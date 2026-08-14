@@ -58,21 +58,18 @@ public sealed record BlueprintKnowledgeRequirement(
 public sealed class TrustedKnowledgeBlueprintProjector
 {
     private readonly EvidenceBus _bus;
+    private readonly EvidenceFusionEngine _fusion;
 
-    public TrustedKnowledgeBlueprintProjector(EvidenceBus bus)
+    public TrustedKnowledgeBlueprintProjector(EvidenceBus bus, EvidenceFusionEngine? fusion = null)
     {
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
+        _fusion = fusion ?? new EvidenceFusionEngine();
     }
 
     public BlueprintKnowledgeRequirement Project(MissionKnowledgeItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
         var knowledge = item.Knowledge ?? throw new InvalidDataException("Mission knowledge item has no knowledge payload.");
-
-        if (item.FusionState != EvidenceFusionState.Convergent)
-        {
-            throw new InvalidOperationException("Only convergent evidence may enter blueprint promotion.");
-        }
 
         var promotionLevel = knowledge.TrustState switch
         {
@@ -99,6 +96,16 @@ public sealed class TrustedKnowledgeBlueprintProjector
             throw new InvalidDataException("Blueprint promotion evidence does not match the governed project, target or claim.");
         }
 
+        var recalculatedFusion = _fusion.Fuse(knowledge.ProjectId, knowledge.TargetId, item.ClaimKey, observations);
+        if (item.FusionState != recalculatedFusion.State)
+        {
+            throw new InvalidDataException("Blueprint promotion fusion state does not match the independently recalculated evidence state.");
+        }
+        if (recalculatedFusion.State != EvidenceFusionState.Convergent)
+        {
+            throw new InvalidOperationException("Only independently convergent evidence may enter blueprint promotion.");
+        }
+
         var basis = ConservativeBasis(observations);
         var sensitivity = observations.MaxBy(observation => (int)observation.Sensitivity)!.Sensitivity;
         var evidenceIds = observations.Select(observation => observation.EvidenceId)
@@ -114,7 +121,7 @@ public sealed class TrustedKnowledgeBlueprintProjector
             Basis: basis,
             Sensitivity: sensitivity,
             PromotionLevel: promotionLevel,
-            Confidence: knowledge.Confidence,
+            Confidence: Math.Min(knowledge.Confidence, recalculatedFusion.Confidence),
             EvidenceIds: evidenceIds,
             SourceKnowledgeId: knowledge.KnowledgeId,
             ValidationRecordId: knowledge.ValidationRecordId);
