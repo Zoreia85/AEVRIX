@@ -6,7 +6,7 @@ namespace Aevrix.Remote.Orchestration.Tests;
 public sealed class TrustedKnowledgeBlueprintProjectionValidationTests
 {
     [TestMethod]
-    public void Project_RejectsMalformedKnowledgeBeforeEvidenceLookup()
+    public async Task ProjectAsync_RejectsMalformedAuthoritativeKnowledgeBeforeEvidenceLookup()
     {
         var knowledge = new CandidateKnowledge(
             KnowledgeId: "KN-valid-shape",
@@ -24,7 +24,25 @@ public sealed class TrustedKnowledgeBlueprintProjectionValidationTests
             UpdatedAt: new DateTimeOffset(2026, 8, 14, 21, 31, 0, TimeSpan.Zero),
             ValidationRecordId: "VR-valid-shape");
 
-        Assert.Throws<InvalidDataException>(() => new TrustedKnowledgeBlueprintProjector(new EvidenceBus()).Project(
-            new MissionKnowledgeItem("runtime", EvidenceFusionState.Convergent, knowledge)));
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new TrustedKnowledgeBlueprintProjector(new EvidenceBus(), new StaticRepository(knowledge)).ProjectAsync(
+                new MissionKnowledgeItem("runtime", EvidenceFusionState.Convergent, knowledge)));
+    }
+
+    private sealed class StaticRepository(CandidateKnowledge item) : ICandidateKnowledgeRepository
+    {
+        public Task StoreCandidateAsync(CandidateKnowledge candidate, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<CandidateKnowledge?> LoadAsync(string knowledgeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(string.Equals(knowledgeId, item.KnowledgeId, StringComparison.Ordinal) ? item : null);
+
+        public Task StoreValidationAsync(KnowledgeValidationRecord validation, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task PromoteAsync(
+            string knowledgeId,
+            KnowledgeTrustState state,
+            string validationRecordId,
+            DateTimeOffset promotedAt,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }
