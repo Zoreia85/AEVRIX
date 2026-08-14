@@ -13,5 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AEVRIX.Core\AEVRIX.Core.csproj" />
+    <ProjectReference Include="..\..\..\..\services\aevrix-remote-brain\src\AEVRIX.Remote.Orchestration\AEVRIX.Remote.Orchestration.csproj" />
   </ItemGroup>
 </Project>
