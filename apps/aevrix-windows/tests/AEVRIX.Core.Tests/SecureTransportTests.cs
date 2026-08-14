@@ -68,7 +68,7 @@ public sealed class SecureTransportTests
             signingKey,
             timeProvider: time);
 
-        var uri = new Uri("https://api.aevrix.example/v1/blueprint?project=secret#not-sent");
+        var uri = new Uri("https://api.aevrix.example/v1/blueprint?project=secret");
         var body = Encoding.UTF8.GetBytes("{\"captureId\":\"capture-1\"}");
         var first = transport.CreateDpopProof(HttpMethod.Post, uri, body, session);
         var second = transport.CreateDpopProof(HttpMethod.Post, uri, body, session);

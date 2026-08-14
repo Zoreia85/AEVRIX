@@ -89,11 +89,11 @@ public sealed class DpopProofValidatorTests
         var replay = new RecordingReplayStore();
         var nonce = new StaticNonceValidator("server-nonce-1234567890");
         var uri = new Uri("https://api.aevrix.example/v1/resource");
-        var proof = CreateProof(signer, "GET", uri, "token-value", [], nonce.Nonce, Now, "jti-key-1234567890");
+        var proof = CreateProof(signer, "GET", uri, "token-value", ReadOnlySpan<byte>.Empty, nonce.Nonce, Now, "jti-key-1234567890");
         var validator = new DpopProofValidator(replay, nonce);
 
         var result = await validator.ValidateAsync(new DpopValidationInput(
-            proof, "GET", uri, "token-value", [], JwkThumbprint(expected), nonce.Nonce, Now));
+            proof, "GET", uri, "token-value", ReadOnlyMemory<byte>.Empty, JwkThumbprint(expected), nonce.Nonce, Now));
 
         Assert.IsFalse(result.Valid);
         Assert.AreEqual("dpop_key_binding_mismatch", result.Code);

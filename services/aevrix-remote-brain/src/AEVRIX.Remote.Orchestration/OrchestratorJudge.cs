@@ -152,8 +152,10 @@ public sealed record JudgePolicy(
 {
     public JudgePolicy Validate()
     {
-        if (PrimaryAcceptConfidence is < 0.5 or > 1
-            || EscalationConfidence is < 0 or > PrimaryAcceptConfidence)
+        if (PrimaryAcceptConfidence < 0.5
+            || PrimaryAcceptConfidence > 1
+            || EscalationConfidence < 0
+            || EscalationConfidence > PrimaryAcceptConfidence)
         {
             throw new ArgumentOutOfRangeException(nameof(PrimaryAcceptConfidence));
         }

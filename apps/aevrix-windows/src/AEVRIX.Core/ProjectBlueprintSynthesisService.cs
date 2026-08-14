@@ -670,7 +670,7 @@ public sealed class ProjectBlueprintSynthesisService
                 var inputs = group.Select(item => item.Control.ElementType).Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item!).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal).ToArray();
                 return new UiComponentModel(
                     Id: StableId("ui", group.Key),
-                    Name: string.IsNullOrWhiteSpace(representative.Label) ? representative.Role : representative.Label,
+                    Name: FirstNonEmpty(representative.Label, representative.Role, representative.ElementType, "control"),
                     ComponentType: FirstNonEmpty(representative.SemanticKind, representative.Role, representative.ElementType, "control"),
                     States: stateIds,
                     Inputs: inputs,

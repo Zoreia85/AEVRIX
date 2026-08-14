@@ -208,6 +208,7 @@ public sealed class WindowsDeviceIdentityProvisioner
 
     private static WindowsDeviceSigningKey GetOrCreate(string installationId, DeviceKeySecurityTier tier)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(installationId);
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException("AEVRIX Windows device identity requires Windows CNG.");
@@ -254,7 +255,9 @@ public sealed class WindowsDeviceIdentityProvisioner
 
         try
         {
-            if (!string.Equals(key.Provider.Provider, provider.Provider, StringComparison.Ordinal)
+            var keyProvider = key.Provider;
+            if (keyProvider is null
+                || !string.Equals(keyProvider.Provider, provider.Provider, StringComparison.Ordinal)
                 || key.ExportPolicy != CngExportPolicies.None
                 || (key.KeyUsage & CngKeyUsages.Signing) == 0)
             {

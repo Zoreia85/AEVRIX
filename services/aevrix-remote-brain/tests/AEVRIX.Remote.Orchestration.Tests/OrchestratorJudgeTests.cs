@@ -132,7 +132,7 @@ public sealed class OrchestratorJudgeTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
-            return Task.FromResult(candidate with { ProviderId = id });
+            return Task.FromResult(candidate with { ProviderId = ProviderId });
         }
     }
 
