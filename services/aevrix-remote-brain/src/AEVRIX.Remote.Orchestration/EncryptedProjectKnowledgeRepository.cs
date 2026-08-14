@@ -41,10 +41,11 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var existing = await TryReadAsync<CandidateKnowledge>(CandidateKind, candidate.KnowledgeId, cancellationToken);
-            if (existing is not null)
+            var existingRecord = await TryReadRecordAsync<CandidateKnowledge>(CandidateKind, candidate.KnowledgeId, cancellationToken);
+            if (existingRecord is not null)
             {
-                if (!CandidateEquivalent(existing, candidate))
+                EnsureCandidateProjectBinding(existingRecord);
+                if (!CandidateEquivalent(existingRecord.Value, candidate))
                 {
                     throw new InvalidOperationException("Knowledge id is immutable and cannot be rebound to different candidate content.");
                 }
@@ -59,10 +60,16 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         }
     }
 
-    public Task<CandidateKnowledge?> LoadAsync(string knowledgeId, CancellationToken cancellationToken = default)
+    public async Task<CandidateKnowledge?> LoadAsync(string knowledgeId, CancellationToken cancellationToken = default)
     {
         ValidateId(knowledgeId, nameof(knowledgeId));
-        return TryReadAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken);
+        var record = await TryReadRecordAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken);
+        if (record is null)
+        {
+            return null;
+        }
+        EnsureCandidateProjectBinding(record);
+        return record.Value;
     }
 
     public async Task StoreValidationAsync(KnowledgeValidationRecord validation, CancellationToken cancellationToken = default)
@@ -83,10 +90,14 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var existing = await TryReadAsync<KnowledgeValidationRecord>(ValidationKind, validation.ValidationRecordId, cancellationToken);
-            if (existing is not null)
+            var existingRecord = await TryReadRecordAsync<KnowledgeValidationRecord>(ValidationKind, validation.ValidationRecordId, cancellationToken);
+            if (existingRecord is not null)
             {
-                if (!ValidationEquivalent(existing, validation))
+                if (existingRecord.ProjectId != candidate.ProjectId)
+                {
+                    throw new InvalidDataException("Validation record envelope is bound to a different project.");
+                }
+                if (!ValidationEquivalent(existingRecord.Value, validation))
                 {
                     throw new InvalidOperationException("Validation record id is immutable and cannot be rebound.");
                 }
@@ -123,18 +134,29 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var candidate = await TryReadAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken)
+            var candidateRecord = await TryReadRecordAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken)
                 ?? throw new KeyNotFoundException("Candidate knowledge was not found for promotion.");
+            EnsureCandidateProjectBinding(candidateRecord);
+            var candidate = candidateRecord.Value;
             if (candidate.TrustState != KnowledgeTrustState.Candidate)
             {
                 throw new InvalidOperationException("Only Candidate knowledge may be promoted by this repository.");
             }
 
-            var validation = await TryReadAsync<KnowledgeValidationRecord>(ValidationKind, validationRecordId, cancellationToken)
+            var validationRecord = await TryReadRecordAsync<KnowledgeValidationRecord>(ValidationKind, validationRecordId, cancellationToken)
                 ?? throw new KeyNotFoundException("Promotion validation record was not found.");
+            if (validationRecord.ProjectId != candidate.ProjectId)
+            {
+                throw new InvalidDataException("Promotion validation record is bound to a different project.");
+            }
+            var validation = validationRecord.Value;
             if (!string.Equals(validation.KnowledgeId, knowledgeId, StringComparison.Ordinal))
             {
                 throw new InvalidDataException("Promotion validation record belongs to different knowledge.");
+            }
+            if (validation.ValidatedEvidenceIds.Except(candidate.EvidenceIds, StringComparer.Ordinal).Any())
+            {
+                throw new InvalidDataException("Promotion validation references evidence outside the candidate boundary.");
             }
 
             var expectedState = validation.EligibleForTrustedPromotion
@@ -221,14 +243,17 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         }
     }
 
-    private async Task<T?> TryReadAsync<T>(string kind, string recordId, CancellationToken cancellationToken)
+    private async Task<DecryptedRecord<T>?> TryReadRecordAsync<T>(
+        string kind,
+        string recordId,
+        CancellationToken cancellationToken)
     {
         ValidateId(recordId, nameof(recordId));
         var path = RecordPath(kind, recordId);
         var info = new FileInfo(path);
         if (!info.Exists)
         {
-            return default;
+            return null;
         }
         if (info.Length is <= 0 or > MaxEnvelopeBytes)
         {
@@ -269,8 +294,9 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
 
             try
             {
-                return JsonSerializer.Deserialize<T>(plaintext, JsonOptions)
+                var value = JsonSerializer.Deserialize<T>(plaintext, JsonOptions)
                     ?? throw new InvalidDataException("Knowledge vault payload is unreadable.");
+                return new DecryptedRecord<T>(envelope.ProjectId, value);
             }
             catch (JsonException ex)
             {
@@ -326,6 +352,14 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         }
     }
 
+    private static void EnsureCandidateProjectBinding(DecryptedRecord<CandidateKnowledge> record)
+    {
+        if (record.Value.ProjectId != record.ProjectId)
+        {
+            throw new InvalidDataException("Candidate payload project id does not match its authenticated envelope.");
+        }
+    }
+
     private static void ValidateCandidate(CandidateKnowledge candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
@@ -345,10 +379,10 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             || candidate.ProviderTrace.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 1_024)
             || candidate.Assumptions is null
             || candidate.Assumptions.Count > 256
-            || candidate.Assumptions.Any(value => value.Length > 8_000)
+            || candidate.Assumptions.Any(value => value is null || value.Length > 8_000)
             || candidate.OpenQuestions is null
             || candidate.OpenQuestions.Count > 256
-            || candidate.OpenQuestions.Any(value => value.Length > 8_000)
+            || candidate.OpenQuestions.Any(value => value is null || value.Length > 8_000)
             || candidate.CreatedAt == default
             || candidate.UpdatedAt == default
             || candidate.UpdatedAt < candidate.CreatedAt)
@@ -374,6 +408,8 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
 
     private static bool ValidationEquivalent(KnowledgeValidationRecord left, KnowledgeValidationRecord right) =>
         JsonSerializer.Serialize(left, JsonOptions) == JsonSerializer.Serialize(right, JsonOptions);
+
+    private sealed record DecryptedRecord<T>(Guid ProjectId, T Value);
 
     private sealed record VaultEnvelope(
         int Version,
