@@ -200,12 +200,18 @@ public sealed class BlueprintKnowledgeExchangeImporter
         {
             return false;
         }
-        Span<byte> a = stackalloc byte[32];
-        Span<byte> b = stackalloc byte[32];
-        return Convert.TryFromHexString(expected, a, out var aw)
-            && Convert.TryFromHexString(supplied, b, out var bw)
-            && aw == 32 && bw == 32
-            && CryptographicOperations.FixedTimeEquals(a, b);
+
+        var a = Convert.FromHexString(expected);
+        var b = Convert.FromHexString(supplied);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(a, b);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(a);
+            CryptographicOperations.ZeroMemory(b);
+        }
     }
 
     private static void ValidateId(string value, int min, int max, string name)
