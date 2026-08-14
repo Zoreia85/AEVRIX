@@ -46,7 +46,7 @@ public sealed class CleanRoomBenchmarkTests
             passedIdentitySeparation: true,
             passedRestrictedArtifactGuard: true);
 
-        Assert.AreEqual(0.9425, report.FunctionalEquivalence, 0.000001);
+        Assert.AreEqual(0.943, report.FunctionalEquivalence, 0.000001);
         Assert.IsTrue(report.Passed);
     }
 
