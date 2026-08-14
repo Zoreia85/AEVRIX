@@ -141,6 +141,27 @@ specialist observations
 
 A fusion candidate always requires Judge validation. Cross-project, cross-target and cross-claim fusion is rejected rather than silently filtered.
 
+### QIR governed learning
+
+`QirLearningLedger` is the first adaptive-learning boundary. Project observations remain project-scoped and keep their evidence references locally in the ledger. Global learning is a separate promotion operation and is deliberately lossy: the resulting `QirGlobalPattern` contains only a normalized pattern key, a SHA-256 feature hash, aggregate support counts, aggregate confidence and promotion time.
+
+Raw credentials, tokens, private keys and session secrets are rejected before recording. Public observations containing personal data are rejected. Confidential, inferred and vendor-claim observations remain useful inside a project but are ineligible for global promotion.
+
+Global promotion requires support from multiple independent projects and minimum per-project confidence. Each project receives equal weight so a noisy workspace cannot dominate the learned pattern simply by producing more observations. The promoted global object intentionally contains no project ids, target ids, user ids, evidence ids or raw source material.
+
+```text
+project evidence
+  -> sanitized QIR observation
+  -> project-scoped immutable ledger
+  -> eligibility filter
+  -> independent-project threshold
+  -> equal-project aggregation
+  -> QirGlobalPattern (no project/evidence identifiers)
+  -> future planner/capability hints only
+```
+
+QIR learning does not bypass the Judge and does not turn learned patterns into trusted evidence. A learned global pattern may guide planning, tool ranking or hypothesis generation, but any claim about a concrete target must still be established from that target's governed evidence.
+
 ### Evidence to Blueprint
 
 ```text
