@@ -119,6 +119,28 @@ mission
   -> trusted knowledge only after validation
 ```
 
+### Evidence Bus / candidate fusion
+
+`EvidenceBus` is a project-scoped bus for structured specialist observations, not a raw evidence or secret store. Each observation is bound to one project, target, source task and specialist and carries a bounded claim key/value, observation class, sensitivity, confidence, SHA-256 content hash, source artifacts and parent evidence ids.
+
+The specialist publication path enforces the Mission Director evidence boundary. Observation ids are immutable: an idempotent re-publication is accepted, while rebinding the same id to different content fails closed. Raw credentials, access tokens, private keys and session secrets are rejected. Personal data cannot be classified as public, and only sanitized public `Observed`/`ExperimentallyValidated` observations are eligible for any future global-learning export.
+
+`EvidenceFusionEngine` performs deterministic claim-level fusion. Equal normalized values from independent tasks and independent specialist kinds can become `Convergent`; a single-source result remains `Insufficient`; multiple values for the same claim become `Contested`. Contested fusion never selects a winner implicitly. Observation class weights vendor claims and inference below directly observed or experimentally validated evidence.
+
+```text
+specialist observations
+  -> project/target/provenance boundary validation
+  -> EvidenceBus
+  -> group by governed claim key
+  -> independent-source + independent-specialist scoring
+  -> Convergent | Insufficient | Contested
+  -> EvidenceFusionCandidate
+  -> Judge / independent validation
+  -> trusted knowledge only after explicit promotion
+```
+
+A fusion candidate always requires Judge validation. Cross-project, cross-target and cross-claim fusion is rejected rather than silently filtered.
+
 ### Evidence to Blueprint
 
 ```text

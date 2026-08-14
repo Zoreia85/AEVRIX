@@ -30,7 +30,7 @@
 - [x] Candidate-knowledge governance baseline.
 - [x] Adaptive capability broker and bounded model council.
 - [x] Bounded Mission Director / specialist swarm.
-- [ ] Evidence Bus and candidate-fusion pipeline.
+- [x] Evidence Bus and candidate-fusion pipeline.
 - [ ] Deploy minimal public remote-brain service.
 - [ ] Add provider adapters and evidence validation pipeline.
 
