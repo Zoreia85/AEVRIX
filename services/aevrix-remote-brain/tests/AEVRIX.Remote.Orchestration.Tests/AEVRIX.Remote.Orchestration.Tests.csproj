@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>AEVRIX.Remote.Orchestration.Tests</AssemblyName>
+    <RootNamespace>Aevrix.Remote.Orchestration.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="MSTest" Version="4.3.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AEVRIX.Remote.Orchestration\AEVRIX.Remote.Orchestration.csproj" />
+  </ItemGroup>
+</Project>
