@@ -29,16 +29,18 @@ public sealed class TrustedKnowledgeBlueprintProjectionTests
     }
 
     [TestMethod]
-    public void Project_ValidatedKnowledgeRemainsConditional()
+    public void Project_ValidatedKnowledgeRemainsConditionalOnlyAfterIndependentConvergence()
     {
         var bus = new EvidenceBus();
-        Publish(bus, "obs-validation", "validate", MissionSpecialistKind.StructuralAnalysis,
-            EvidenceObservationClass.ExperimentallyValidated, EvidenceSensitivity.Public, "runtime", ".NET", "ev-runtime");
+        Publish(bus, "obs-runtime-static", "runtime-static", MissionSpecialistKind.StaticAnalysis,
+            EvidenceObservationClass.ExperimentallyValidated, EvidenceSensitivity.Public, "runtime", ".NET", "ev-runtime-a");
+        Publish(bus, "obs-runtime-dynamic", "runtime-dynamic", MissionSpecialistKind.DynamicAnalysis,
+            EvidenceObservationClass.ExperimentallyValidated, EvidenceSensitivity.Public, "runtime", ".NET", "ev-runtime-b");
 
         var requirement = new TrustedKnowledgeBlueprintProjector(bus).Project(new MissionKnowledgeItem(
             "runtime",
             EvidenceFusionState.Convergent,
-            Knowledge(KnowledgeTrustState.Validated, ["obs-validation"], statement: "runtime = .NET")));
+            Knowledge(KnowledgeTrustState.Validated, ["obs-runtime-static", "obs-runtime-dynamic"], statement: "runtime = .NET")));
 
         Assert.AreEqual(BlueprintKnowledgePromotionLevel.Conditional, requirement.PromotionLevel);
         Assert.AreEqual(EvidenceObservationClass.ExperimentallyValidated, requirement.Basis);
@@ -59,18 +61,39 @@ public sealed class TrustedKnowledgeBlueprintProjectionTests
     }
 
     [TestMethod]
-    public void Project_RejectsContestedOrInsufficientFusionEvenWhenKnowledgeWasValidated()
+    public void Project_RejectsContestedAndInsufficientFusionAfterIndependentRecalculation()
+    {
+        var contestedBus = new EvidenceBus();
+        Publish(contestedBus, "obs-dotnet", "inspect-dotnet", MissionSpecialistKind.StaticAnalysis,
+            EvidenceObservationClass.Observed, EvidenceSensitivity.Public, "runtime", ".NET", "ev-dotnet");
+        Publish(contestedBus, "obs-jvm", "inspect-jvm", MissionSpecialistKind.DynamicAnalysis,
+            EvidenceObservationClass.Observed, EvidenceSensitivity.Public, "runtime", "JVM", "ev-jvm");
+        var contestedKnowledge = Knowledge(KnowledgeTrustState.Trusted, ["obs-dotnet", "obs-jvm"], statement: "runtime contested");
+
+        Assert.Throws<InvalidOperationException>(() => new TrustedKnowledgeBlueprintProjector(contestedBus).Project(
+            new MissionKnowledgeItem("runtime", EvidenceFusionState.Contested, contestedKnowledge)));
+
+        var insufficientBus = new EvidenceBus();
+        Publish(insufficientBus, "obs-single", "inspect-single", MissionSpecialistKind.StaticAnalysis,
+            EvidenceObservationClass.Observed, EvidenceSensitivity.Public, "runtime", ".NET", "ev-single");
+        var insufficientKnowledge = Knowledge(KnowledgeTrustState.Trusted, ["obs-single"], statement: "runtime = .NET");
+
+        Assert.Throws<InvalidOperationException>(() => new TrustedKnowledgeBlueprintProjector(insufficientBus).Project(
+            new MissionKnowledgeItem("runtime", EvidenceFusionState.Insufficient, insufficientKnowledge)));
+    }
+
+    [TestMethod]
+    public void Project_RejectsForgedFusionState()
     {
         var bus = new EvidenceBus();
-        Publish(bus, "obs-state", "inspect", MissionSpecialistKind.StaticAnalysis,
-            EvidenceObservationClass.Observed, EvidenceSensitivity.Public, "runtime", ".NET", "ev-state");
-        var projector = new TrustedKnowledgeBlueprintProjector(bus);
-        var knowledge = Knowledge(KnowledgeTrustState.Trusted, ["obs-state"]);
+        Publish(bus, "obs-only", "inspect-only", MissionSpecialistKind.StaticAnalysis,
+            EvidenceObservationClass.Observed, EvidenceSensitivity.Public, "framework", "ASP.NET", "ev-only");
 
-        Assert.Throws<InvalidOperationException>(() => projector.Project(
-            new MissionKnowledgeItem("runtime", EvidenceFusionState.Contested, knowledge)));
-        Assert.Throws<InvalidOperationException>(() => projector.Project(
-            new MissionKnowledgeItem("runtime", EvidenceFusionState.Insufficient, knowledge)));
+        Assert.Throws<InvalidDataException>(() => new TrustedKnowledgeBlueprintProjector(bus).Project(
+            new MissionKnowledgeItem(
+                "framework",
+                EvidenceFusionState.Convergent,
+                Knowledge(KnowledgeTrustState.Trusted, ["obs-only"]))));
     }
 
     [TestMethod]
