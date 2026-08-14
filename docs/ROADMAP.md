@@ -13,7 +13,7 @@
 
 - [x] Integrity-first synthesis implementation in canonical workspace.
 - [x] Blueprint reference validation.
-- [ ] Compile/test on .NET 10 Windows runner.
+- [x] Compile/test on .NET 10 Windows runner.
 - [ ] Wire final EngineHost command end-to-end.
 
 ## P2 — Secure transport and device identity
@@ -28,6 +28,9 @@
 ## P3 — Remote Orchestrator/Judge
 
 - [x] Candidate-knowledge governance baseline.
+- [x] Adaptive capability broker and bounded model council.
+- [x] Bounded Mission Director / specialist swarm.
+- [ ] Evidence Bus and candidate-fusion pipeline.
 - [ ] Deploy minimal public remote-brain service.
 - [ ] Add provider adapters and evidence validation pipeline.
 
