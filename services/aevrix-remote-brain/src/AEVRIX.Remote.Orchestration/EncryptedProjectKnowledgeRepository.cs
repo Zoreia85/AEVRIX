@@ -16,6 +16,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
     private const int NonceBytes = 12;
     private const int TagBytes = 16;
     private const int KeyBytes = 32;
+    private const int MaxEnvelopeBytes = 8 * 1024 * 1024;
     private const string CandidateKind = "candidate";
     private const string ValidationKind = "validation";
 
@@ -169,6 +170,12 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         bool overwrite = false)
     {
         var plaintext = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
+        if (plaintext.Length > MaxEnvelopeBytes / 2)
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            throw new InvalidDataException("Knowledge vault payload exceeds the configured bound.");
+        }
+
         var key = await GetKeyCopyAsync(projectId, cancellationToken);
         try
         {
@@ -182,6 +189,11 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
 
             var envelope = new VaultEnvelope(CurrentEnvelopeVersion, projectId, nonce, ciphertext, tag);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOptions);
+            if (bytes.Length > MaxEnvelopeBytes)
+            {
+                throw new InvalidDataException("Knowledge vault envelope exceeds the configured bound.");
+            }
+
             var path = RecordPath(kind, recordId);
             if (!overwrite && File.Exists(path))
             {
@@ -213,14 +225,27 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
     {
         ValidateId(recordId, nameof(recordId));
         var path = RecordPath(kind, recordId);
-        if (!File.Exists(path))
+        var info = new FileInfo(path);
+        if (!info.Exists)
         {
             return default;
         }
+        if (info.Length is <= 0 or > MaxEnvelopeBytes)
+        {
+            throw new InvalidDataException("Knowledge vault envelope size is invalid.");
+        }
 
         var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
-        var envelope = JsonSerializer.Deserialize<VaultEnvelope>(bytes, JsonOptions)
-            ?? throw new InvalidDataException("Knowledge vault envelope is unreadable.");
+        VaultEnvelope envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize<VaultEnvelope>(bytes, JsonOptions)
+                ?? throw new InvalidDataException("Knowledge vault envelope is unreadable.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("Knowledge vault envelope is malformed.", ex);
+        }
         ValidateEnvelope(envelope);
 
         var key = await GetKeyCopyAsync(envelope.ProjectId, cancellationToken);
@@ -242,8 +267,15 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
                 throw new InvalidDataException("Knowledge vault integrity verification failed.", ex);
             }
 
-            return JsonSerializer.Deserialize<T>(plaintext, JsonOptions)
-                ?? throw new InvalidDataException("Knowledge vault payload is unreadable.");
+            try
+            {
+                return JsonSerializer.Deserialize<T>(plaintext, JsonOptions)
+                    ?? throw new InvalidDataException("Knowledge vault payload is unreadable.");
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidDataException("Knowledge vault payload is malformed.", ex);
+            }
         }
         finally
         {
@@ -287,7 +319,8 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             || envelope.Nonce is not { Length: NonceBytes }
             || envelope.Tag is not { Length: TagBytes }
             || envelope.Ciphertext is null
-            || envelope.Ciphertext.Length == 0)
+            || envelope.Ciphertext.Length == 0
+            || envelope.Ciphertext.Length > MaxEnvelopeBytes / 2)
         {
             throw new InvalidDataException("Knowledge vault envelope failed structural validation.");
         }
@@ -306,7 +339,19 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             || candidate.TrustState != KnowledgeTrustState.Candidate
             || candidate.EvidenceIds is null
             || candidate.EvidenceIds.Count is < 1 or > 2_000
-            || candidate.EvidenceIds.Any(id => !MissionTaskSpec.IsSafeId(id, 3, 160)))
+            || candidate.EvidenceIds.Any(id => !MissionTaskSpec.IsSafeId(id, 3, 160))
+            || candidate.ProviderTrace is null
+            || candidate.ProviderTrace.Count > 256
+            || candidate.ProviderTrace.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 1_024)
+            || candidate.Assumptions is null
+            || candidate.Assumptions.Count > 256
+            || candidate.Assumptions.Any(value => value.Length > 8_000)
+            || candidate.OpenQuestions is null
+            || candidate.OpenQuestions.Count > 256
+            || candidate.OpenQuestions.Any(value => value.Length > 8_000)
+            || candidate.CreatedAt == default
+            || candidate.UpdatedAt == default
+            || candidate.UpdatedAt < candidate.CreatedAt)
         {
             throw new InvalidDataException("Candidate knowledge is invalid for vault storage.");
         }
