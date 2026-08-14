@@ -112,6 +112,12 @@ public sealed class TrustedKnowledgeBlueprintProjector
             throw new InvalidDataException("Blueprint promotion evidence does not match the governed project, target or claim.");
         }
 
+        if (observations.Any(observation => observation.ContainsPersonalData
+            || observation.Sensitivity == EvidenceSensitivity.PersonalData))
+        {
+            throw new InvalidOperationException("Personal data must be sanitized into a non-PII observation before Blueprint promotion.");
+        }
+
         var recalculatedFusion = _fusion.Fuse(knowledge.ProjectId, knowledge.TargetId, item.ClaimKey, observations);
         if (item.FusionState != recalculatedFusion.State)
         {
