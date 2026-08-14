@@ -85,7 +85,7 @@ public sealed class AdaptiveModelCouncilProviderTests
             reliability: 0.98,
             latency: 80,
             now,
-            approval: CapabilityApprovalState.Pending));
+            approval: CapabilityApprovalState.Unreviewed));
 
         var council = new AdaptiveModelCouncilProvider(
             broker,
