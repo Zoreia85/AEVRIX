@@ -31,6 +31,9 @@
 - [x] Adaptive capability broker and bounded model council.
 - [x] Bounded Mission Director / specialist swarm.
 - [x] Evidence Bus and candidate-fusion pipeline.
+- [x] Governed QIR learning ledger baseline with independent-project privacy gates.
+- [ ] Persist QIR ledger behind an encrypted/project-bound storage adapter.
+- [ ] Feed sanitized QIR patterns into planner/capability hints without treating them as evidence.
 - [ ] Deploy minimal public remote-brain service.
 - [ ] Add provider adapters and evidence validation pipeline.
 
