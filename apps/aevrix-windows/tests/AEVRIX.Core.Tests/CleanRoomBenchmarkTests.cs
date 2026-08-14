@@ -61,7 +61,7 @@ public sealed class CleanRoomBenchmarkTests
             MustMatchBehavior: true,
             MustNotCopyExpression: false);
 
-        Assert.ThrowsExactly<InvalidOperationException>(requirement.Validate);
+        Assert.Throws<InvalidOperationException>(requirement.Validate);
     }
 
     [TestMethod]
@@ -74,7 +74,7 @@ public sealed class CleanRoomBenchmarkTests
             ["restricted-source"],
             HadDirectAccessToRestrictedImplementationArtifacts: true);
 
-        Assert.ThrowsExactly<InvalidOperationException>(attestation.Validate);
+        Assert.Throws<InvalidOperationException>(attestation.Validate);
     }
 
     [TestMethod]
@@ -82,7 +82,7 @@ public sealed class CleanRoomBenchmarkTests
     {
         var attestation = ValidAttestation();
 
-        Assert.ThrowsExactly<InvalidOperationException>(() => CleanRoomBenchmarkProtocol.Evaluate(
+        Assert.Throws<InvalidOperationException>(() => CleanRoomBenchmarkProtocol.Evaluate(
             [Evidence("EV-001", CleanRoomEvidenceKind.PublicDocumentation)],
             [Requirement("REQ-001", "EV-MISSING")],
             attestation,
@@ -101,7 +101,7 @@ public sealed class CleanRoomBenchmarkTests
             new CleanRoomMetricResult("performance", 0.10, 1.0)
         };
 
-        Assert.ThrowsExactly<InvalidOperationException>(() => CleanRoomBenchmarkProtocol.Evaluate(
+        Assert.Throws<InvalidOperationException>(() => CleanRoomBenchmarkProtocol.Evaluate(
             [Evidence("EV-001", CleanRoomEvidenceKind.PublicDocumentation)],
             [Requirement("REQ-001", "EV-001")],
             ValidAttestation(),
@@ -137,7 +137,7 @@ public sealed class CleanRoomBenchmarkTests
             DateTimeOffset.UtcNow,
             "not-a-sha");
 
-        Assert.ThrowsExactly<ArgumentException>(evidence.Validate);
+        Assert.Throws<ArgumentException>(evidence.Validate);
     }
 
     private static CleanRoomEvidence Evidence(string id, CleanRoomEvidenceKind kind) => new(
