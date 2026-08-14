@@ -71,6 +71,10 @@ Model output is never trusted memory by itself:
 task -> model/provider -> candidate knowledge -> evidence/comparison/test -> validation -> trusted memory
 ```
 
+The capability fabric is provider-independent. `CapabilityBroker` ranks approved providers from bounded telemetry (quality, reliability, latency, health and consecutive failures). Unapproved, disabled, stale, unavailable or quarantined providers are excluded fail-closed. Repeated failures demote a provider and force selection of a healthy backup; a later successful health probe can recover an unavailable provider, while quarantine always requires an explicit release.
+
+This broker controls tool selection only. It does not promote provider output into trusted memory; Judge/evidence validation remains mandatory.
+
 ### Evidence to Blueprint
 
 ```text
