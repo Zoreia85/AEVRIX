@@ -73,7 +73,21 @@ task -> model/provider -> candidate knowledge -> evidence/comparison/test -> val
 
 The capability fabric is provider-independent. `CapabilityBroker` ranks approved providers from bounded telemetry (quality, reliability, latency, health and consecutive failures). Unapproved, disabled, stale, unavailable or quarantined providers are excluded fail-closed. Repeated failures demote a provider and force selection of a healthy backup; a later successful health probe can recover an unavailable provider, while quarantine always requires an explicit release.
 
-This broker controls tool selection only. It does not promote provider output into trusted memory; Judge/evidence validation remains mandatory.
+`AdaptiveModelCouncilProvider` connects that fabric to the model-analysis path. It consumes broker ranking, invokes only registered implementations, enforces a bounded attempt budget, records success/failure telemetry, rejects provider-identity spoofing and fails over deterministically. Caller cancellation is never converted into failover. This allows local models, remote models and future specialist/quantum-backed analyzers to compete as replaceable council members without becoming the AEVRIX brain.
+
+```text
+AnalysisTask
+  -> CapabilityBroker rank
+  -> Adaptive Model Council
+       -> provider #1
+       -> bounded failover to #2/#3 on provider failure
+  -> ModelAnalysisCandidate
+  -> OrchestratorJudge
+  -> evidence validation
+  -> trusted-memory promotion only after validation
+```
+
+The broker and council control tool selection only. They do not promote provider output into trusted memory; Judge/evidence validation remains mandatory.
 
 ### Evidence to Blueprint
 
