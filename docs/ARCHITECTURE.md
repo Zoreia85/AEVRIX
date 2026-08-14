@@ -89,6 +89,36 @@ AnalysisTask
 
 The broker and council control tool selection only. They do not promote provider output into trusted memory; Judge/evidence validation remains mandatory.
 
+### Mission Director / specialist swarm
+
+`MissionDirector` is the bounded scheduler above individual analysis specialists. A mission is an acyclic dependency graph of tasks associated with one project and one target. Each task declares the specialist capability, objective, allowed evidence boundary, dependencies and whether the task is required.
+
+Initial specialist taxonomy is domain-agnostic:
+
+- static analysis;
+- dynamic analysis;
+- vision/OCR;
+- network behavior;
+- structural analysis;
+- documentation;
+- reconstruction;
+- quantum/hybrid experiments.
+
+The scheduler validates the entire graph before execution, fails closed if a required specialist is unavailable, enforces a bounded concurrency budget, blocks dependent work after failed prerequisites and preserves deterministic result ordering. A specialist cannot cite evidence outside the evidence boundary assigned to its task. Specialist failure is recorded as an execution result and cannot silently become trusted knowledge.
+
+The Mission Director deliberately does not embed a model runtime or a particular tool. Capability-brokered councils, local models, remote models, deterministic analyzers and future quantum/hybrid solvers can implement specialist roles through adapters. Their outputs still flow through provenance/evidence validation and the Judge before trusted-memory promotion.
+
+```text
+mission
+  -> validate DAG + evidence boundaries
+  -> schedule ready specialists under concurrency budget
+  -> collect bounded outputs/artifacts
+  -> block dependents on failed prerequisites
+  -> Evidence Bus / candidate fusion
+  -> Judge
+  -> trusted knowledge only after validation
+```
+
 ### Evidence to Blueprint
 
 ```text

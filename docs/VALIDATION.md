@@ -2,6 +2,8 @@
 
 AVA is a mandatory delivery gate. A green compile is not enough.
 
+Passing CI unit/integration tests proves only the exercised test scope; it does not satisfy installer, runtime, signing, antivirus, accessibility, emulator or real-device AVA gates.
+
 ## Windows final gate
 
 For the **exact hashes that will be released**:
