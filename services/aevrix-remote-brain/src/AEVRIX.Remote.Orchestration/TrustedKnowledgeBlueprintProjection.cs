@@ -70,6 +70,7 @@ public sealed class TrustedKnowledgeBlueprintProjector
     {
         ArgumentNullException.ThrowIfNull(item);
         var knowledge = item.Knowledge ?? throw new InvalidDataException("Mission knowledge item has no knowledge payload.");
+        ValidateInput(item, knowledge);
 
         var promotionLevel = knowledge.TrustState switch
         {
@@ -127,6 +128,30 @@ public sealed class TrustedKnowledgeBlueprintProjector
             ValidationRecordId: knowledge.ValidationRecordId);
 
         return requirement.Validate();
+    }
+
+    private static void ValidateInput(MissionKnowledgeItem item, CandidateKnowledge knowledge)
+    {
+        if (!MissionTaskSpec.IsSafeId(item.ClaimKey, 3, 160)
+            || knowledge.ProjectId == Guid.Empty
+            || !MissionTaskSpec.IsSafeId(knowledge.TargetId, 2, 128)
+            || !MissionTaskSpec.IsSafeId(knowledge.KnowledgeId, 3, 160))
+        {
+            throw new InvalidDataException("Blueprint promotion knowledge identity is invalid.");
+        }
+        if (string.IsNullOrWhiteSpace(knowledge.Statement) || knowledge.Statement.Length > 64_000)
+        {
+            throw new InvalidDataException("Blueprint promotion knowledge statement is invalid.");
+        }
+        if (!double.IsFinite(knowledge.Confidence) || knowledge.Confidence is < 0 or > 1)
+        {
+            throw new InvalidDataException("Blueprint promotion knowledge confidence is outside [0,1].");
+        }
+        if (knowledge.EvidenceIds is null || knowledge.EvidenceIds.Count is < 1 or > 2_000
+            || knowledge.EvidenceIds.Any(id => !MissionTaskSpec.IsSafeId(id, 3, 160)))
+        {
+            throw new InvalidDataException("Blueprint promotion knowledge evidence set is invalid.");
+        }
     }
 
     private static EvidenceObservationClass ConservativeBasis(IReadOnlyCollection<EvidenceObservation> observations)
