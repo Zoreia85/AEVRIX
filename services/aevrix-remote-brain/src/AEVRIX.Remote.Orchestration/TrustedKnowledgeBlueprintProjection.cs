@@ -58,19 +58,34 @@ public sealed record BlueprintKnowledgeRequirement(
 public sealed class TrustedKnowledgeBlueprintProjector
 {
     private readonly EvidenceBus _bus;
+    private readonly ICandidateKnowledgeRepository _knowledgeRepository;
     private readonly EvidenceFusionEngine _fusion;
 
-    public TrustedKnowledgeBlueprintProjector(EvidenceBus bus, EvidenceFusionEngine? fusion = null)
+    public TrustedKnowledgeBlueprintProjector(
+        EvidenceBus bus,
+        ICandidateKnowledgeRepository knowledgeRepository,
+        EvidenceFusionEngine? fusion = null)
     {
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
+        _knowledgeRepository = knowledgeRepository ?? throw new ArgumentNullException(nameof(knowledgeRepository));
         _fusion = fusion ?? new EvidenceFusionEngine();
     }
 
-    public BlueprintKnowledgeRequirement Project(MissionKnowledgeItem item)
+    public async Task<BlueprintKnowledgeRequirement> ProjectAsync(
+        MissionKnowledgeItem item,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
-        var knowledge = item.Knowledge ?? throw new InvalidDataException("Mission knowledge item has no knowledge payload.");
+        var supplied = item.Knowledge ?? throw new InvalidDataException("Mission knowledge item has no knowledge payload.");
+        if (!MissionTaskSpec.IsSafeId(supplied.KnowledgeId, 3, 160))
+        {
+            throw new InvalidDataException("Blueprint promotion supplied knowledge id is invalid.");
+        }
+
+        var knowledge = await _knowledgeRepository.LoadAsync(supplied.KnowledgeId, cancellationToken)
+            ?? throw new KeyNotFoundException("Blueprint promotion knowledge was not found in the authoritative repository.");
         ValidateInput(item, knowledge);
+        EnsureSuppliedIdentityMatches(supplied, knowledge);
 
         var promotionLevel = knowledge.TrustState switch
         {
@@ -151,6 +166,16 @@ public sealed class TrustedKnowledgeBlueprintProjector
             || knowledge.EvidenceIds.Any(id => !MissionTaskSpec.IsSafeId(id, 3, 160)))
         {
             throw new InvalidDataException("Blueprint promotion knowledge evidence set is invalid.");
+        }
+    }
+
+    private static void EnsureSuppliedIdentityMatches(CandidateKnowledge supplied, CandidateKnowledge authoritative)
+    {
+        if (!string.Equals(supplied.KnowledgeId, authoritative.KnowledgeId, StringComparison.Ordinal)
+            || supplied.ProjectId != authoritative.ProjectId
+            || !string.Equals(supplied.TargetId, authoritative.TargetId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Supplied mission knowledge identity does not match the authoritative repository record.");
         }
     }
 
