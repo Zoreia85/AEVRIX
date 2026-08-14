@@ -45,7 +45,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             if (existingRecord is not null)
             {
                 EnsureCandidateProjectBinding(existingRecord);
-                if (!CandidateEquivalent(existingRecord.Value, candidate))
+                if (!SerializedEquivalent(existingRecord.Value, candidate))
                 {
                     throw new InvalidOperationException("Knowledge id is immutable and cannot be rebound to different candidate content.");
                 }
@@ -97,7 +97,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
                 {
                     throw new InvalidDataException("Validation record envelope is bound to a different project.");
                 }
-                if (!ValidationEquivalent(existingRecord.Value, validation))
+                if (!SerializedEquivalent(existingRecord.Value, validation))
                 {
                     throw new InvalidOperationException("Validation record id is immutable and cannot be rebound.");
                 }
@@ -191,16 +191,16 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         CancellationToken cancellationToken,
         bool overwrite = false)
     {
-        var plaintext = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
-        if (plaintext.Length > MaxEnvelopeBytes / 2)
-        {
-            CryptographicOperations.ZeroMemory(plaintext);
-            throw new InvalidDataException("Knowledge vault payload exceeds the configured bound.");
-        }
-
         var key = await GetKeyCopyAsync(projectId, cancellationToken);
+        byte[]? plaintext = null;
         try
         {
+            plaintext = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
+            if (plaintext.Length > MaxEnvelopeBytes / 2)
+            {
+                throw new InvalidDataException("Knowledge vault payload exceeds the configured bound.");
+            }
+
             var nonce = RandomNumberGenerator.GetBytes(NonceBytes);
             var ciphertext = new byte[plaintext.Length];
             var tag = new byte[TagBytes];
@@ -239,7 +239,10 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         finally
         {
             CryptographicOperations.ZeroMemory(key);
-            CryptographicOperations.ZeroMemory(plaintext);
+            if (plaintext is not null)
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
         }
     }
 
@@ -403,11 +406,24 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         }
     }
 
-    private static bool CandidateEquivalent(CandidateKnowledge left, CandidateKnowledge right) =>
-        JsonSerializer.Serialize(left, JsonOptions) == JsonSerializer.Serialize(right, JsonOptions);
-
-    private static bool ValidationEquivalent(KnowledgeValidationRecord left, KnowledgeValidationRecord right) =>
-        JsonSerializer.Serialize(left, JsonOptions) == JsonSerializer.Serialize(right, JsonOptions);
+    private static bool SerializedEquivalent<T>(T left, T right)
+    {
+        var leftBytes = JsonSerializer.SerializeToUtf8Bytes(left, JsonOptions);
+        var rightBytes = JsonSerializer.SerializeToUtf8Bytes(right, JsonOptions);
+        try
+        {
+            Span<byte> leftHash = stackalloc byte[32];
+            Span<byte> rightHash = stackalloc byte[32];
+            SHA256.HashData(leftBytes, leftHash);
+            SHA256.HashData(rightBytes, rightHash);
+            return CryptographicOperations.FixedTimeEquals(leftHash, rightHash);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(leftBytes);
+            CryptographicOperations.ZeroMemory(rightBytes);
+        }
+    }
 
     private sealed record DecryptedRecord<T>(Guid ProjectId, T Value);
 
