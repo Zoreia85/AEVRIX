@@ -208,6 +208,58 @@ public sealed class CapabilityBroker
         }
     }
 
+    public CapabilityProviderSnapshot RecordHealthObservation(CapabilityHealthObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        observation.Validate();
+
+        while (true)
+        {
+            if (!_providers.TryGetValue(observation.ProviderId, out var current))
+            {
+                throw new KeyNotFoundException($"Unknown capability provider '{observation.ProviderId}'.");
+            }
+
+            if (observation.ObservedAt < current.LastObservedAt)
+            {
+                throw new InvalidOperationException("Capability health observations must be recorded in non-decreasing order.");
+            }
+
+            var requestedHealth = observation.Health;
+            var health = current.Health == CapabilityHealthState.Quarantined
+                ? CapabilityHealthState.Quarantined
+                : requestedHealth;
+            var failures = requestedHealth == CapabilityHealthState.Healthy
+                ? 0
+                : requestedHealth == CapabilityHealthState.Quarantined
+                    ? current.ConsecutiveFailures
+                    : checked(current.ConsecutiveFailures + 1);
+            var reliabilitySample = requestedHealth switch
+            {
+                CapabilityHealthState.Healthy => 1d,
+                CapabilityHealthState.Degraded => 0.5d,
+                _ => 0d
+            };
+
+            var updated = current with
+            {
+                Health = health,
+                ReliabilityScore = Ewma(current.ReliabilityScore, reliabilitySample),
+                P95LatencyMilliseconds = Math.Max(
+                    observation.LatencyMilliseconds,
+                    Ewma(current.P95LatencyMilliseconds, observation.LatencyMilliseconds)),
+                ConsecutiveFailures = failures,
+                LastObservedAt = observation.ObservedAt
+            };
+
+            updated.Validate();
+            if (_providers.TryUpdate(observation.ProviderId, updated, current))
+            {
+                return updated;
+            }
+        }
+    }
+
     public CapabilityProviderSnapshot SetQuarantined(string providerId, bool quarantined)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
