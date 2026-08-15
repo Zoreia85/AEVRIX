@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 
 namespace Aevrix.Remote.Capabilities;
@@ -233,6 +234,7 @@ internal static class WindowsRaceFreeProcessLauncher
         }
     }
 
+    [SupportedOSPlatform("windows")]
     private static IntPtr BuildProcessAttributeList(
         IntPtr stdinHandle,
         IntPtr stdoutHandle,
