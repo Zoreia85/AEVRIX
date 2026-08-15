@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>AEVRIX.Remote.Orchestration</AssemblyName>
+    <RootNamespace>Aevrix.Remote.Orchestration</RootNamespace>
+  </PropertyGroup>
+</Project>
