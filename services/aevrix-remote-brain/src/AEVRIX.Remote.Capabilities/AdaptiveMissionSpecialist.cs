@@ -117,12 +117,12 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
             var provider = _providers[rank.ProviderId];
             var started = Stopwatch.GetTimestamp();
             using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCancellation.CancelAfter(_executionPolicy.AttemptTimeout);
 
             try
             {
-                var output = (await provider
-                    .ExecuteAsync(context, attemptCancellation.Token)
+                var providerTask = provider.ExecuteAsync(context, attemptCancellation.Token);
+                var output = (await providerTask
+                    .WaitAsync(_executionPolicy.AttemptTimeout, cancellationToken)
                     .ConfigureAwait(false))
                     .Validate();
 
@@ -155,10 +155,12 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                attemptCancellation.Cancel();
                 throw;
             }
-            catch (OperationCanceledException exception) when (attemptCancellation.IsCancellationRequested)
+            catch (TimeoutException exception)
             {
+                attemptCancellation.Cancel();
                 Record(provider.ProviderId, succeeded: false, observedQuality: 0, started);
                 await ObserveSafelyAsync(
                     provider.ProviderId,
