@@ -16,18 +16,21 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
         Process process,
         AnonymousPipeServerStream stdout,
         AnonymousPipeServerStream stderr,
-        WindowsJobObjectLease jobLease)
+        WindowsJobObjectLease jobLease,
+        bool restrictedTokenEnforced)
     {
         Process = process;
         _stdout = stdout;
         _stderr = stderr;
         JobLease = jobLease;
+        RestrictedTokenEnforced = restrictedTokenEnforced;
     }
 
     internal Process Process { get; }
     internal Stream StandardOutput => _stdout;
     internal Stream StandardError => _stderr;
     internal WindowsJobObjectLease JobLease { get; }
+    internal bool RestrictedTokenEnforced { get; }
 
     public void Dispose()
     {
@@ -41,10 +44,11 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
 }
 
 /// <summary>
-/// Windows-only launcher that creates the child with CREATE_SUSPENDED, assigns the native
-/// process handle to an already-configured Job Object, and resumes the primary thread only
-/// after assignment succeeds. Handle inheritance is restricted with STARTUPINFOEX so the
-/// child receives only its three governed standard-I/O handles.
+/// Windows-only launcher that creates the child with CREATE_SUSPENDED, optionally under a
+/// DISABLE_MAX_PRIVILEGE primary token, assigns the native process handle to an already-configured
+/// Job Object, and resumes the primary thread only after assignment and token verification succeed.
+/// Handle inheritance is restricted with STARTUPINFOEX so the child receives only its three
+/// governed standard-I/O handles.
 /// </summary>
 internal static class WindowsRaceFreeProcessLauncher
 {
@@ -61,7 +65,8 @@ internal static class WindowsRaceFreeProcessLauncher
         IReadOnlyList<string> arguments,
         string workingDirectory,
         IReadOnlyDictionary<string, string> environment,
-        WindowsJobObjectPolicy jobPolicy)
+        WindowsJobObjectPolicy jobPolicy,
+        WindowsRestrictedTokenLease? restrictedToken = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -84,6 +89,7 @@ internal static class WindowsRaceFreeProcessLauncher
         WindowsJobObjectLease? jobLease = null;
         Process? process = null;
         var ownershipTransferred = false;
+        var restrictedTokenEnforced = false;
 
         try
         {
@@ -108,20 +114,40 @@ internal static class WindowsRaceFreeProcessLauncher
 
             var commandLine = new StringBuilder(BuildCommandLine(executablePath, arguments));
             environmentPointer = Marshal.StringToHGlobalUni(BuildEnvironmentBlock(environment));
+            var creationFlags = CreateSuspended | CreateNoWindow | CreateUnicodeEnvironment | ExtendedStartupInfoPresent;
 
-            if (!NativeMethods.CreateProcessW(
+            var created = restrictedToken is null
+                ? NativeMethods.CreateProcessW(
                     executablePath,
                     commandLine,
                     IntPtr.Zero,
                     IntPtr.Zero,
                     true,
-                    CreateSuspended | CreateNoWindow | CreateUnicodeEnvironment | ExtendedStartupInfoPresent,
+                    creationFlags,
                     environmentPointer,
                     workingDirectory,
                     ref startup,
-                    out processInfo))
+                    out processInfo)
+                : NativeMethods.CreateProcessAsUserW(
+                    restrictedToken.DangerousTokenHandle,
+                    executablePath,
+                    commandLine,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    true,
+                    creationFlags,
+                    environmentPointer,
+                    workingDirectory,
+                    ref startup,
+                    out processInfo);
+
+            if (!created)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create the governed adapter process in suspended state.");
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    restrictedToken is null
+                        ? "Could not create the governed adapter process in suspended state."
+                        : "Could not create the governed adapter process with the restricted token.");
             }
 
             stdout.DisposeLocalCopyOfClientHandle();
@@ -131,6 +157,15 @@ internal static class WindowsRaceFreeProcessLauncher
 
             try
             {
+                if (restrictedToken is not null)
+                {
+                    restrictedTokenEnforced = WindowsRestrictedTokenLease.ProcessTokenHasMaximumPrivilegesDisabled(processInfo.hProcess);
+                    if (!restrictedTokenEnforced)
+                    {
+                        throw new InvalidOperationException("Child process token did not retain the required maximum-privilege reduction.");
+                    }
+                }
+
                 jobLease = WindowsJobObjectLease.CreateAndAssign(processInfo.hProcess, jobPolicy);
                 process = Process.GetProcessById(checked((int)processInfo.dwProcessId));
 
@@ -141,7 +176,12 @@ internal static class WindowsRaceFreeProcessLauncher
                 }
 
                 ownershipTransferred = true;
-                return new WindowsRaceFreeProcessLaunch(process, stdout, stderr, jobLease);
+                return new WindowsRaceFreeProcessLaunch(
+                    process,
+                    stdout,
+                    stderr,
+                    jobLease,
+                    restrictedTokenEnforced);
             }
             catch
             {
@@ -317,6 +357,21 @@ internal static class WindowsRaceFreeProcessLauncher
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CreateProcessW(
+            string applicationName,
+            StringBuilder commandLine,
+            IntPtr processAttributes,
+            IntPtr threadAttributes,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+            uint creationFlags,
+            IntPtr environment,
+            string currentDirectory,
+            ref StartupInfoEx startupInfo,
+            out ProcessInformation processInformation);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CreateProcessAsUserW(
+            IntPtr token,
             string applicationName,
             StringBuilder commandLine,
             IntPtr processAttributes,
