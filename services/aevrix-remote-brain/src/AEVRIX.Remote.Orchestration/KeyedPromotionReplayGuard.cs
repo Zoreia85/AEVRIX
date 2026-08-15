@@ -13,10 +13,19 @@ public interface IPromotionClaimStore
 }
 
 /// <summary>
+/// Lookup-capable claim store used only for coordinated replay-key rotation. Identifiers remain
+/// opaque HMAC outputs; canonical project/run/execution material must never cross this boundary.
+/// </summary>
+public interface IPromotionClaimLookupStore : IPromotionClaimStore
+{
+    bool Exists(string opaqueClaimId);
+}
+
+/// <summary>
 /// Local durable claim store. The filename is already an opaque keyed identifier; the store never
 /// receives project, run, execution or evidence identifiers in plaintext.
 /// </summary>
-public sealed class FilePromotionClaimStore : IPromotionClaimStore
+public sealed class FilePromotionClaimStore : IPromotionClaimLookupStore
 {
     private static readonly byte[] ClaimMarker = Encoding.ASCII.GetBytes("AEVRIX_OPAQUE_PROMOTION_CLAIM_V1\n");
     private readonly string _claimDirectory;
@@ -54,6 +63,13 @@ public sealed class FilePromotionClaimStore : IPromotionClaimStore
         }
     }
 
+    public bool Exists(string opaqueClaimId)
+    {
+        ValidateOpaqueClaimId(opaqueClaimId);
+        RejectReparsePoint(_claimDirectory);
+        return File.Exists(Path.Combine(_claimDirectory, opaqueClaimId + ".claim"));
+    }
+
     private static void ValidateOpaqueClaimId(string opaqueClaimId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(opaqueClaimId);
@@ -81,9 +97,31 @@ public sealed class FilePromotionClaimStore : IPromotionClaimStore
 /// deployment key. The Authority nonce is intentionally excluded by the canonical identity, so a
 /// second valid signature over the same promotion cannot bypass the claim.
 /// </summary>
-public sealed class KeyedPromotionReplayGuard : IPromotionReplayGuard, IDisposable
+internal static class PromotionClaimIdDerivation
 {
     private const string DomainSeparator = "AEVRIX_PROMOTION_CLAIM_HMAC_V1\n";
+
+    public static string Derive(VerifiedPromotionAuthorityAttestation attestation, ReadOnlySpan<byte> key)
+    {
+        ArgumentNullException.ThrowIfNull(attestation);
+        if (key.Length < 32)
+            throw new ArgumentException("Promotion replay HMAC key must contain at least 256 bits.", nameof(key));
+
+        var canonicalIdentity = InMemoryPromotionReplayGuard.BuildReplayKey(attestation);
+        var payload = Encoding.UTF8.GetBytes(DomainSeparator + canonicalIdentity);
+        try
+        {
+            return Convert.ToHexString(HMACSHA256.HashData(key, payload)).ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+}
+
+public sealed class KeyedPromotionReplayGuard : IPromotionReplayGuard, IDisposable
+{
     private readonly IPromotionClaimStore _claimStore;
     private readonly byte[] _key;
     private bool _disposed;
@@ -102,19 +140,8 @@ public sealed class KeyedPromotionReplayGuard : IPromotionReplayGuard, IDisposab
     public bool TryClaim(VerifiedPromotionAuthorityAttestation attestation, out string replayKey)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(attestation);
-
-        var canonicalIdentity = InMemoryPromotionReplayGuard.BuildReplayKey(attestation);
-        var payload = Encoding.UTF8.GetBytes(DomainSeparator + canonicalIdentity);
-        try
-        {
-            replayKey = Convert.ToHexString(HMACSHA256.HashData(_key, payload)).ToLowerInvariant();
-            return _claimStore.TryCreate(replayKey);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(payload);
-        }
+        replayKey = PromotionClaimIdDerivation.Derive(attestation, _key);
+        return _claimStore.TryCreate(replayKey);
     }
 
     public void Dispose()
