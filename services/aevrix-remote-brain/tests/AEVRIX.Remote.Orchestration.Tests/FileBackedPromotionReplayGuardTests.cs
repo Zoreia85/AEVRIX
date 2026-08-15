@@ -1,10 +1,27 @@
 using Aevrix.Remote.Orchestration;
 
+#pragma warning disable CS0618 // Intentional legacy-compatibility coverage; production callers must use KeyedPromotionReplayGuard.
+
 namespace Aevrix.Remote.Orchestration.Tests;
 
 [TestClass]
 public sealed class FileBackedPromotionReplayGuardTests
 {
+    [TestMethod]
+    public void LegacyGuard_IsExplicitlyDeprecatedInFavorOfKeyedClaims()
+    {
+        var legacyType = typeof(IPromotionReplayGuard).Assembly.GetType(
+            "Aevrix.Remote.Orchestration.FileBackedPromotionReplayGuard",
+            throwOnError: true)!;
+        var obsolete = legacyType
+            .GetCustomAttributes(typeof(ObsoleteAttribute), inherit: false)
+            .Cast<ObsoleteAttribute>()
+            .Single();
+
+        StringAssert.Contains(obsolete.Message, nameof(KeyedPromotionReplayGuard));
+        StringAssert.Contains(obsolete.Message, "256-bit");
+    }
+
     [TestMethod]
     public void TryClaim_SurvivesGuardRecreation()
     {
@@ -113,3 +130,5 @@ public sealed class FileBackedPromotionReplayGuardTests
         }
     }
 }
+
+#pragma warning restore CS0618

@@ -4,11 +4,14 @@ using System.Text;
 namespace Aevrix.Remote.Orchestration;
 
 /// <summary>
-/// Durable local-filesystem implementation of <see cref="IPromotionReplayGuard"/>.
-/// Claims are represented only by a SHA-256 digest of the canonical promotion identity, so
-/// project/run/execution identifiers are not persisted in plaintext. FileMode.CreateNew is the
-/// cross-process compare-and-set primitive: exactly one contender can create a given claim file.
+/// Legacy durable local-filesystem implementation of <see cref="IPromotionReplayGuard"/>.
+/// The persisted identifier is an unkeyed SHA-256 digest of the canonical promotion identity.
+/// Although plaintext identifiers are not written, an observer can test guesses for low-entropy
+/// project/run/execution metadata offline. New deployments must use <see cref="KeyedPromotionReplayGuard"/>
+/// with a deployment-specific secret key of at least 256 bits.
 /// </summary>
+[Obsolete(
+    "Unkeyed promotion claim digests permit offline correlation. Use KeyedPromotionReplayGuard with a deployment-specific 256-bit key.")]
 public sealed class FileBackedPromotionReplayGuard : IPromotionReplayGuard
 {
     private const string ClaimPrefix = "promotion-claim-v1:";
