@@ -25,16 +25,17 @@ public sealed record OllamaRuntimeOptions(
             throw new ArgumentException("Ollama base address must be an absolute URI without credentials, query, or fragment.", nameof(BaseAddress));
         }
 
-        var isHttp = string.Equals(BaseAddress.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
-        var isHttps = string.Equals(BaseAddress.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
-        if (!isHttp && !isHttps)
+        if (AllowRemoteEndpoint)
         {
-            throw new ArgumentException("Ollama base address must use HTTP or HTTPS.", nameof(BaseAddress));
+            throw new InvalidOperationException(
+                "Remote Ollama endpoints are forbidden for the local-runtime adapter.");
         }
 
-        if (!AllowRemoteEndpoint && !BaseAddress.IsLoopback)
+        var isHttp = string.Equals(BaseAddress.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
+        if (!isHttp || !BaseAddress.IsLoopback)
         {
-            throw new InvalidOperationException("Remote Ollama endpoints are disabled by default.");
+            throw new InvalidOperationException(
+                "Ollama local-runtime endpoints must use loopback HTTP. Remote and HTTPS endpoints require a separately governed remote-brain adapter.");
         }
 
         if (!IsSafeModelName(Model))
@@ -128,19 +129,19 @@ public sealed class OllamaModelProvider : IAevrixModelProvider
         var analysis = JsonSerializer.Deserialize<OllamaAnalysisPayload>(payload, JsonOptions)
             ?? throw new InvalidDataException("Ollama analysis payload is missing.");
 
-        if (!Enum.TryParse<ModelRiskLevel>(analysis.Risk, ignoreCase: true, out var risk))
-        {
-            throw new InvalidDataException("Ollama analysis risk is invalid.");
-        }
-
         var candidate = new ModelAnalysisCandidate(
             ProviderId,
             string.IsNullOrWhiteSpace(envelope.Model) ? _options.Model : envelope.Model.Trim(),
             analysis.Statement?.Trim() ?? string.Empty,
-            analysis.Confidence,
-            risk,
-            analysis.EvidenceIds ?? Array.Empty<string>(),
-            analysis.Assumptions ?? Array.Empty<string>(),
+            0.55,
+            ModelRiskLevel.High,
+            task.EvidenceIds.ToArray(),
+            (analysis.Assumptions ?? Array.Empty<string>())
+                .Concat(new[]
+                {
+                    "Ollama output is candidate knowledge and cannot self-promote confidence, risk, or evidence provenance."
+                })
+                .ToArray(),
             analysis.OpenQuestions ?? Array.Empty<string>());
 
         return candidate.Validate();

@@ -54,8 +54,11 @@ public sealed class CapabilityFabricTests
 
         Assert.AreEqual("ollama", candidate.ProviderId);
         Assert.AreEqual("qwen3:8b", candidate.ProviderModelVersion);
-        Assert.AreEqual(0.91, candidate.Confidence, 0.0001);
+        Assert.AreEqual(0.55, candidate.Confidence, 0.0001);
+        Assert.AreEqual(ModelRiskLevel.High, candidate.Risk);
         CollectionAssert.AreEqual(new[] { "EV-001" }, candidate.EvidenceIds.ToArray());
+        Assert.IsTrue(candidate.Assumptions.Any(assumption =>
+            assumption.Contains("cannot self-promote", StringComparison.OrdinalIgnoreCase)));
         Assert.AreEqual(1, handler.RequestCount);
     }
 
