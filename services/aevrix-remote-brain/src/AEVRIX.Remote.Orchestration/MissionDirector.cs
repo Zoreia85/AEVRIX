@@ -223,18 +223,64 @@ public sealed class MissionDirector
     private readonly IReadOnlyDictionary<MissionSpecialistKind, IMissionSpecialist> _specialists;
     private readonly TimeProvider _time;
 
-    public MissionDirector(IEnumerable<IMissionSpecialist> specialists, TimeProvider? timeProvider = null)
+    /// <summary>
+    /// Creates the only externally constructible MissionDirector composition. Every raw specialist
+    /// is wrapped exactly once in a ProofRecordingMissionSpecialist before the director can exist.
+    /// There is intentionally no public MissionDirector constructor.
+    /// </summary>
+    public static MissionDirector CreateProofBound(
+        IEnumerable<IMissionSpecialist> specialists,
+        IExecutionProofJournalProvider journalProvider,
+        TimeProvider? timeProvider = null,
+        ProofRecordingMissionSpecialistOptions? proofOptions = null)
     {
         ArgumentNullException.ThrowIfNull(specialists);
-        _time = timeProvider ?? TimeProvider.System;
+        ArgumentNullException.ThrowIfNull(journalProvider);
 
-        var list = specialists.ToList();
-        if (list.GroupBy(s => s.Kind).Any(group => group.Count() != 1))
+        var raw = specialists.ToArray();
+        if (raw.Any(static specialist => specialist is null))
         {
-            throw new ArgumentException("Exactly one active specialist may be registered for each specialist kind.", nameof(specialists));
+            throw new ArgumentException("Mission specialist set cannot contain null entries.", nameof(specialists));
         }
 
-        _specialists = list.ToDictionary(s => s.Kind);
+        if (raw.Any(static specialist => specialist is ProofRecordingMissionSpecialist))
+        {
+            throw new ArgumentException(
+                "Mission specialist set must contain raw specialists; proof wrapping is owned exclusively by MissionDirector.CreateProofBound.",
+                nameof(specialists));
+        }
+
+        if (raw.GroupBy(static specialist => specialist.Kind).Any(static group => group.Count() != 1))
+        {
+            throw new ArgumentException(
+                "Exactly one active specialist may be registered for each specialist kind.",
+                nameof(specialists));
+        }
+
+        var clock = timeProvider ?? TimeProvider.System;
+        var wrapped = raw
+            .Select(specialist => (IMissionSpecialist)new ProofRecordingMissionSpecialist(
+                specialist,
+                journalProvider,
+                clock,
+                proofOptions))
+            .ToArray();
+
+        return new MissionDirector(wrapped, clock);
+    }
+
+    private MissionDirector(
+        IReadOnlyList<IMissionSpecialist> proofBoundSpecialists,
+        TimeProvider timeProvider)
+    {
+        if (proofBoundSpecialists.Any(static specialist => specialist is not ProofRecordingMissionSpecialist))
+        {
+            throw new InvalidOperationException(
+                "MissionDirector can only be created from proof-bound specialists.");
+        }
+
+        _time = timeProvider;
+        _specialists = proofBoundSpecialists.ToDictionary(static specialist => specialist.Kind);
     }
 
     public async Task<MissionExecutionResult> ExecuteWithQirHintsAsync(
