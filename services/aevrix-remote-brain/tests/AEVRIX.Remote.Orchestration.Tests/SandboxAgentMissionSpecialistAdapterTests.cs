@@ -92,7 +92,7 @@ public sealed class SandboxAgentMissionSpecialistAdapterTests
             [allowedRoot],
             HostFilesystemMounted: false,
             OutboundNetworkAllowed: false);
-        using HttpClient http = new(handler);
+        HttpClient http = new(handler);
         var client = new SandboxAgentBackendClient(
             http,
             backend,
