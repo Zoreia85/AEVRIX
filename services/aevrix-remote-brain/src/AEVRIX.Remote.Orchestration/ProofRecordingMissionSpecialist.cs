@@ -90,6 +90,8 @@ public sealed record ProofRecordingMissionSpecialistOptions(TimeSpan Finalizatio
 /// A specialist is never invoked until Started is durably accepted. A successful output is never
 /// returned until Completed is durably accepted. Raw objective, summary, exception message and
 /// artifact contents never enter the ledger; only deterministic SHA-256 digests and bounded ids do.
+/// A pre-existing Started event is never treated as permission to replay work after a process loss;
+/// that ambiguous state requires a separate reconciliation/lease decision.
 /// </summary>
 public sealed class ProofRecordingMissionSpecialist : IMissionSpecialist
 {
@@ -123,9 +125,17 @@ public sealed class ProofRecordingMissionSpecialist : IMissionSpecialist
 
         var identity = ExecutionIdentity.Create(context, Kind);
         var journal = await _journals.GetAsync(context.ProjectId, cancellationToken).ConfigureAwait(false);
-        await journal.AppendAndPersistAsync(
-            identity.CreateStarted(_time.GetUtcNow()),
-            cancellationToken).ConfigureAwait(false);
+        await ClaimExecutionStartAsync(journal, identity, cancellationToken).ConfigureAwait(false);
+
+        // Cancellation after a durable Started claim must close the proof before returning control;
+        // otherwise a benign cancellation would leave an ambiguous started-only execution behind.
+        if (cancellationToken.IsCancellationRequested)
+        {
+            await PersistTerminalAsync(
+                journal,
+                identity.CreateFailed(typeof(OperationCanceledException), _time.GetUtcNow())).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
 
         SpecialistExecutionOutput output;
         try
@@ -156,6 +166,58 @@ public sealed class ProofRecordingMissionSpecialist : IMissionSpecialist
             journal,
             identity.CreateSucceeded(output, _time.GetUtcNow())).ConfigureAwait(false);
         return output;
+    }
+
+    private async Task ClaimExecutionStartAsync(
+        DurableExecutionProofJournal journal,
+        ExecutionIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        if (journal.HasPendingRecovery)
+        {
+            throw new InvalidOperationException(
+                "Execution proof journal has unresolved recovery state; specialist execution is blocked until reconciliation completes.");
+        }
+
+        var existing = journal.Snapshot()
+            .Where(record => string.Equals(
+                record.Event.ExecutionId,
+                identity.ExecutionId,
+                StringComparison.Ordinal))
+            .ToArray();
+        if (existing.Length != 0)
+        {
+            throw new InvalidOperationException(
+                "Mission specialist execution id already exists in the proof ledger; automatic replay is forbidden.");
+        }
+
+        var started = identity.CreateStarted(_time.GetUtcNow());
+        try
+        {
+            await journal.AppendAndPersistAsync(started, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (!journal.HasPendingRecovery)
+                throw;
+
+            // This recovery is safe because the pending candidate was created by the exact Started
+            // append immediately above in this same call. We never use this path to resume an
+            // arbitrary started-only execution discovered after restart.
+            using var recovery = new CancellationTokenSource(_options.FinalizationTimeout);
+            await journal.RecoverPendingAsync(recovery.Token).ConfigureAwait(false);
+            var recovered = journal.Snapshot()
+                .Where(record => string.Equals(
+                    record.Event.ExecutionId,
+                    identity.ExecutionId,
+                    StringComparison.Ordinal))
+                .ToArray();
+            if (recovered.Length != 1 || recovered[0].Event != started)
+            {
+                throw new InvalidDataException(
+                    "Execution proof recovery did not reproduce the exact Started claim; specialist execution remains blocked.");
+            }
+        }
     }
 
     private async Task PersistTerminalAsync(
