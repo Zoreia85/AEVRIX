@@ -50,6 +50,13 @@ public sealed class WindowsExperimentalProcessSandboxProbeTests
         }
 
         var capability = new WindowsExperimentalProcessSandboxProbe().Probe();
+        Console.WriteLine(
+            $"AEVRIX_WINDOWS_EXPERIMENTAL_SANDBOX module={capability.ModulePresent} " +
+            $"create={capability.CreateProcessInSandboxAvailable} " +
+            $"createAsUser={capability.CreateProcessAsUserInSandboxAvailable} " +
+            $"fullyAvailable={capability.FullyAvailable} " +
+            $"contract={capability.ContractVersion} " +
+            $"modulePath={capability.ModulePath ?? "<absent>"}");
 
         Assert.AreEqual(WindowsExperimentalProcessSandboxProbe.KnownContractVersion, capability.ContractVersion);
         Assert.IsTrue(capability.Experimental);
