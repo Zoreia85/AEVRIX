@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
 
 namespace Aevrix.Remote.Capabilities;
@@ -9,6 +10,7 @@ namespace Aevrix.Remote.Capabilities;
 /// This is a privilege-reduction primitive only: it does not itself enforce
 /// filesystem or network isolation and must not be used to attest either.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public sealed class WindowsRestrictedTokenLease : IDisposable
 {
     private const uint TokenQuery = 0x0008;
@@ -48,11 +50,6 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
 
     public static WindowsRestrictedTokenLease Create()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            throw new PlatformNotSupportedException("Windows restricted access tokens require Windows.");
-        }
-
         if (!OpenProcessToken(GetCurrentProcess(), TokenQuery | TokenDuplicate, out var processToken))
         {
             throw Win32("OpenProcessToken failed.");
