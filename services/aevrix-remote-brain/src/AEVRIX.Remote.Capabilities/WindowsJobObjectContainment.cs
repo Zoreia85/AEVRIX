@@ -34,8 +34,8 @@ public sealed record WindowsJobObjectPolicy(
 /// <summary>
 /// Owns a Windows Job Object configured for AEVRIX adapter containment. Closing the lease
 /// terminates all processes that remain in the job. This primitive enforces process-count,
-/// per-process memory and, when configured, a hard CPU-rate cap. It does not claim network,
-/// filesystem ACL or race-free suspended-start isolation.
+/// per-process memory and, when configured, a hard CPU-rate cap. It can assign either a managed
+/// Process or a native suspended process handle, allowing callers to eliminate pre-assignment execution.
 /// </summary>
 public sealed class WindowsJobObjectLease : IDisposable
 {
@@ -75,6 +75,24 @@ public sealed class WindowsJobObjectLease : IDisposable
             throw new InvalidOperationException("Cannot assign an exited process to a governed Job Object.");
         }
 
+        return CreateAndAssign(process.Handle, policy);
+    }
+
+    internal static WindowsJobObjectLease CreateAndAssign(IntPtr processHandle, WindowsJobObjectPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        policy.Validate();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Windows Job Object containment requires Windows.");
+        }
+
+        if (processHandle == IntPtr.Zero || processHandle == new IntPtr(-1))
+        {
+            throw new ArgumentException("A valid native process handle is required.", nameof(processHandle));
+        }
+
         var handle = NativeMethods.CreateJobObjectW(IntPtr.Zero, null);
         if (handle.IsInvalid)
         {
@@ -85,7 +103,7 @@ public sealed class WindowsJobObjectLease : IDisposable
         {
             ConfigureLimits(handle, policy);
             ConfigureCpuRate(handle, policy);
-            if (!NativeMethods.AssignProcessToJobObject(handle, process.Handle))
+            if (!NativeMethods.AssignProcessToJobObject(handle, processHandle))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not assign the adapter process to the governed Windows Job Object.");
             }
