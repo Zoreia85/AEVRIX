@@ -13,8 +13,9 @@ namespace Aevrix.Remote.Capabilities;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsRestrictedTokenLease : IDisposable
 {
-    private const uint TokenQuery = 0x0008;
+    private const uint TokenAssignPrimary = 0x0001;
     private const uint TokenDuplicate = 0x0002;
+    private const uint TokenQuery = 0x0008;
     private const uint DisableMaxPrivilege = 0x00000001;
     private const int TokenPrivileges = 3;
     private const int TokenType = 8;
@@ -50,7 +51,10 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
 
     public static WindowsRestrictedTokenLease Create()
     {
-        if (!OpenProcessToken(GetCurrentProcess(), TokenQuery | TokenDuplicate, out var processToken))
+        if (!OpenProcessToken(
+                GetCurrentProcess(),
+                TokenQuery | TokenDuplicate | TokenAssignPrimary,
+                out var processToken))
         {
             throw Win32("OpenProcessToken failed.");
         }
@@ -93,6 +97,24 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
                 restrictedToken.Dispose();
                 throw;
             }
+        }
+    }
+
+    internal static bool ProcessTokenHasMaximumPrivilegesDisabled(IntPtr processHandle)
+    {
+        if (processHandle == IntPtr.Zero)
+        {
+            throw new ArgumentException("Process handle cannot be null.", nameof(processHandle));
+        }
+
+        if (!OpenProcessToken(processHandle, TokenQuery, out var processToken))
+        {
+            throw Win32("OpenProcessToken(child) failed.");
+        }
+
+        using (processToken)
+        {
+            return CountEnabledPrivileges(processToken) <= 1;
         }
     }
 
