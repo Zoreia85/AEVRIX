@@ -50,13 +50,6 @@ public sealed class WindowsExperimentalProcessSandboxProbeTests
         }
 
         var capability = new WindowsExperimentalProcessSandboxProbe().Probe();
-        Console.WriteLine(
-            $"AEVRIX_WINDOWS_EXPERIMENTAL_SANDBOX module={capability.ModulePresent} " +
-            $"create={capability.CreateProcessInSandboxAvailable} " +
-            $"createAsUser={capability.CreateProcessAsUserInSandboxAvailable} " +
-            $"fullyAvailable={capability.FullyAvailable} " +
-            $"contract={capability.ContractVersion} " +
-            $"modulePath={capability.ModulePath ?? "<absent>"}");
 
         Assert.AreEqual(WindowsExperimentalProcessSandboxProbe.KnownContractVersion, capability.ContractVersion);
         Assert.IsTrue(capability.Experimental);
@@ -74,6 +67,24 @@ public sealed class WindowsExperimentalProcessSandboxProbeTests
             "processmodel.dll"));
         Assert.AreEqual(expected, Path.GetFullPath(capability.ModulePath), ignoreCase: true);
         Assert.IsTrue(File.Exists(capability.ModulePath));
+    }
+
+    [TestMethod]
+    public void Probe_ExperimentalSurfaceMustBeFullyAvailableForBackendExperiment()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Experimental Windows sandbox availability gate requires Windows.");
+            return;
+        }
+
+        var capability = new WindowsExperimentalProcessSandboxProbe().Probe();
+        Assert.IsTrue(
+            capability.FullyAvailable,
+            $"Experimental sandbox surface is not fully available: module={capability.ModulePresent}, " +
+            $"create={capability.CreateProcessInSandboxAvailable}, " +
+            $"createAsUser={capability.CreateProcessAsUserInSandboxAvailable}, " +
+            $"contract={capability.ContractVersion}, modulePath={capability.ModulePath ?? "<absent>"}.");
     }
 
     private static WindowsExperimentalProcessSandboxCapability AvailableCapability() => new(
