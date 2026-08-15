@@ -107,11 +107,19 @@ public sealed class OutOfProcessAdapterRuntime
         }
 
         var actualHash = await ComputeSha256Async(executablePath, cancellationToken).ConfigureAwait(false);
-        if (!CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(actualHash),
-                Convert.FromHexString(request.ExecutableSha256)))
+        var actualHashBytes = Convert.FromHexString(actualHash);
+        var expectedHashBytes = Convert.FromHexString(request.ExecutableSha256);
+        try
         {
-            throw new InvalidDataException("Adapter executable hash does not match the pinned SHA-256.");
+            if (!CryptographicOperations.FixedTimeEquals(actualHashBytes, expectedHashBytes))
+            {
+                throw new InvalidDataException("Adapter executable hash does not match the pinned SHA-256.");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(actualHashBytes);
+            CryptographicOperations.ZeroMemory(expectedHashBytes);
         }
 
         var startInfo = new ProcessStartInfo
@@ -335,5 +343,7 @@ public sealed class OutOfProcessAdapterRuntime
         return (stdout, stderr);
     }
 
-    private sealed class OutputLimitExceededException : Exception;
+    private sealed class OutputLimitExceededException : Exception
+    {
+    }
 }
