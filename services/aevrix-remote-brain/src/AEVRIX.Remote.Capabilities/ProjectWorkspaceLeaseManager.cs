@@ -25,6 +25,7 @@ public sealed record ProjectWorkspaceLeaseOptions(
 
 public sealed class ProjectWorkspaceLeaseManager
 {
+    private const string LocalSubjectId = "local-user";
     private readonly ProjectWorkspaceLeaseOptions _options;
 
     public ProjectWorkspaceLeaseManager(ProjectWorkspaceLeaseOptions options)
@@ -34,24 +35,39 @@ public sealed class ProjectWorkspaceLeaseManager
         EnsureNotReparsePoint(_options.RootDirectory);
     }
 
-    public ProjectWorkspaceLease Create(Guid projectId, string workId, AdapterWorkspaceScope workspaceScope)
+    public ProjectWorkspaceLease Create(
+        Guid projectId,
+        string workId,
+        AdapterWorkspaceScope workspaceScope) =>
+        Create(projectId, LocalSubjectId, workId, workspaceScope);
+
+    public ProjectWorkspaceLease Create(
+        Guid projectId,
+        string subjectId,
+        string workId,
+        AdapterWorkspaceScope workspaceScope)
     {
         if (projectId == Guid.Empty)
         {
             throw new ArgumentException("Project id cannot be empty.", nameof(projectId));
         }
+        McpServerDescriptor.ValidateId(subjectId, nameof(subjectId));
         McpServerDescriptor.ValidateId(workId, nameof(workId));
         if (workspaceScope == AdapterWorkspaceScope.None)
         {
             throw new InvalidOperationException("A filesystem workspace cannot be created for WorkspaceScope.None.");
         }
 
+        var subjectBucket = "u-" + HashToken(subjectId, 16);
         var projectBucket = "p-" + HashToken(projectId.ToString("D"), 16);
         var workBucket = "w-" + HashToken(workId, 12);
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
-        var projectRoot = Path.Combine(_options.RootDirectory, projectBucket);
+        var subjectRoot = Path.Combine(_options.RootDirectory, subjectBucket);
+        var projectRoot = Path.Combine(subjectRoot, projectBucket);
         var leaseRoot = Path.Combine(projectRoot, $"{workBucket}-{nonce}");
 
+        Directory.CreateDirectory(subjectRoot);
+        EnsureNotReparsePoint(subjectRoot);
         Directory.CreateDirectory(projectRoot);
         EnsureNotReparsePoint(projectRoot);
         Directory.CreateDirectory(leaseRoot);
@@ -60,6 +76,7 @@ public sealed class ProjectWorkspaceLeaseManager
         return new ProjectWorkspaceLease(
             leaseRoot,
             projectId,
+            subjectId,
             workId,
             workspaceScope,
             _options.MaximumRelativePathLength);
@@ -88,12 +105,14 @@ public sealed class ProjectWorkspaceLease : IAsyncDisposable
     internal ProjectWorkspaceLease(
         string rootPath,
         Guid projectId,
+        string subjectId,
         string workId,
         AdapterWorkspaceScope workspaceScope,
         int maximumRelativePathLength)
     {
         RootPath = Path.GetFullPath(rootPath);
         ProjectId = projectId;
+        SubjectId = subjectId;
         WorkId = workId;
         WorkspaceScope = workspaceScope;
         _maximumRelativePathLength = maximumRelativePathLength;
@@ -101,6 +120,7 @@ public sealed class ProjectWorkspaceLease : IAsyncDisposable
 
     public string RootPath { get; }
     public Guid ProjectId { get; }
+    public string SubjectId { get; }
     public string WorkId { get; }
     public AdapterWorkspaceScope WorkspaceScope { get; }
     public bool CanWrite => WorkspaceScope == AdapterWorkspaceScope.ReadWrite;
