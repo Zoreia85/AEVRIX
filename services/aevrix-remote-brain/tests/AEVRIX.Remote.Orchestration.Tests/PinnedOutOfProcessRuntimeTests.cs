@@ -62,8 +62,9 @@ public sealed class PinnedOutOfProcessRuntimeTests
         var marker = Path.Combine(workspace.Path, "child-marker.txt");
         var child = CommandProcessor().Replace("\"", "\"\"");
         var command =
-            $"for /L %i in (1,1,5000) do @set a=%i >nul & " +
-            $"start /wait \"\" \"{child}\" /d /c \"echo CHILD>{marker}\" & " +
+            $"for /L %i in (1,1,1000) do @set a=%i >nul & " +
+            $"start \"\" \"{child}\" /d /c \"echo CHILD>{marker}\" & " +
+            $"for /L %i in (1,1,3000) do @set b=%i >nul & " +
             $"if exist \"{marker}\" (echo CHILD-ESCAPED) else echo CHILD-BLOCKED";
 
         var runtime = new PinnedOutOfProcessRuntime(
