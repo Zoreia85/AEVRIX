@@ -1,0 +1,273 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "SHA-256",
+  "fileCount": 53,
+  "recordsSha256": "297f7b037c078ea8ff05e27d3611a267c39623c75dd02a7a12bae736e42f8c53",
+  "files": [
+    {
+      "path": ".editorconfig",
+      "sizeBytes": 216,
+      "sha256": "bad448003f5fa41246d911911da7c0f23e69bcf16797de3f6749d8c2e68ffef5"
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "sizeBytes": 441,
+      "sha256": "2b74e77c7b3c1e7061e7230676e85075c86f7a2f491162566ec0cf4ccfcc966c"
+    },
+    {
+      "path": ".github/workflows/dotnet-core.yml",
+      "sizeBytes": 1511,
+      "sha256": "f02d4c66294cb5bb82f00fd43d6689a8be2f611d82fc50bb811a0dbd44562807"
+    },
+    {
+      "path": ".github/workflows/source-policy.yml",
+      "sizeBytes": 481,
+      "sha256": "936c02b366eeb2837a1e4e876eed17530b23ee94b1fbc5d5cdae9cf2a9fd751e"
+    },
+    {
+      "path": ".gitignore",
+      "sizeBytes": 573,
+      "sha256": "67989678893ef69581e9ecab58a00034c66689d02b501357e83151ff1413df0d"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sizeBytes": 1199,
+      "sha256": "8a25f72ab36ea36781732a41b79fba6cb167c5f117adab1fdec6ba2d9961d281"
+    },
+    {
+      "path": "GOVERNANCE.md",
+      "sizeBytes": 962,
+      "sha256": "02b7c51129a474c86d652d401cdb73ab7bbce1c7d63dfdc04ff04f7d3830edf1"
+    },
+    {
+      "path": "LICENSE",
+      "sizeBytes": 10854,
+      "sha256": "79c80607b19a9dde443e409ba9796caba84798bb0c41186ec7786bb103b40b1c"
+    },
+    {
+      "path": "NOTICE",
+      "sizeBytes": 182,
+      "sha256": "6855185ea556ead8117af83044663218beeb009bd511adc09d2ac1654d82238f"
+    },
+    {
+      "path": "README.md",
+      "sizeBytes": 3807,
+      "sha256": "a1bd69e31869680f769a52544662c0a255a8e637fbbea8c2da7aeb4539591468"
+    },
+    {
+      "path": "SECURITY.md",
+      "sizeBytes": 1844,
+      "sha256": "8810f43d56bd1e158b8809da4909dc8ee5807dc1ad2f1a196ae295f429fcbecb"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sizeBytes": 881,
+      "sha256": "d4e0d619c1ef476c36caff354ada7909944741a1f63e561102098c887fb33c1f"
+    },
+    {
+      "path": "apps/aevrix-windows/Directory.Build.props",
+      "sizeBytes": 709,
+      "sha256": "dec946b813c808815f9e3dd264d81f3eeb53db74154dd89a60032eea82c44bb1"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/AEVRIX.Core.csproj",
+      "sizeBytes": 174,
+      "sha256": "fe1877f7421730fde2f5c166246184d0a9e0ed8a9eee9b51e2101554fac812f2"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/AevrixDataPaths.cs",
+      "sizeBytes": 2320,
+      "sha256": "8b32653ea880da07d3ffa7e0ff303abfde656bfda8c850d54a1212dc9d58621b"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/AevrixSecureTransport.cs",
+      "sizeBytes": 23862,
+      "sha256": "be2904b9b9e225ba3dee547a08598edb476ecbc14232ec411f65e3c97ca175d5"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/BlueprintCommandHandler.cs",
+      "sizeBytes": 8771,
+      "sha256": "8b15efba3fd540e2646412a44330144297d6ad0c43aebaf8979ca367f15c68d2"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/CaptureProject.cs",
+      "sizeBytes": 2377,
+      "sha256": "f968ba0844462892b13b5a995956d582462c798e4c1aff4ceb04fa466347f176"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/DeviceEnrollmentClient.cs",
+      "sizeBytes": 8476,
+      "sha256": "bd0f3343e5cc7e71f66a6b30ed4f32fe431df54d06aa2598b9126dce107a5250"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/DeviceIdentity.cs",
+      "sizeBytes": 12893,
+      "sha256": "7b2b4693ce92a422cab507134e446f79fd09d2b51131369cae397c71fe0b2af9"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/EngineProtocol.cs",
+      "sizeBytes": 3212,
+      "sha256": "205f1699d7e8ad15ff0c00b32596145f21b223d4c22720afe00dc90d878e58e7"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/EvidenceStore.cs",
+      "sizeBytes": 11747,
+      "sha256": "f442042b642caf07f5e0c38be97510afd6ad2806d61236ef0d53b9026e6dcf3f"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/ProjectBlueprint.cs",
+      "sizeBytes": 8576,
+      "sha256": "a57350f233e8705b800835bb363715a069d8331212c5fe91802fbc3611ee4cba"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/ProjectBlueprintExporter.cs",
+      "sizeBytes": 11014,
+      "sha256": "ce71ddd9f4bf8abb17594b732bf63ccb1e2d2887f5dd7a82ecff61717a0d925b"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/ProjectBlueprintSynthesisService.cs",
+      "sizeBytes": 46418,
+      "sha256": "ab6aca5fb392a132b03a6c9427cb9a1230fadf5aa2b9feba88d9cea543a3ab6e"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/ProjectRepository.cs",
+      "sizeBytes": 6192,
+      "sha256": "e4125df732fa9017ca15ac4b3b9908ba22e1f9c2fd648601d83f82c91d5be068"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/ReproductionReadiness.cs",
+      "sizeBytes": 3460,
+      "sha256": "0acf864b1dce0a1743a2e78a53220165cb19d78b63ea1321ee8d6ca50de98e4c"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/ResearchBrowserPolicy.cs",
+      "sizeBytes": 6155,
+      "sha256": "6681c018b51bca1dd6b2f1d8681c6a2b126758ed9364726d0eb4fd410e1eac76"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.Core/SecureEgressPolicy.cs",
+      "sizeBytes": 5134,
+      "sha256": "f5db765da183f6110b75eee56a9ae66e9ebcd7717c4ef529c587ee1d5091d1e9"
+    },
+    {
+      "path": "apps/aevrix-windows/src/AEVRIX.EngineHost.GenerateBlueprint.patch",
+      "sizeBytes": 952,
+      "sha256": "89f797efa50c7ef866e7d1cbc8f5ea9bc2484746fc3ce0c084c693a96e80885f"
+    },
+    {
+      "path": "apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj",
+      "sizeBytes": 530,
+      "sha256": "9b8596ae9c078ee2a64bcbd61322d43c4ff62d28992a142ace0779ab8bb51704"
+    },
+    {
+      "path": "apps/aevrix-windows/tests/AEVRIX.Core.Tests/SecureTransportTests.cs",
+      "sizeBytes": 8225,
+      "sha256": "b83d55e0ac1dcf6ee66f3a69208b9668529ee95fc4c6130aba3abe1ecbf2a02b"
+    },
+    {
+      "path": "apps/aevrix-windows/tests/AEVRIX.Core.Tests/StorageAndBlueprintTests.cs",
+      "sizeBytes": 23504,
+      "sha256": "c867cbecb4d818927136929553d6576f9c32e3ee5e7aff66fc33269d2750697b"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sizeBytes": 2267,
+      "sha256": "caa65781889667c7e29e749ee444428f7309798a5a4c4ac01611afa0dcc5d827"
+    },
+    {
+      "path": "docs/OPEN_SOURCE_MODEL.md",
+      "sizeBytes": 823,
+      "sha256": "66beaa81578e102aa6009120a983d47b4d8fc7e428c562a3291b8ff04d815fb0"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "sizeBytes": 1519,
+      "sha256": "e6c5643f223416605be16055a53f8cbe679ebcfad8be84683ad44f1dcc1b8b30"
+    },
+    {
+      "path": "docs/VALIDATION.md",
+      "sizeBytes": 1828,
+      "sha256": "a57973baf32440b8e13bc076fc6e32f8071e522eaf9676f433e02fc5d1688029"
+    },
+    {
+      "path": "global.json",
+      "sizeBytes": 109,
+      "sha256": "b54f95ccc7a0a2199f7f2ce71cef88c853e633b5f6d0c492095cd16bbf4d8506"
+    },
+    {
+      "path": "services/aevrix-remote-brain/Directory.Build.props",
+      "sizeBytes": 550,
+      "sha256": "fd658aafb6c4e0f6417c6bda7c0232e305c58e0e87c46499c89c79183e6b80ad"
+    },
+    {
+      "path": "services/aevrix-remote-brain/src/AEVRIX.Remote.Orchestration/AEVRIX.Remote.Orchestration.csproj",
+      "sizeBytes": 206,
+      "sha256": "74b5788c7ebb5b341926949dd6d4fffb31223ddf0517707b2c99109c9168877b"
+    },
+    {
+      "path": "services/aevrix-remote-brain/src/AEVRIX.Remote.Orchestration/OrchestratorJudge.cs",
+      "sizeBytes": 14457,
+      "sha256": "3bb199a1c3fd495aaae6016751a5e1287d81ff15536a383b188644463237d8c8"
+    },
+    {
+      "path": "services/aevrix-remote-brain/src/AEVRIX.Remote.Security/AEVRIX.Remote.Security.csproj",
+      "sizeBytes": 196,
+      "sha256": "a5331b78f5893aa6e05546f55c162fb674688271792a13fa332a2a22e5d63aaf"
+    },
+    {
+      "path": "services/aevrix-remote-brain/src/AEVRIX.Remote.Security/DpopProofValidator.cs",
+      "sizeBytes": 15422,
+      "sha256": "0f2621c882f3a31e7d3eb0287ca0e6d01ed58ec5c7ae9d17e1c3f7d5ad2a759d"
+    },
+    {
+      "path": "services/aevrix-remote-brain/tests/AEVRIX.Remote.Orchestration.Tests/AEVRIX.Remote.Orchestration.Tests.csproj",
+      "sizeBytes": 592,
+      "sha256": "9054595cafbbe2a6a4e6ed10b76a069feb3e0d205d48ff6196347335ba9863bc"
+    },
+    {
+      "path": "services/aevrix-remote-brain/tests/AEVRIX.Remote.Orchestration.Tests/OrchestratorJudgeTests.cs",
+      "sizeBytes": 9613,
+      "sha256": "45f5463193102fb061de2d2f1ac3ad70c3dfec7148e8ca1b7d1b81d273eadac0"
+    },
+    {
+      "path": "services/aevrix-remote-brain/tests/AEVRIX.Remote.Security.Tests/AEVRIX.Remote.Security.Tests.csproj",
+      "sizeBytes": 572,
+      "sha256": "f13d3cc266f47a66d703cebada64e1e28e3424915120efbd592edfa69c82c548"
+    },
+    {
+      "path": "services/aevrix-remote-brain/tests/AEVRIX.Remote.Security.Tests/DpopProofValidatorTests.cs",
+      "sizeBytes": 8508,
+      "sha256": "847c037199ae5845e6472b97ada07a217290a3f61deea876fa06d07f573d2f27"
+    },
+    {
+      "path": "tools/ci/public_repo_audit.py",
+      "sizeBytes": 3543,
+      "sha256": "9124e3429d05230dedbf1a797dfbf719682029b0bbbbcf0f90f016c169335fef"
+    },
+    {
+      "path": "tools/release/generate-source-manifest.py",
+      "sizeBytes": 1253,
+      "sha256": "4deed658030661a90cb2395ae0d058bbff5e1da60fdb7b0f8637cb2d034f36ed"
+    },
+    {
+      "path": "tools/research-lab/src/research_lab/artifact_manifest.py",
+      "sizeBytes": 3954,
+      "sha256": "43f61162958b272587e94622fb0feb5de3755462f005b08e3c846a127dcf089f"
+    },
+    {
+      "path": "tools/research-lab/src/research_lab/coverage.py",
+      "sizeBytes": 4131,
+      "sha256": "7941948ff5dec98338641c9239a71b95d21b43fd7f780628b57e35be6aa1ffd1"
+    },
+    {
+      "path": "tools/research-lab/src/research_lab/network_observer.py",
+      "sizeBytes": 4106,
+      "sha256": "2234d8ef8e5239f5d597cecc8ac01903e851ea170761a6e7a6582e56f6357163"
+    },
+    {
+      "path": "tools/research-lab/src/research_lab/state_graph.py",
+      "sizeBytes": 3157,
+      "sha256": "51567fe12318701c7b76bf8b6f93c1ec95c3f07c06d9a9f38b6585535dd65482"
+    }
+  ]
+}
