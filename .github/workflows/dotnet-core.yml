@@ -1,0 +1,48 @@
+name: .NET core
+
+on:
+  push:
+    paths:
+      - "apps/aevrix-windows/src/AEVRIX.Core/**"
+      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/**"
+      - "services/aevrix-remote-brain/**"
+      - "global.json"
+      - ".github/workflows/dotnet-core.yml"
+  pull_request:
+    paths:
+      - "apps/aevrix-windows/src/AEVRIX.Core/**"
+      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/**"
+      - "services/aevrix-remote-brain/**"
+      - "global.json"
+      - ".github/workflows/dotnet-core.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10.0.400
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.400"
+
+      - name: Test Windows Core
+        run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
+
+      - name: Test Remote Security
+        run: dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Security.Tests/AEVRIX.Remote.Security.Tests.csproj -c Release
+
+      - name: Test Orchestrator Judge
+        run: dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Orchestration.Tests/AEVRIX.Remote.Orchestration.Tests.csproj -c Release
