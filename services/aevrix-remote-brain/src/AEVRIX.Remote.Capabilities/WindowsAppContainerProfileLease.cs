@@ -6,10 +6,10 @@ namespace Aevrix.Remote.Capabilities;
 
 /// <summary>
 /// Creates one ephemeral per-user AppContainer profile with no capabilities and verifies that
-/// Windows derives the same package SID from its opaque AEVRIX-generated profile name.
-/// The profile name deliberately contains no project, user or evidence identifiers.
-/// This is an identity/lifecycle primitive only; it does not by itself attest process, network
-/// or filesystem isolation until a launcher applies the AppContainer security capabilities.
+/// Windows derives the same package SID from its opaque AEVRIX-generated profile name. The profile
+/// name deliberately contains no project, user or evidence identifiers. The lease also resolves
+/// the AppContainer-owned local-data path so launchers can construct the redirected environment
+/// expected by Windows without reusing host TEMP/TMP locations.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsAppContainerProfileLease : IDisposable
@@ -20,15 +20,22 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
     private readonly IntPtr _profileSid;
     private bool _disposed;
 
-    private WindowsAppContainerProfileLease(string profileName, IntPtr profileSid, string appContainerSid)
+    private WindowsAppContainerProfileLease(
+        string profileName,
+        IntPtr profileSid,
+        string appContainerSid,
+        string profileFolderPath)
     {
         ProfileName = profileName;
         _profileSid = profileSid;
         AppContainerSid = appContainerSid;
+        ProfileFolderPath = profileFolderPath;
     }
 
     public string ProfileName { get; }
     public string AppContainerSid { get; }
+    public string ProfileFolderPath { get; }
+    public string TempFolderPath => Path.Combine(ProfileFolderPath, "Temp");
     public bool ProfileCreated => !_disposed && _profileSid != IntPtr.Zero;
     public bool IsDisposed => _disposed;
 
@@ -92,10 +99,16 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
                     _ = FreeSid(derivedSid);
                 }
 
+                var sidText = SidToString(createdSid);
+                var folder = ResolveProfileFolder(sidText);
+                Directory.CreateDirectory(folder);
+                Directory.CreateDirectory(Path.Combine(folder, "Temp"));
+
                 return new WindowsAppContainerProfileLease(
                     profileName,
                     createdSid,
-                    SidToString(createdSid));
+                    sidText,
+                    folder);
             }
             catch
             {
@@ -128,6 +141,29 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
         }
 
         if (deletionError is not null) throw deletionError;
+    }
+
+    private static string ResolveProfileFolder(string appContainerSid)
+    {
+        var hr = GetAppContainerFolderPath(appContainerSid, out var folderPointer);
+        if (hr != S_OK || folderPointer == IntPtr.Zero)
+        {
+            throw HResult(hr, "Could not resolve the AppContainer local-data folder.");
+        }
+
+        try
+        {
+            var value = Marshal.PtrToStringUni(folderPointer);
+            if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value))
+            {
+                throw new InvalidDataException("AppContainer local-data folder is invalid.");
+            }
+            return Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(folderPointer);
+        }
     }
 
     private static string SidToString(IntPtr sid)
@@ -170,6 +206,9 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
     [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
     private static extern int DeleteAppContainerProfile(string appContainerName);
 
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetAppContainerFolderPath(string appContainerSid, out IntPtr path);
+
     [DllImport("advapi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsValidSid(IntPtr sid);
@@ -177,6 +216,10 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
     [DllImport("advapi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EqualSid(IntPtr sid1, IntPtr sid2);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ConvertSidToStringSidW(string stringSid, out IntPtr sid);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
