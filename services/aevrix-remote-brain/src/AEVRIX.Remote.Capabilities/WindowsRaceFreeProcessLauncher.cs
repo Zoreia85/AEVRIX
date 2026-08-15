@@ -17,13 +17,15 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
         AnonymousPipeServerStream stdout,
         AnonymousPipeServerStream stderr,
         WindowsJobObjectLease jobLease,
-        bool restrictedTokenEnforced)
+        bool restrictedTokenEnforced,
+        bool appContainerEnforced)
     {
         Process = process;
         _stdout = stdout;
         _stderr = stderr;
         JobLease = jobLease;
         RestrictedTokenEnforced = restrictedTokenEnforced;
+        AppContainerEnforced = appContainerEnforced;
     }
 
     internal Process Process { get; }
@@ -31,6 +33,7 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
     internal Stream StandardError => _stderr;
     internal WindowsJobObjectLease JobLease { get; }
     internal bool RestrictedTokenEnforced { get; }
+    internal bool AppContainerEnforced { get; }
 
     public void Dispose()
     {
@@ -45,10 +48,10 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
 
 /// <summary>
 /// Windows-only launcher that creates the child with CREATE_SUSPENDED, optionally under a
-/// DISABLE_MAX_PRIVILEGE primary token, assigns the native process handle to an already-configured
-/// Job Object, and resumes the primary thread only after assignment and token verification succeed.
-/// Handle inheritance is restricted with STARTUPINFOEX so the child receives only its three
-/// governed standard-I/O handles.
+/// reduced primary token and/or AppContainer identity, assigns the native process handle to an
+/// already-configured Job Object, verifies the requested token boundaries, and resumes the
+/// primary thread only after those controls succeed. STARTUPINFOEX restricts inherited handles
+/// to governed stdio and carries SECURITY_CAPABILITIES when AppContainer is requested.
 /// </summary>
 internal static class WindowsRaceFreeProcessLauncher
 {
@@ -58,7 +61,11 @@ internal static class WindowsRaceFreeProcessLauncher
     private const uint CreateNoWindow = 0x08000000;
     private const uint StartfUseStdHandles = 0x00000100;
     private const int ErrorInsufficientBuffer = 122;
+    private const uint TokenQuery = 0x0008;
+    private const int TokenIsAppContainer = 29;
+    private const int TokenAppContainerSid = 31;
     private static readonly UIntPtr ProcThreadAttributeHandleList = new(0x00020002u);
+    private static readonly UIntPtr ProcThreadAttributeSecurityCapabilities = new(0x00020009u);
 
     internal static WindowsRaceFreeProcessLaunch Start(
         string executablePath,
@@ -66,7 +73,8 @@ internal static class WindowsRaceFreeProcessLauncher
         string workingDirectory,
         IReadOnlyDictionary<string, string> environment,
         WindowsJobObjectPolicy jobPolicy,
-        WindowsRestrictedTokenLease? restrictedToken = null)
+        WindowsRestrictedTokenLease? restrictedToken = null,
+        WindowsAppContainerProfileLease? appContainerProfile = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -84,20 +92,24 @@ internal static class WindowsRaceFreeProcessLauncher
 
         IntPtr attributeList = IntPtr.Zero;
         IntPtr handleList = IntPtr.Zero;
+        IntPtr securityCapabilities = IntPtr.Zero;
         IntPtr environmentPointer = IntPtr.Zero;
         ProcessInformation processInfo = default;
         WindowsJobObjectLease? jobLease = null;
         Process? process = null;
         var ownershipTransferred = false;
         var restrictedTokenEnforced = false;
+        var appContainerEnforced = false;
 
         try
         {
-            attributeList = BuildHandleAttributeList(
+            attributeList = BuildAttributeList(
                 stdin.ClientSafePipeHandle.DangerousGetHandle(),
                 stdout.ClientSafePipeHandle.DangerousGetHandle(),
                 stderr.ClientSafePipeHandle.DangerousGetHandle(),
-                out handleList);
+                appContainerProfile,
+                out handleList,
+                out securityCapabilities);
 
             var startup = new StartupInfoEx
             {
@@ -118,36 +130,22 @@ internal static class WindowsRaceFreeProcessLauncher
 
             var created = restrictedToken is null
                 ? NativeMethods.CreateProcessW(
-                    executablePath,
-                    commandLine,
-                    IntPtr.Zero,
-                    IntPtr.Zero,
-                    true,
-                    creationFlags,
-                    environmentPointer,
-                    workingDirectory,
-                    ref startup,
-                    out processInfo)
+                    executablePath, commandLine, IntPtr.Zero, IntPtr.Zero, true, creationFlags,
+                    environmentPointer, workingDirectory, ref startup, out processInfo)
                 : NativeMethods.CreateProcessAsUserW(
-                    restrictedToken.DangerousTokenHandle,
-                    executablePath,
-                    commandLine,
-                    IntPtr.Zero,
-                    IntPtr.Zero,
-                    true,
-                    creationFlags,
-                    environmentPointer,
-                    workingDirectory,
-                    ref startup,
-                    out processInfo);
+                    restrictedToken.DangerousTokenHandle, executablePath, commandLine,
+                    IntPtr.Zero, IntPtr.Zero, true, creationFlags,
+                    environmentPointer, workingDirectory, ref startup, out processInfo);
 
             if (!created)
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
-                    restrictedToken is null
-                        ? "Could not create the governed adapter process in suspended state."
-                        : "Could not create the governed adapter process with the restricted token.");
+                    appContainerProfile is not null
+                        ? "Could not create the governed adapter process inside the AppContainer."
+                        : restrictedToken is null
+                            ? "Could not create the governed adapter process in suspended state."
+                            : "Could not create the governed adapter process with the restricted token.");
             }
 
             stdout.DisposeLocalCopyOfClientHandle();
@@ -166,6 +164,15 @@ internal static class WindowsRaceFreeProcessLauncher
                     }
                 }
 
+                if (appContainerProfile is not null)
+                {
+                    appContainerEnforced = ProcessTokenMatchesAppContainer(processInfo.hProcess, appContainerProfile.DangerousSid);
+                    if (!appContainerEnforced)
+                    {
+                        throw new InvalidOperationException("Child process token did not retain the requested AppContainer identity.");
+                    }
+                }
+
                 jobLease = WindowsJobObjectLease.CreateAndAssign(processInfo.hProcess, jobPolicy);
                 process = Process.GetProcessById(checked((int)processInfo.dwProcessId));
 
@@ -177,11 +184,7 @@ internal static class WindowsRaceFreeProcessLauncher
 
                 ownershipTransferred = true;
                 return new WindowsRaceFreeProcessLaunch(
-                    process,
-                    stdout,
-                    stderr,
-                    jobLease,
-                    restrictedTokenEnforced);
+                    process, stdout, stderr, jobLease, restrictedTokenEnforced, appContainerEnforced);
             }
             catch
             {
@@ -200,6 +203,7 @@ internal static class WindowsRaceFreeProcessLauncher
                 Marshal.FreeHGlobal(attributeList);
             }
             if (handleList != IntPtr.Zero) Marshal.FreeHGlobal(handleList);
+            if (securityCapabilities != IntPtr.Zero) Marshal.FreeHGlobal(securityCapabilities);
             if (processInfo.hThread != IntPtr.Zero) NativeMethods.CloseHandle(processInfo.hThread);
             if (processInfo.hProcess != IntPtr.Zero) NativeMethods.CloseHandle(processInfo.hProcess);
             if (!ownershipTransferred)
@@ -211,19 +215,23 @@ internal static class WindowsRaceFreeProcessLauncher
         }
     }
 
-    private static IntPtr BuildHandleAttributeList(
+    private static IntPtr BuildAttributeList(
         IntPtr stdinHandle,
         IntPtr stdoutHandle,
         IntPtr stderrHandle,
-        out IntPtr handleList)
+        WindowsAppContainerProfileLease? appContainerProfile,
+        out IntPtr handleList,
+        out IntPtr securityCapabilities)
     {
         handleList = Marshal.AllocHGlobal(IntPtr.Size * 3);
         Marshal.WriteIntPtr(handleList, 0, stdinHandle);
         Marshal.WriteIntPtr(handleList, IntPtr.Size, stdoutHandle);
         Marshal.WriteIntPtr(handleList, IntPtr.Size * 2, stderrHandle);
+        securityCapabilities = IntPtr.Zero;
 
+        var attributeCount = appContainerProfile is null ? 1 : 2;
         IntPtr size = IntPtr.Zero;
-        if (NativeMethods.InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size)
+        if (NativeMethods.InitializeProcThreadAttributeList(IntPtr.Zero, attributeCount, 0, ref size)
             || Marshal.GetLastWin32Error() != ErrorInsufficientBuffer
             || size == IntPtr.Zero)
         {
@@ -235,21 +243,37 @@ internal static class WindowsRaceFreeProcessLauncher
         var attributeList = Marshal.AllocHGlobal(size);
         try
         {
-            if (!NativeMethods.InitializeProcThreadAttributeList(attributeList, 1, 0, ref size))
+            if (!NativeMethods.InitializeProcThreadAttributeList(attributeList, attributeCount, 0, ref size))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not initialize the process attribute list.");
             }
 
             if (!NativeMethods.UpdateProcThreadAttribute(
-                    attributeList,
-                    0,
-                    ProcThreadAttributeHandleList,
-                    handleList,
-                    new UIntPtr(checked((uint)(IntPtr.Size * 3))),
-                    IntPtr.Zero,
-                    IntPtr.Zero))
+                    attributeList, 0, ProcThreadAttributeHandleList, handleList,
+                    new UIntPtr(checked((uint)(IntPtr.Size * 3))), IntPtr.Zero, IntPtr.Zero))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not restrict inherited handles for the governed adapter process.");
+            }
+
+            if (appContainerProfile is not null)
+            {
+                var security = new SecurityCapabilities
+                {
+                    AppContainerSid = appContainerProfile.DangerousSid,
+                    Capabilities = IntPtr.Zero,
+                    CapabilityCount = 0,
+                    Reserved = 0
+                };
+                securityCapabilities = Marshal.AllocHGlobal(Marshal.SizeOf<SecurityCapabilities>());
+                Marshal.StructureToPtr(security, securityCapabilities, false);
+
+                if (!NativeMethods.UpdateProcThreadAttribute(
+                        attributeList, 0, ProcThreadAttributeSecurityCapabilities,
+                        securityCapabilities, new UIntPtr(checked((uint)Marshal.SizeOf<SecurityCapabilities>())),
+                        IntPtr.Zero, IntPtr.Zero))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not apply the AppContainer security capabilities attribute.");
+                }
             }
 
             return attributeList;
@@ -260,7 +284,45 @@ internal static class WindowsRaceFreeProcessLauncher
             Marshal.FreeHGlobal(attributeList);
             Marshal.FreeHGlobal(handleList);
             handleList = IntPtr.Zero;
+            if (securityCapabilities != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(securityCapabilities);
+                securityCapabilities = IntPtr.Zero;
+            }
             throw;
+        }
+    }
+
+    private static bool ProcessTokenMatchesAppContainer(IntPtr processHandle, IntPtr expectedSid)
+    {
+        if (!NativeMethods.OpenProcessToken(processHandle, TokenQuery, out var tokenHandle))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not open the child process token for AppContainer verification.");
+        }
+
+        try
+        {
+            var isContainer = 0;
+            if (!NativeMethods.GetTokenInformation(
+                    tokenHandle, TokenIsAppContainer, ref isContainer, sizeof(int), out _))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not verify whether the child token is an AppContainer token.");
+            }
+            if (isContainer == 0) return false;
+
+            var info = new TokenAppContainerInformation();
+            if (!NativeMethods.GetTokenInformation(
+                    tokenHandle, TokenAppContainerSid, ref info,
+                    Marshal.SizeOf<TokenAppContainerInformation>(), out _))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the child AppContainer SID.");
+            }
+
+            return info.TokenAppContainer != IntPtr.Zero && NativeMethods.EqualSid(info.TokenAppContainer, expectedSid);
+        }
+        finally
+        {
+            NativeMethods.CloseHandle(tokenHandle);
         }
     }
 
@@ -278,10 +340,7 @@ internal static class WindowsRaceFreeProcessLauncher
     private static string BuildCommandLine(string executablePath, IReadOnlyList<string> arguments)
     {
         var builder = new StringBuilder(QuoteArgument(executablePath));
-        foreach (var argument in arguments)
-        {
-            builder.Append(' ').Append(QuoteArgument(argument));
-        }
+        foreach (var argument in arguments) builder.Append(' ').Append(QuoteArgument(argument));
         return builder.ToString();
     }
 
@@ -293,24 +352,33 @@ internal static class WindowsRaceFreeProcessLauncher
         var backslashes = 0;
         foreach (var ch in value)
         {
-            if (ch == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
+            if (ch == '\\') { backslashes++; continue; }
             if (ch == '"')
             {
                 builder.Append('\\', backslashes * 2 + 1).Append('"');
                 backslashes = 0;
                 continue;
             }
-
             builder.Append('\\', backslashes).Append(ch);
             backslashes = 0;
         }
         builder.Append('\\', backslashes * 2).Append('"');
         return builder.ToString();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SecurityCapabilities
+    {
+        public IntPtr AppContainerSid;
+        public IntPtr Capabilities;
+        public uint CapabilityCount;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenAppContainerInformation
+    {
+        public IntPtr TokenAppContainer;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -337,11 +405,7 @@ internal static class WindowsRaceFreeProcessLauncher
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct StartupInfoEx
-    {
-        public StartupInfo StartupInfo;
-        public IntPtr lpAttributeList;
-    }
+    private struct StartupInfoEx { public StartupInfo StartupInfo; public IntPtr lpAttributeList; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ProcessInformation
@@ -356,51 +420,27 @@ internal static class WindowsRaceFreeProcessLauncher
     {
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool CreateProcessW(
-            string applicationName,
-            StringBuilder commandLine,
-            IntPtr processAttributes,
-            IntPtr threadAttributes,
-            [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
-            uint creationFlags,
-            IntPtr environment,
-            string currentDirectory,
-            ref StartupInfoEx startupInfo,
+        internal static extern bool CreateProcessW(string applicationName, StringBuilder commandLine,
+            IntPtr processAttributes, IntPtr threadAttributes, [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+            uint creationFlags, IntPtr environment, string currentDirectory, ref StartupInfoEx startupInfo,
             out ProcessInformation processInformation);
 
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool CreateProcessAsUserW(
-            IntPtr token,
-            string applicationName,
-            StringBuilder commandLine,
-            IntPtr processAttributes,
-            IntPtr threadAttributes,
-            [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
-            uint creationFlags,
-            IntPtr environment,
-            string currentDirectory,
-            ref StartupInfoEx startupInfo,
+        internal static extern bool CreateProcessAsUserW(IntPtr token, string applicationName, StringBuilder commandLine,
+            IntPtr processAttributes, IntPtr threadAttributes, [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+            uint creationFlags, IntPtr environment, string currentDirectory, ref StartupInfoEx startupInfo,
             out ProcessInformation processInformation);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool InitializeProcThreadAttributeList(
-            IntPtr attributeList,
-            int attributeCount,
-            uint flags,
-            ref IntPtr size);
+        internal static extern bool InitializeProcThreadAttributeList(IntPtr attributeList, int attributeCount,
+            uint flags, ref IntPtr size);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool UpdateProcThreadAttribute(
-            IntPtr attributeList,
-            uint flags,
-            UIntPtr attribute,
-            IntPtr value,
-            UIntPtr size,
-            IntPtr previousValue,
-            IntPtr returnSize);
+        internal static extern bool UpdateProcThreadAttribute(IntPtr attributeList, uint flags, UIntPtr attribute,
+            IntPtr value, UIntPtr size, IntPtr previousValue, IntPtr returnSize);
 
         [DllImport("kernel32.dll")]
         internal static extern void DeleteProcThreadAttributeList(IntPtr attributeList);
@@ -415,5 +455,23 @@ internal static class WindowsRaceFreeProcessLauncher
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass,
+            ref int tokenInformation, int tokenInformationLength, out int returnLength);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass,
+            ref TokenAppContainerInformation tokenInformation, int tokenInformationLength, out int returnLength);
+
+        [DllImport("advapi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool EqualSid(IntPtr sid1, IntPtr sid2);
     }
 }
