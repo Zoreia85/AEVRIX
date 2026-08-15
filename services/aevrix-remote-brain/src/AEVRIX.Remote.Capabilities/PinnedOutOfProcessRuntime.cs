@@ -32,7 +32,8 @@ public sealed record OutOfProcessExecutionPolicy(
     int MaximumStderrBytes = 262_144,
     IReadOnlyList<string>? InheritedEnvironmentKeys = null,
     IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null,
-    WindowsJobObjectPolicy? WindowsJobObject = null)
+    WindowsJobObjectPolicy? WindowsJobObject = null,
+    bool RequireRaceFreeJobAssignment = false)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -55,6 +56,14 @@ public sealed record OutOfProcessExecutionPolicy(
             AllowedRequestedEnvironmentKeys ?? DefaultAllowedRequestedEnvironmentKeys,
             nameof(AllowedRequestedEnvironmentKeys));
         WindowsJobObject?.Validate();
+
+        if (RequireRaceFreeJobAssignment && WindowsJobObject is null)
+        {
+            throw new ArgumentException(
+                "Race-free Job Object assignment requires a Windows Job Object policy.",
+                nameof(RequireRaceFreeJobAssignment));
+        }
+
         return this;
     }
 
@@ -121,6 +130,7 @@ public sealed record OutOfProcessExecutionAttestation(
     bool WindowsJobObjectAssigned,
     bool ProcessMemoryLimitEnforced,
     bool ActiveProcessLimitEnforced,
+    bool RaceFreeJobAssignmentEnforced,
     bool NetworkIsolationEnforced,
     bool CpuMemoryLimitsEnforced,
     bool FilesystemIsolationEnforced);
@@ -137,9 +147,10 @@ public sealed record OutOfProcessExecutionResult(
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
 /// On Windows it can additionally assign the launched process to a governed Job Object for
-/// per-process memory, active-process and optional CPU hard-cap limits. Job assignment occurs
-/// immediately after launch, so this increment does not claim race-free suspended-start,
-/// network or filesystem ACL isolation.
+/// per-process memory, active-process and optional CPU hard-cap limits. Job assignment currently
+/// occurs immediately after launch. Callers that require race-free pre-execution containment must
+/// set RequireRaceFreeJobAssignment; the runtime then fails closed until a suspended-start or
+/// process-creation Job-list launcher is used. Network and filesystem ACL isolation are not claimed.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -171,6 +182,12 @@ public sealed class PinnedOutOfProcessRuntime
         ArgumentNullException.ThrowIfNull(request);
         request.Validate();
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (_policy.RequireRaceFreeJobAssignment)
+        {
+            throw new PlatformNotSupportedException(
+                "This runtime cannot yet guarantee race-free Job Object assignment before adapter code begins executing.");
+        }
 
         var workingDirectory = EnsureContainedWorkspace(request.WorkingDirectory);
         ValidateRequestedEnvironment(request.Environment);
@@ -242,6 +259,7 @@ public sealed class PinnedOutOfProcessRuntime
                     WindowsJobObjectAssigned: jobLease is not null,
                     ProcessMemoryLimitEnforced: jobLease is not null,
                     ActiveProcessLimitEnforced: jobLease is not null,
+                    RaceFreeJobAssignmentEnforced: false,
                     NetworkIsolationEnforced: false,
                     CpuMemoryLimitsEnforced: jobLease?.CpuRateLimitEnforced == true,
                     FilesystemIsolationEnforced: false));
