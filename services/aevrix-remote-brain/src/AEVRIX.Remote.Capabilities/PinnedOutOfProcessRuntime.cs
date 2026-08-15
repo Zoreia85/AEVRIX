@@ -32,7 +32,8 @@ public sealed record OutOfProcessExecutionPolicy(
     int MaximumStderrBytes = 262_144,
     IReadOnlyList<string>? InheritedEnvironmentKeys = null,
     IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null,
-    WindowsJobObjectPolicy? WindowsJobObject = null)
+    WindowsJobObjectPolicy? WindowsJobObject = null,
+    bool RequireRaceFreeJobAssignment = false)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -48,21 +49,20 @@ public sealed record OutOfProcessExecutionPolicy(
             throw new ArgumentOutOfRangeException(nameof(MaximumStdoutBytes));
         }
 
-        ValidateEnvironmentKeys(
-            InheritedEnvironmentKeys ?? DefaultInheritedEnvironmentKeys,
-            nameof(InheritedEnvironmentKeys));
-        ValidateEnvironmentKeys(
-            AllowedRequestedEnvironmentKeys ?? DefaultAllowedRequestedEnvironmentKeys,
-            nameof(AllowedRequestedEnvironmentKeys));
+        ValidateEnvironmentKeys(InheritedEnvironmentKeys ?? DefaultInheritedEnvironmentKeys, nameof(InheritedEnvironmentKeys));
+        ValidateEnvironmentKeys(AllowedRequestedEnvironmentKeys ?? DefaultAllowedRequestedEnvironmentKeys, nameof(AllowedRequestedEnvironmentKeys));
         WindowsJobObject?.Validate();
+
+        if (RequireRaceFreeJobAssignment && WindowsJobObject is null)
+        {
+            throw new ArgumentException("Race-free Job Object assignment requires a Windows Job Object policy.", nameof(RequireRaceFreeJobAssignment));
+        }
+
         return this;
     }
 
-    internal static IReadOnlyList<string> DefaultInheritedEnvironmentKeys { get; } =
-        ["SystemRoot", "WINDIR", "TEMP", "TMP"];
-
-    internal static IReadOnlyList<string> DefaultAllowedRequestedEnvironmentKeys { get; } =
-        Array.Empty<string>();
+    internal static IReadOnlyList<string> DefaultInheritedEnvironmentKeys { get; } = ["SystemRoot", "WINDIR", "TEMP", "TMP"];
+    internal static IReadOnlyList<string> DefaultAllowedRequestedEnvironmentKeys { get; } = Array.Empty<string>();
 
     private static void ValidateEnvironmentKeys(IReadOnlyList<string> keys, string parameterName)
     {
@@ -121,6 +121,7 @@ public sealed record OutOfProcessExecutionAttestation(
     bool WindowsJobObjectAssigned,
     bool ProcessMemoryLimitEnforced,
     bool ActiveProcessLimitEnforced,
+    bool RaceFreeJobAssignmentEnforced,
     bool NetworkIsolationEnforced,
     bool CpuMemoryLimitsEnforced,
     bool FilesystemIsolationEnforced);
@@ -136,10 +137,9 @@ public sealed record OutOfProcessExecutionResult(
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
-/// On Windows it can additionally assign the launched process to a governed Job Object for
-/// per-process memory, active-process and optional CPU hard-cap limits. Job assignment occurs
-/// immediately after launch, so this increment does not claim race-free suspended-start,
-/// network or filesystem ACL isolation.
+/// Windows Job Object limits are assigned immediately after launch. Callers that require race-free
+/// pre-execution assignment must set RequireRaceFreeJobAssignment; this implementation fails closed
+/// until a suspended-start or process-creation Job-list launcher is integrated.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -147,30 +147,27 @@ public sealed class PinnedOutOfProcessRuntime
     private readonly string _workspaceRoot;
     private readonly OutOfProcessExecutionPolicy _policy;
 
-    public PinnedOutOfProcessRuntime(
-        PinnedExecutableDescriptor executable,
-        string workspaceRoot,
-        OutOfProcessExecutionPolicy policy)
+    public PinnedOutOfProcessRuntime(PinnedExecutableDescriptor executable, string workspaceRoot, OutOfProcessExecutionPolicy policy)
     {
         _executable = (executable ?? throw new ArgumentNullException(nameof(executable))).Validate();
         _policy = (policy ?? throw new ArgumentNullException(nameof(policy))).Validate();
-        if (string.IsNullOrWhiteSpace(workspaceRoot)
-            || !Path.IsPathFullyQualified(workspaceRoot)
-            || workspaceRoot.Length > 2_048)
+        if (string.IsNullOrWhiteSpace(workspaceRoot) || !Path.IsPathFullyQualified(workspaceRoot) || workspaceRoot.Length > 2_048)
         {
             throw new ArgumentException("Workspace root must be a bounded absolute path.", nameof(workspaceRoot));
         }
-
         _workspaceRoot = NormalizeDirectory(workspaceRoot);
     }
 
-    public async Task<OutOfProcessExecutionResult> ExecuteAsync(
-        OutOfProcessExecutionRequest request,
-        CancellationToken cancellationToken = default)
+    public async Task<OutOfProcessExecutionResult> ExecuteAsync(OutOfProcessExecutionRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         request.Validate();
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (_policy.RequireRaceFreeJobAssignment)
+        {
+            throw new PlatformNotSupportedException("This runtime cannot yet guarantee race-free Job Object assignment before adapter code begins executing.");
+        }
 
         var workingDirectory = EnsureContainedWorkspace(request.WorkingDirectory);
         ValidateRequestedEnvironment(request.Environment);
@@ -188,46 +185,23 @@ public sealed class PinnedOutOfProcessRuntime
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
-
-        foreach (var argument in request.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
+        foreach (var argument in request.Arguments) startInfo.ArgumentList.Add(argument);
         ApplyMinimalEnvironment(startInfo, request.Environment);
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var started = Stopwatch.GetTimestamp();
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Pinned adapter process could not be started.");
-        }
+        if (!process.Start()) throw new InvalidOperationException("Pinned adapter process could not be started.");
 
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         runtimeCancellation.CancelAfter(_policy.MaximumRuntime);
         WindowsJobObjectLease? jobLease = null;
-
         try
         {
-            if (_policy.WindowsJobObject is not null)
-            {
-                jobLease = WindowsJobObjectLease.CreateAndAssign(process, _policy.WindowsJobObject);
-            }
-
+            if (_policy.WindowsJobObject is not null) jobLease = WindowsJobObjectLease.CreateAndAssign(process, _policy.WindowsJobObject);
             process.StandardInput.Close();
-
-            var stdout = ReadBoundedAsync(
-                process.StandardOutput.BaseStream,
-                _policy.MaximumStdoutBytes,
-                process,
-                runtimeCancellation.Token);
-            var stderr = ReadBoundedAsync(
-                process.StandardError.BaseStream,
-                _policy.MaximumStderrBytes,
-                process,
-                runtimeCancellation.Token);
+            var stdout = ReadBoundedAsync(process.StandardOutput.BaseStream, _policy.MaximumStdoutBytes, process, runtimeCancellation.Token);
+            var stderr = ReadBoundedAsync(process.StandardError.BaseStream, _policy.MaximumStderrBytes, process, runtimeCancellation.Token);
             var wait = process.WaitForExitAsync(runtimeCancellation.Token);
-
             await Task.WhenAll(wait, stdout, stderr).ConfigureAwait(false);
             return new OutOfProcessExecutionResult(
                 process.ExitCode,
@@ -235,54 +209,36 @@ public sealed class PinnedOutOfProcessRuntime
                 Encoding.UTF8.GetString(stderr.Result),
                 Stopwatch.GetElapsedTime(started),
                 new OutOfProcessExecutionAttestation(
-                    ExecutableHashVerified: true,
-                    ProcessTreeKillEnforced: true,
-                    WorkspaceContainmentVerified: true,
-                    EnvironmentAllowlistApplied: true,
-                    WindowsJobObjectAssigned: jobLease is not null,
-                    ProcessMemoryLimitEnforced: jobLease is not null,
-                    ActiveProcessLimitEnforced: jobLease is not null,
-                    NetworkIsolationEnforced: false,
-                    CpuMemoryLimitsEnforced: jobLease?.CpuRateLimitEnforced == true,
-                    FilesystemIsolationEnforced: false));
+                    true, true, true, true,
+                    jobLease is not null,
+                    jobLease is not null,
+                    jobLease is not null,
+                    false,
+                    false,
+                    jobLease?.CpuRateLimitEnforced == true,
+                    false));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            KillTree(process);
-            await ObserveExitAsync(process).ConfigureAwait(false);
-            throw;
+            KillTree(process); await ObserveExitAsync(process).ConfigureAwait(false); throw;
         }
         catch (OperationCanceledException exception)
         {
-            KillTree(process);
-            await ObserveExitAsync(process).ConfigureAwait(false);
+            KillTree(process); await ObserveExitAsync(process).ConfigureAwait(false);
             throw new TimeoutException("Pinned adapter process exceeded its governed runtime.", exception);
         }
         catch
         {
-            KillTree(process);
-            await ObserveExitAsync(process).ConfigureAwait(false);
-            throw;
+            KillTree(process); await ObserveExitAsync(process).ConfigureAwait(false); throw;
         }
-        finally
-        {
-            jobLease?.Dispose();
-        }
+        finally { jobLease?.Dispose(); }
     }
 
     private FileStream VerifyExecutableHashAndLock()
     {
         var path = Path.GetFullPath(_executable.ExecutablePath);
-        if (!File.Exists(path))
-        {
-            throw new FileNotFoundException("Pinned adapter executable was not found.", path);
-        }
-
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new InvalidOperationException("Pinned adapter executable cannot be a reparse point.");
-        }
-
+        if (!File.Exists(path)) throw new FileNotFoundException("Pinned adapter executable was not found.", path);
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new InvalidOperationException("Pinned adapter executable cannot be a reparse point.");
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
@@ -290,165 +246,69 @@ public sealed class PinnedOutOfProcessRuntime
             var expectedHash = Convert.FromHexString(_executable.Sha256);
             try
             {
-                if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
-                {
-                    throw new InvalidDataException("Pinned adapter executable hash does not match the approved SHA-256.");
-                }
+                if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash)) throw new InvalidDataException("Pinned adapter executable hash does not match the approved SHA-256.");
             }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(actualHash);
-                CryptographicOperations.ZeroMemory(expectedHash);
-            }
-
+            finally { CryptographicOperations.ZeroMemory(actualHash); CryptographicOperations.ZeroMemory(expectedHash); }
             return stream;
         }
-        catch
-        {
-            stream.Dispose();
-            throw;
-        }
+        catch { stream.Dispose(); throw; }
     }
 
     private string EnsureContainedWorkspace(string candidate)
     {
-        if (!Directory.Exists(_workspaceRoot))
-        {
-            throw new DirectoryNotFoundException("Governed workspace root does not exist.");
-        }
-
+        if (!Directory.Exists(_workspaceRoot)) throw new DirectoryNotFoundException("Governed workspace root does not exist.");
         var full = NormalizeDirectory(candidate);
         var comparer = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!string.Equals(full, _workspaceRoot, comparer)
-            && !full.StartsWith(_workspaceRoot + Path.DirectorySeparatorChar, comparer))
-        {
-            throw new UnauthorizedAccessException("Process working directory is outside the governed workspace.");
-        }
-
-        if (!Directory.Exists(full))
-        {
-            throw new DirectoryNotFoundException("Process working directory does not exist.");
-        }
-
+        if (!string.Equals(full, _workspaceRoot, comparer) && !full.StartsWith(_workspaceRoot + Path.DirectorySeparatorChar, comparer)) throw new UnauthorizedAccessException("Process working directory is outside the governed workspace.");
+        if (!Directory.Exists(full)) throw new DirectoryNotFoundException("Process working directory does not exist.");
         var cursor = new DirectoryInfo(full);
         while (cursor is not null)
         {
-            if ((cursor.Attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                throw new UnauthorizedAccessException("Governed workspace path cannot traverse a reparse point.");
-            }
-
-            if (string.Equals(NormalizeDirectory(cursor.FullName), _workspaceRoot, comparer))
-            {
-                return full;
-            }
-
+            if ((cursor.Attributes & FileAttributes.ReparsePoint) != 0) throw new UnauthorizedAccessException("Governed workspace path cannot traverse a reparse point.");
+            if (string.Equals(NormalizeDirectory(cursor.FullName), _workspaceRoot, comparer)) return full;
             cursor = cursor.Parent;
         }
-
         throw new UnauthorizedAccessException("Process working directory escaped the governed workspace root.");
     }
 
     private void ValidateRequestedEnvironment(IReadOnlyDictionary<string, string>? requested)
     {
-        if (requested is null || requested.Count == 0)
-        {
-            return;
-        }
-
-        var allowed = (_policy.AllowedRequestedEnvironmentKeys
-                ?? OutOfProcessExecutionPolicy.DefaultAllowedRequestedEnvironmentKeys)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var denied = requested.Keys
-            .Where(key => !allowed.Contains(key))
-            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (denied.Length > 0)
-        {
-            throw new UnauthorizedAccessException(
-                "Requested process environment contains keys outside the explicit allowlist.");
-        }
+        if (requested is null || requested.Count == 0) return;
+        var allowed = (_policy.AllowedRequestedEnvironmentKeys ?? OutOfProcessExecutionPolicy.DefaultAllowedRequestedEnvironmentKeys).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (requested.Keys.Any(key => !allowed.Contains(key))) throw new UnauthorizedAccessException("Requested process environment contains keys outside the explicit allowlist.");
     }
 
-    private void ApplyMinimalEnvironment(
-        ProcessStartInfo startInfo,
-        IReadOnlyDictionary<string, string>? requested)
+    private void ApplyMinimalEnvironment(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string>? requested)
     {
         var inheritedKeys = _policy.InheritedEnvironmentKeys ?? OutOfProcessExecutionPolicy.DefaultInheritedEnvironmentKeys;
-        var inherited = inheritedKeys
-            .Select(key => (Key: key, Value: System.Environment.GetEnvironmentVariable(key)))
-            .Where(item => item.Value is not null)
-            .ToArray();
-
+        var inherited = inheritedKeys.Select(key => (Key: key, Value: Environment.GetEnvironmentVariable(key))).Where(item => item.Value is not null).ToArray();
         startInfo.Environment.Clear();
-        foreach (var item in inherited)
-        {
-            startInfo.Environment[item.Key] = item.Value!;
-        }
-
-        if (requested is null)
-        {
-            return;
-        }
-
-        foreach (var pair in requested)
-        {
-            startInfo.Environment[pair.Key] = pair.Value;
-        }
+        foreach (var item in inherited) startInfo.Environment[item.Key] = item.Value!;
+        if (requested is not null) foreach (var pair in requested) startInfo.Environment[pair.Key] = pair.Value;
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(
-        Stream stream,
-        int maximumBytes,
-        Process process,
-        CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBoundedAsync(Stream stream, int maximumBytes, Process process, CancellationToken cancellationToken)
     {
         using var buffer = new MemoryStream();
         var chunk = new byte[8_192];
         while (true)
         {
             var read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                return buffer.ToArray();
-            }
-
-            if (buffer.Length + read > maximumBytes)
-            {
-                KillTree(process);
-                throw new InvalidDataException("Pinned adapter process output exceeded its governed byte budget.");
-            }
-
+            if (read == 0) return buffer.ToArray();
+            if (buffer.Length + read > maximumBytes) { KillTree(process); throw new InvalidDataException("Pinned adapter process output exceeded its governed byte budget."); }
             await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
         }
     }
 
     private static void KillTree(Process process)
     {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
     }
 
     private static async Task ObserveExitAsync(Process process)
     {
-        try
-        {
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-        }
-        catch
-        {
-        }
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
     }
 
-    private static string NormalizeDirectory(string path) =>
-        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    private static string NormalizeDirectory(string path) => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }
