@@ -119,6 +119,23 @@ mission
   -> trusted knowledge only after validation
 ```
 
+### Governed local process execution
+
+Pinned local adapters are not allowed to infer sandbox authority from working-directory containment alone. `GovernedOutOfProcessRuntime` is the single authority boundary that evaluates network and filesystem policy together before any launch.
+
+The currently implemented local backend can launch only when both authorities are `Unrestricted`. Any requested `None`, `LoopbackOnly`, `Allowlisted`, `WorkspaceOnly` or `WorkspaceReadOnly` boundary is rejected before process creation until an OS-level enforcement backend proves that isolation. This prevents a caller from accidentally applying only one of the independent authority gates and silently launching with broader host access.
+
+```text
+Pinned executable + SHA-256
+  -> unified network/filesystem authority decision
+  -> deny before launch if requested isolation is unavailable
+  -> race-free Job Object launch / process budgets
+  -> bounded output + cancellation
+  -> adapter result
+```
+
+The authority decision is not evidence and does not weaken the downstream Evidence Boundary or Judge. Future AppContainer, restricted-token, container or VM implementations can replace the deny-only decision for constrained scopes only after tests demonstrate actual enforcement.
+
 ### Evidence Bus / candidate fusion
 
 `EvidenceBus` is a project-scoped bus for structured specialist observations, not a raw evidence or secret store. Each observation is bound to one project, target, source task and specialist and carries a bounded claim key/value, observation class, sensitivity, confidence, SHA-256 content hash, source artifacts and parent evidence ids.
