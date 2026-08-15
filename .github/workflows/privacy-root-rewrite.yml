@@ -2,7 +2,7 @@ name: Privacy-safe baseline import
 
 # Privacy root rewrite protocol v3: preserve the audited tree while replacing
 # user-authored preparation history with a bot-authored orphan root commit.
-# Trigger note: refresh public history after validated workspace-lease promotion.
+# Trigger note: refresh public history after validated Job Object containment promotion.
 on:
   push:
     branches: [main]
