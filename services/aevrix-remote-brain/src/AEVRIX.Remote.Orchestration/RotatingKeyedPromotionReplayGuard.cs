@@ -23,15 +23,16 @@ public sealed class RotatingKeyedPromotionReplayGuard : IPromotionReplayGuard, I
         ValidateKey(currentKey, nameof(currentKey));
         _currentKey = currentKey.ToArray();
 
-        _previousKeys = (previousKeys ?? Array.Empty<byte[]>())
-            .Select(static key => key?.ToArray() ?? throw new ArgumentException("Previous promotion replay keys must not contain null entries.", nameof(previousKeys)))
-            .ToArray();
-
+        var previous = previousKeys?.ToArray() ?? Array.Empty<byte[]>();
+        _previousKeys = new byte[previous.Length][];
         try
         {
-            foreach (var key in _previousKeys)
+            for (var index = 0; index < previous.Length; index++)
             {
+                var key = previous[index] ?? throw new ArgumentException(
+                    "Previous promotion replay keys must not contain null entries.", nameof(previousKeys));
                 ValidateKey(key, nameof(previousKeys));
+                _previousKeys[index] = key.ToArray();
             }
         }
         catch
@@ -39,7 +40,10 @@ public sealed class RotatingKeyedPromotionReplayGuard : IPromotionReplayGuard, I
             CryptographicOperations.ZeroMemory(_currentKey);
             foreach (var key in _previousKeys)
             {
-                CryptographicOperations.ZeroMemory(key);
+                if (key is not null)
+                {
+                    CryptographicOperations.ZeroMemory(key);
+                }
             }
 
             throw;
