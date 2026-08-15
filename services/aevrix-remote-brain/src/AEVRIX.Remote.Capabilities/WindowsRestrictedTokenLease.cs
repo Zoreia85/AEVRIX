@@ -6,10 +6,12 @@ using Microsoft.Win32.SafeHandles;
 namespace Aevrix.Remote.Capabilities;
 
 /// <summary>
-/// Owns a Windows primary access token created with DISABLE_MAX_PRIVILEGE, with the
-/// BUILTIN\Administrators SID made deny-only when present, and explicitly lowered to
-/// Low mandatory integrity. This is a privilege/identity/integrity reduction primitive only:
-/// it does not itself enforce filesystem or network isolation and must not be used to attest either.
+/// Owns a Windows primary access token created with DISABLE_MAX_PRIVILEGE and explicitly
+/// lowered to Low mandatory integrity. Callers may additionally request that the
+/// BUILTIN\Administrators SID be made deny-only when present. Administrator-SID restriction is
+/// opt-in because some legitimate Windows execution environments contain deny ACLs that make a
+/// deny-only Administrators SID incompatible with otherwise valid adapters. This primitive does
+/// not itself enforce filesystem or network isolation and must not be used to attest either.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsRestrictedTokenLease : IDisposable
@@ -39,11 +41,13 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
         SafeAccessTokenHandle token,
         int enabledPrivilegeCount,
         bool lowIntegrityEnforced,
+        bool administratorSidRestrictionRequested,
         bool administratorSidRestricted)
     {
         _token = token;
         EnabledPrivilegeCount = enabledPrivilegeCount;
         LowIntegrityEnforced = lowIntegrityEnforced;
+        AdministratorSidRestrictionRequested = administratorSidRestrictionRequested;
         AdministratorSidRestricted = administratorSidRestricted;
     }
 
@@ -51,6 +55,7 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     public bool IsPrimaryToken => !_token.IsClosed && ReadTokenType(_token) == TokenPrimary;
     public bool MaximumPrivilegesDisabled => EnabledPrivilegeCount <= 1;
     public bool LowIntegrityEnforced { get; }
+    public bool AdministratorSidRestrictionRequested { get; }
     public bool AdministratorSidRestricted { get; }
     public bool IsClosed => _token.IsClosed;
 
@@ -67,7 +72,7 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
         }
     }
 
-    public static WindowsRestrictedTokenLease Create()
+    public static WindowsRestrictedTokenLease Create(bool restrictAdministratorSid = false)
     {
         if (!OpenProcessToken(
                 GetCurrentProcess(),
@@ -79,29 +84,33 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
 
         using (processToken)
         {
-            if (!ConvertStringSidToSidW(BuiltinAdministratorsSid, out var administratorsSid))
-            {
-                throw Win32("ConvertStringSidToSidW(Administrators) failed.");
-            }
-
-            var disabledSidBuffer = IntPtr.Zero;
+            IntPtr administratorsSid = IntPtr.Zero;
+            IntPtr disabledSidBuffer = IntPtr.Zero;
             try
             {
-                if (!IsValidSid(administratorsSid))
+                if (restrictAdministratorSid)
                 {
-                    throw new InvalidDataException("Administrators SID conversion returned an invalid SID.");
-                }
+                    if (!ConvertStringSidToSidW(BuiltinAdministratorsSid, out administratorsSid))
+                    {
+                        throw Win32("ConvertStringSidToSidW(Administrators) failed.");
+                    }
 
-                disabledSidBuffer = Marshal.AllocHGlobal(Marshal.SizeOf<SidAndAttributes>());
-                Marshal.StructureToPtr(
-                    new SidAndAttributes { Sid = administratorsSid, Attributes = 0 },
-                    disabledSidBuffer,
-                    false);
+                    if (!IsValidSid(administratorsSid))
+                    {
+                        throw new InvalidDataException("Administrators SID conversion returned an invalid SID.");
+                    }
+
+                    disabledSidBuffer = Marshal.AllocHGlobal(Marshal.SizeOf<SidAndAttributes>());
+                    Marshal.StructureToPtr(
+                        new SidAndAttributes { Sid = administratorsSid, Attributes = 0 },
+                        disabledSidBuffer,
+                        false);
+                }
 
                 if (!CreateRestrictedToken(
                         processToken,
                         DisableMaxPrivilege,
-                        1,
+                        restrictAdministratorSid ? 1u : 0u,
                         disabledSidBuffer,
                         0,
                         IntPtr.Zero,
@@ -127,8 +136,9 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
                             "Restricted token retained more enabled privileges than permitted by DISABLE_MAX_PRIVILEGE policy.");
                     }
 
-                    var administratorSidRestricted = IsSidDenyOnlyOrAbsent(restrictedToken, administratorsSid);
-                    if (!administratorSidRestricted)
+                    var administratorSidRestricted = restrictAdministratorSid
+                        && IsSidDenyOnlyOrAbsent(restrictedToken, administratorsSid);
+                    if (restrictAdministratorSid && !administratorSidRestricted)
                     {
                         throw new InvalidOperationException(
                             "Restricted token retained an enabled BUILTIN\\Administrators SID.");
@@ -146,6 +156,7 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
                         restrictedToken,
                         enabledPrivileges,
                         lowIntegrityEnforced,
+                        restrictAdministratorSid,
                         administratorSidRestricted);
                 }
                 catch
@@ -161,7 +172,10 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
                     Marshal.FreeHGlobal(disabledSidBuffer);
                 }
 
-                _ = LocalFree(administratorsSid);
+                if (administratorsSid != IntPtr.Zero)
+                {
+                    _ = LocalFree(administratorsSid);
+                }
             }
         }
     }
