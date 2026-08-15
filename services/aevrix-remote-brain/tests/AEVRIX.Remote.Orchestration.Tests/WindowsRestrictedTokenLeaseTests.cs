@@ -1,18 +1,15 @@
+using System.Runtime.Versioning;
 using Aevrix.Remote.Capabilities;
 
 namespace Aevrix.Remote.Orchestration.Tests;
 
 [TestClass]
+[SupportedOSPlatform("windows")]
 public sealed class WindowsRestrictedTokenLeaseTests
 {
     [TestMethod]
     public void Create_ProducesPrimaryTokenWithMaximumPrivilegesDisabled()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.Inconclusive("Windows restricted-token primitive requires Windows.");
-        }
-
         using var lease = WindowsRestrictedTokenLease.Create();
 
         Assert.IsTrue(lease.IsPrimaryToken);
@@ -24,11 +21,6 @@ public sealed class WindowsRestrictedTokenLeaseTests
     [TestMethod]
     public void Dispose_ClosesRestrictedTokenHandle()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.Inconclusive("Windows restricted-token primitive requires Windows.");
-        }
-
         var lease = WindowsRestrictedTokenLease.Create();
         lease.Dispose();
 
