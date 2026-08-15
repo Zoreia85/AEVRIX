@@ -5,12 +5,12 @@ public enum WindowsIsolationBackendKind
     None,
     LocalUnrestricted,
     ZeroCapabilityAppContainer,
-    ExperimentalProcessSandbox
+    ExperimentalProcessSandboxCandidate
 }
 
 public sealed record WindowsIsolationBackendSelection(
     WindowsIsolationBackendKind Backend,
-    bool LaunchEligible,
+    bool PolicyEligible,
     string DecisionCode)
 {
     public WindowsIsolationBackendSelection Validate()
@@ -25,21 +25,21 @@ public sealed record WindowsIsolationBackendSelection(
         {
             throw new ArgumentException("Isolation backend decision code is invalid.", nameof(DecisionCode));
         }
-        if (LaunchEligible == (Backend == WindowsIsolationBackendKind.None))
+        if (PolicyEligible == (Backend == WindowsIsolationBackendKind.None))
         {
-            throw new InvalidOperationException("Isolation backend selection eligibility is inconsistent with the selected backend.");
+            throw new InvalidOperationException("Isolation backend policy eligibility is inconsistent with the selected backend.");
         }
         return this;
     }
 }
 
 /// <summary>
-/// Pure fail-closed eligibility selector for Windows process-isolation backends.
-/// It does not launch a process and does not convert feature availability into authority.
-/// Experimental process sandbox selection requires both the reviewed governance opt-in and
-/// native feature availability. The existing zero-capability AppContainer backend remains
-/// eligible only for Network=None + Filesystem=Unrestricted. Filesystem-restricted profiles
-/// are denied unless the experimental backend is both available and explicitly enabled.
+/// Pure fail-closed policy-eligibility selector for Windows process-isolation backends.
+/// It never launches a process and its result is not execution authority. GovernedOutOfProcessRuntime
+/// remains the launch authority and still requires a registered backend plus post-execution attestation.
+/// Experimental process sandbox candidacy requires the reviewed governance opt-in and native feature
+/// availability. The existing zero-capability AppContainer backend remains eligible only for
+/// Network=None + Filesystem=Unrestricted. Filesystem-restricted profiles are otherwise denied.
 /// </summary>
 public sealed class WindowsIsolationBackendSelector
 {
@@ -65,18 +65,22 @@ public sealed class WindowsIsolationBackendSelector
 
         if (!authority.Network.RequiresIsolation && !authority.Filesystem.RequiresIsolation)
         {
-            return Allow(WindowsIsolationBackendKind.LocalUnrestricted, "AuthorizedUnrestrictedLocalProcess");
+            return Eligible(WindowsIsolationBackendKind.LocalUnrestricted, "EligibleUnrestrictedLocalProcess");
         }
 
         if (_experimentalPolicy.AllowsUse(experimentalCapability))
         {
-            return Allow(WindowsIsolationBackendKind.ExperimentalProcessSandbox, "AuthorizedExperimentalProcessSandbox");
+            return Eligible(
+                WindowsIsolationBackendKind.ExperimentalProcessSandboxCandidate,
+                "EligibleExperimentalProcessSandboxCandidate");
         }
 
         if (authority.Network.Scope == OutOfProcessNetworkScope.None
             && authority.Filesystem.Scope == OutOfProcessFilesystemScope.Unrestricted)
         {
-            return Allow(WindowsIsolationBackendKind.ZeroCapabilityAppContainer, "AuthorizedZeroCapabilityAppContainer");
+            return Eligible(
+                WindowsIsolationBackendKind.ZeroCapabilityAppContainer,
+                "EligibleZeroCapabilityAppContainer");
         }
 
         if (authority.Filesystem.RequiresIsolation)
@@ -89,7 +93,7 @@ public sealed class WindowsIsolationBackendSelector
         return Deny("NetworkIsolationBackendUnavailable");
     }
 
-    private static WindowsIsolationBackendSelection Allow(WindowsIsolationBackendKind backend, string code) =>
+    private static WindowsIsolationBackendSelection Eligible(WindowsIsolationBackendKind backend, string code) =>
         new WindowsIsolationBackendSelection(backend, true, code).Validate();
 
     private static WindowsIsolationBackendSelection Deny(string code) =>
