@@ -1,0 +1,149 @@
+name: Privacy-safe baseline import
+# canonical-bootstrap-v3: reconstruct from verified Git blobs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/privacy-safe-baseline-import-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct verified source transport from Git blobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import urllib.request
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          token = os.environ["GH_TOKEN"]
+          parts = [
+              ("83a7feb44770e56dda8147b8da369d2ed5c923ac", "254a0317c70550604ffada305c28ddc92cde8090ee377af270214837948df3c9"),
+              ("8c1a901479f71b1fae5d5225c9cffa1b0a18c2eb", "0c7ef052ce1652355c867c79727fac38f5a5bfbb3a15ba9786e6d1b8ad07653a"),
+              ("bc359bdbb055997935bce4576e967ec044e54c26", "64ac1103befa86ee335accbede32ed11833440e6fe2fb72018b121fcd78092a2"),
+              ("929990cc1dac335ae8fa4bcc70fea735c3f3a587", "57aa2503b336a6ac35a48325a0f43133f9ac99115748be70e3fca2610700c05f"),
+              ("78c66a4b172c14257b2dc15b5b185b708e82356d", "ac08f286cf57cc1c12af76d882cef0f09d7b3358144106e3680d65514d68eb56"),
+              ("973e29834ff7543c149c1a85665997797f0cd072", "4a3c2e949877084183fe34b5aa0cf074245fd600e4f89e8c1a2dfbbbbc9509af"),
+              ("aea3ed1fb484cd6acb5e95cd32efe990d66b956c", "19267c3cce14c71d1294d25f6df0ebba4b486713884b171b6de7499e2d226262"),
+              ("8a442f501f4846b6f6d7c2bb414af2f90df107a1", "b9d77492960a23cc3be952325c4c6cef42cf17888e0f99238ef5061d69a03d4e"),
+              ("4188bb7865f5868cab35b05b70907315fc63daa6", "b967ad0c4f50fdec6f2d200060d703ac311739eb3b48c1b274688df896f397b2"),
+              ("6eb26b960fa0db6cd0e35906e2b5c243b1c43d8c", "cb49a59efd1906c7c48fcbcc74a50f7eafc5177145a544e5e9809ac3be5bed89"),
+              ("96d5af3faa705a29ae3f9c0ac6e50e0d2bf74dd7", "eb4ef8be99ee3f57a95d3345f6a29db474bc048ac2fbba087f5484b2f44462f8"),
+              ("b9a9fdba22ecd455c5f15b96a43d6660aa17939b", "4882c07a19d866de2dc93b29f8511491df34cc11ddace3f2f502e381cecd67ec"),
+              ("72ab63ff50b6df868d2fe96a835814e03b419569", "adc1ab32729fdd5e29e076797d1c0b98cede71733a19ac5abd3c3cd4d714ea06"),
+          ]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "aevrix-source-bootstrap",
+          }
+          fragments = []
+          for blob_sha, expected_sha256 in parts:
+              req = urllib.request.Request(f"{api}/repos/{repo}/git/blobs/{blob_sha}", headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  payload = json.loads(response.read())
+              raw = base64.b64decode(payload["content"])
+              actual = hashlib.sha256(raw).hexdigest()
+              if actual != expected_sha256:
+                  raise SystemExit(f"fragment verification failed for {blob_sha}: {actual}")
+              fragments.append(raw)
+              print(f"verified fragment {blob_sha}")
+
+          encoded = b"".join(fragments)
+          archive = base64.b64decode(encoded, validate=True)
+          archive_sha = hashlib.sha256(archive).hexdigest()
+          expected_archive_sha = "8ca37d7459b9808982522e88ac723f1bbf9ffafec9a6423188bd40f478de6c0e"
+          if archive_sha != expected_archive_sha:
+              raise SystemExit(f"archive verification failed: {archive_sha}")
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "baseline.tar.xz"), "wb") as fh:
+              fh.write(archive)
+          print(f"verified source transport {archive_sha}")
+          PY
+          mkdir -p "$RUNNER_TEMP/baseline"
+          tar -xJf "$RUNNER_TEMP/baseline.tar.xz" -C "$RUNNER_TEMP/baseline"
+          test -f "$RUNNER_TEMP/baseline/AEVRIX/README.md"
+          test -f "$RUNNER_TEMP/baseline/AEVRIX/tools/ci/public_repo_audit.py"
+
+      - name: Prepare privacy-safe canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/preserve/workflows" "$RUNNER_TEMP/preserve/docs"
+          if [ -d docs/versions ]; then
+            cp -a docs/versions "$RUNNER_TEMP/preserve/docs/"
+          fi
+          if [ -f PUBLICATION_POLICY.md ]; then
+            cp PUBLICATION_POLICY.md "$RUNNER_TEMP/preserve/"
+          fi
+          for workflow in \
+            privacy-safe-baseline-import.yml \
+            privacy-safe-baseline-import-v2.yml \
+            privacy-cleanup.yml \
+            bot-patch.yml \
+            bot-patch-v2.yml; do
+            if [ -f ".github/workflows/$workflow" ]; then
+              cp ".github/workflows/$workflow" "$RUNNER_TEMP/preserve/workflows/$workflow"
+            fi
+          done
+
+          git checkout --orphan sanitized-main
+          git rm -rf .
+          cp -a "$RUNNER_TEMP/baseline/AEVRIX/." .
+
+          if [ -d "$RUNNER_TEMP/preserve/docs/versions" ]; then
+            mkdir -p docs
+            cp -a "$RUNNER_TEMP/preserve/docs/versions" docs/
+          fi
+          if [ -f "$RUNNER_TEMP/preserve/PUBLICATION_POLICY.md" ]; then
+            cp "$RUNNER_TEMP/preserve/PUBLICATION_POLICY.md" .
+          fi
+          mkdir -p .github/workflows docs/handoff
+          cp "$RUNNER_TEMP/preserve/workflows/"*.yml .github/workflows/
+
+          cat > docs/handoff/2026-08-14.md <<'DOC'
+          # AEVRIX handoff — 2026-08-14
+
+          The public repository was reconciled from the integrity-verified AEVRIX source handoff.
+
+          - Handoff archive SHA-256: `88374435e56a96d9e42913cdf09e3c9aff327aa3972e3296404f1bd7a9107a88`
+          - Original public baseline ZIP SHA-256: `81bd796630583675a64cc6c3403dccc6da2ecc2e2471db926015bedb26203a6d`
+          - Transport TAR.XZ SHA-256: `8ca37d7459b9808982522e88ac723f1bbf9ffafec9a6423188bd40f478de6c0e`
+          - Original source snapshot: 54 files
+          - Product state: `NOT_HOMOLOGATED`
+
+          This is verified source material, not evidence of a production-ready build. Windows build/install/runtime, Android, signing, antivirus, accessibility and real-device gates remain evidence-based requirements.
+
+          No personal data, private key, credential, token, browser profile, session or production secret is intentionally included.
+          DOC
+
+          python3 tools/ci/public_repo_audit.py
+
+      - name: Replace visible history with privacy-safe baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: import AEVRIX public source baseline R1"
+          git push --force origin HEAD:main
