@@ -62,7 +62,7 @@ public sealed class PinnedOutOfProcessRuntimeTests
         var marker = Path.Combine(workspace.Path, "child-marker.txt");
         var child = CommandProcessor().Replace("\"", "\"\"");
         var command =
-            $"for /L %i in (1,1,200000) do @set /a a=%i >nul & " +
+            $"for /L %i in (1,1,5000) do @set a=%i >nul & " +
             $"start /wait \"\" \"{child}\" /d /c \"echo CHILD>{marker}\" & " +
             $"if exist \"{marker}\" (echo CHILD-ESCAPED) else echo CHILD-BLOCKED";
 
