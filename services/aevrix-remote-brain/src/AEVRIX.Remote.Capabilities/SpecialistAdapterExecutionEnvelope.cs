@@ -98,10 +98,26 @@ public sealed record SpecialistAdapterExecutionProfile(
         envelope.Validate();
         Validate();
 
-        return EnforcedNetworkScope <= envelope.NetworkScope
-            && EnforcedWorkspaceScope <= envelope.WorkspaceScope
+        return NetworkAuthority(EnforcedNetworkScope) <= NetworkAuthority(envelope.NetworkScope)
+            && WorkspaceAuthority(EnforcedWorkspaceScope) <= WorkspaceAuthority(envelope.WorkspaceScope)
             && IsolationStrength(IsolationLevel) >= IsolationStrength(envelope.MinimumIsolation);
     }
+
+    private static int NetworkAuthority(AdapterNetworkScope scope) => scope switch
+    {
+        AdapterNetworkScope.None => 0,
+        AdapterNetworkScope.LoopbackOnly => 1,
+        AdapterNetworkScope.Allowlisted => 2,
+        _ => int.MaxValue
+    };
+
+    private static int WorkspaceAuthority(AdapterWorkspaceScope scope) => scope switch
+    {
+        AdapterWorkspaceScope.None => 0,
+        AdapterWorkspaceScope.ReadOnly => 1,
+        AdapterWorkspaceScope.ReadWrite => 2,
+        _ => int.MaxValue
+    };
 
     private static int IsolationStrength(AgentIsolationLevel isolation) => isolation switch
     {
