@@ -6,9 +6,9 @@ using Microsoft.Win32.SafeHandles;
 namespace Aevrix.Remote.Capabilities;
 
 /// <summary>
-/// Owns a Windows primary access token created with DISABLE_MAX_PRIVILEGE.
-/// This is a privilege-reduction primitive only: it does not itself enforce
-/// filesystem or network isolation and must not be used to attest either.
+/// Owns a Windows primary access token created with DISABLE_MAX_PRIVILEGE and explicitly
+/// lowered to Low mandatory integrity. This is a privilege/integrity reduction primitive only:
+/// it does not itself enforce filesystem or network isolation and must not be used to attest either.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsRestrictedTokenLease : IDisposable
@@ -16,24 +16,34 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     private const uint TokenAssignPrimary = 0x0001;
     private const uint TokenDuplicate = 0x0002;
     private const uint TokenQuery = 0x0008;
+    private const uint TokenAdjustDefault = 0x0080;
     private const uint DisableMaxPrivilege = 0x00000001;
     private const int TokenPrivileges = 3;
     private const int TokenType = 8;
+    private const int TokenIntegrityLevel = 25;
     private const int TokenPrimary = 1;
     private const uint SePrivilegeEnabled = 0x00000002;
+    private const uint SeGroupIntegrity = 0x00000020;
     private const int ErrorInsufficientBuffer = 122;
+    private const uint LowIntegrityRid = 4096;
+    private const string LowIntegritySid = "S-1-16-4096";
 
     private readonly SafeAccessTokenHandle _token;
 
-    private WindowsRestrictedTokenLease(SafeAccessTokenHandle token, int enabledPrivilegeCount)
+    private WindowsRestrictedTokenLease(
+        SafeAccessTokenHandle token,
+        int enabledPrivilegeCount,
+        bool lowIntegrityEnforced)
     {
         _token = token;
         EnabledPrivilegeCount = enabledPrivilegeCount;
+        LowIntegrityEnforced = lowIntegrityEnforced;
     }
 
     public int EnabledPrivilegeCount { get; }
     public bool IsPrimaryToken => !_token.IsClosed && ReadTokenType(_token) == TokenPrimary;
     public bool MaximumPrivilegesDisabled => EnabledPrivilegeCount <= 1;
+    public bool LowIntegrityEnforced { get; }
     public bool IsClosed => _token.IsClosed;
 
     internal IntPtr DangerousTokenHandle
@@ -53,7 +63,7 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     {
         if (!OpenProcessToken(
                 GetCurrentProcess(),
-                TokenQuery | TokenDuplicate | TokenAssignPrimary,
+                TokenQuery | TokenDuplicate | TokenAssignPrimary | TokenAdjustDefault,
                 out var processToken))
         {
             throw Win32("OpenProcessToken failed.");
@@ -90,7 +100,18 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
                         "Restricted token retained more enabled privileges than permitted by DISABLE_MAX_PRIVILEGE policy.");
                 }
 
-                return new WindowsRestrictedTokenLease(restrictedToken, enabledPrivileges);
+                ApplyLowIntegrity(restrictedToken);
+                var lowIntegrityEnforced = ReadIntegrityRid(restrictedToken) == LowIntegrityRid;
+                if (!lowIntegrityEnforced)
+                {
+                    throw new InvalidOperationException(
+                        "Restricted token did not retain the required Low mandatory integrity level.");
+                }
+
+                return new WindowsRestrictedTokenLease(
+                    restrictedToken,
+                    enabledPrivileges,
+                    lowIntegrityEnforced);
             }
             catch
             {
@@ -102,6 +123,20 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
 
     internal static bool ProcessTokenHasMaximumPrivilegesDisabled(IntPtr processHandle)
     {
+        using var processToken = OpenChildProcessToken(processHandle);
+        return CountEnabledPrivileges(processToken) <= 1;
+    }
+
+    internal static bool ProcessTokenHasLowIntegrity(IntPtr processHandle)
+    {
+        using var processToken = OpenChildProcessToken(processHandle);
+        return ReadIntegrityRid(processToken) == LowIntegrityRid;
+    }
+
+    public void Dispose() => _token.Dispose();
+
+    private static SafeAccessTokenHandle OpenChildProcessToken(IntPtr processHandle)
+    {
         if (processHandle == IntPtr.Zero)
         {
             throw new ArgumentException("Process handle cannot be null.", nameof(processHandle));
@@ -112,13 +147,56 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
             throw Win32("OpenProcessToken(child) failed.");
         }
 
-        using (processToken)
-        {
-            return CountEnabledPrivileges(processToken) <= 1;
-        }
+        return processToken;
     }
 
-    public void Dispose() => _token.Dispose();
+    private static void ApplyLowIntegrity(SafeAccessTokenHandle token)
+    {
+        if (!ConvertStringSidToSidW(LowIntegritySid, out var sid))
+        {
+            throw Win32("ConvertStringSidToSidW(LowIntegrity) failed.");
+        }
+
+        try
+        {
+            if (!IsValidSid(sid))
+            {
+                throw new InvalidDataException("Low-integrity SID conversion returned an invalid SID.");
+            }
+
+            var label = new TokenMandatoryLabel
+            {
+                Label = new SidAndAttributes
+                {
+                    Sid = sid,
+                    Attributes = SeGroupIntegrity
+                }
+            };
+            var labelSize = Marshal.SizeOf<TokenMandatoryLabel>();
+            var length = checked(labelSize + GetLengthSid(sid));
+            var buffer = Marshal.AllocHGlobal(labelSize);
+            try
+            {
+                Marshal.StructureToPtr(label, buffer, false);
+                if (!SetTokenInformation(
+                        token,
+                        TokenIntegrityLevel,
+                        buffer,
+                        length))
+                {
+                    throw Win32("SetTokenInformation(TokenIntegrityLevel) failed.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        finally
+        {
+            _ = LocalFree(sid);
+        }
+    }
 
     private static int ReadTokenType(SafeAccessTokenHandle token)
     {
@@ -132,6 +210,55 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
             }
 
             return Marshal.ReadInt32(buffer);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static uint ReadIntegrityRid(SafeAccessTokenHandle token)
+    {
+        _ = GetTokenInformation(token, TokenIntegrityLevel, IntPtr.Zero, 0, out var requiredBytes);
+        var error = Marshal.GetLastPInvokeError();
+        if (requiredBytes <= 0 || error != ErrorInsufficientBuffer)
+        {
+            throw Win32("GetTokenInformation(TokenIntegrityLevel) size query failed.");
+        }
+
+        var buffer = Marshal.AllocHGlobal(requiredBytes);
+        try
+        {
+            if (!GetTokenInformation(token, TokenIntegrityLevel, buffer, requiredBytes, out _))
+            {
+                throw Win32("GetTokenInformation(TokenIntegrityLevel) failed.");
+            }
+
+            var label = Marshal.PtrToStructure<TokenMandatoryLabel>(buffer);
+            if (label.Label.Sid == IntPtr.Zero || !IsValidSid(label.Label.Sid))
+            {
+                throw new InvalidDataException("Token integrity label contains an invalid SID.");
+            }
+
+            var subAuthorityCountPointer = GetSidSubAuthorityCount(label.Label.Sid);
+            if (subAuthorityCountPointer == IntPtr.Zero)
+            {
+                throw new InvalidDataException("Token integrity SID subauthority count is unavailable.");
+            }
+
+            var subAuthorityCount = Marshal.ReadByte(subAuthorityCountPointer);
+            if (subAuthorityCount == 0)
+            {
+                throw new InvalidDataException("Token integrity SID contains no subauthorities.");
+            }
+
+            var ridPointer = GetSidSubAuthority(label.Label.Sid, checked((uint)(subAuthorityCount - 1)));
+            if (ridPointer == IntPtr.Zero)
+            {
+                throw new InvalidDataException("Token integrity SID RID is unavailable.");
+            }
+
+            return unchecked((uint)Marshal.ReadInt32(ridPointer));
         }
         finally
         {
@@ -192,8 +319,24 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     private static Win32Exception Win32(string message) =>
         new(Marshal.GetLastPInvokeError(), message);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SidAndAttributes
+    {
+        public IntPtr Sid;
+        public uint Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenMandatoryLabel
+    {
+        public SidAndAttributes Label;
+    }
+
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr memory);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -223,4 +366,31 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
         IntPtr tokenInformation,
         int tokenInformationLength,
         out int returnLength);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetTokenInformation(
+        SafeAccessTokenHandle tokenHandle,
+        int tokenInformationClass,
+        IntPtr tokenInformation,
+        int tokenInformationLength);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsValidSid(IntPtr sid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern int GetLengthSid(IntPtr sid);
+
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthority);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ConvertStringSidToSidW(
+        string stringSid,
+        out IntPtr sid);
 }
