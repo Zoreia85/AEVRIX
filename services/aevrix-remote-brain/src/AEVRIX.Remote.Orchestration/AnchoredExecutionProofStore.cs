@@ -19,12 +19,25 @@ public interface IExecutionProofHeadAnchor
 }
 
 /// <summary>
+/// Execution-proof stores that can explicitly finish the narrow, safe recovery case where an
+/// authenticated snapshot was persisted but the independent monotonic anchor CAS did not complete.
+/// Normal Load remains fail-closed; callers must deliberately enter reconciliation.
+/// </summary>
+public interface IRecoverableExecutionProofStore : IExecutionProofStore
+{
+    Task<StoredExecutionProofSnapshot?> ReconcileAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// Adds rollback detection to an execution-proof store by binding its authenticated snapshot to a
 /// monotonically advancing head held in an independent trust domain. Snapshot bytes are persisted
 /// before the anchor advances. A crash in that narrow interval therefore fails closed on Load rather
-/// than accepting an unauthenticated history position; retrying the same Save can complete the CAS.
+/// than accepting an unauthenticated history position. ReconcileAsync can finish only that exact
+/// one-head pending CAS; every other mismatch remains blocked as rollback, fork or concurrent drift.
 /// </summary>
-public sealed class AnchoredExecutionProofStore : IExecutionProofStore
+public sealed class AnchoredExecutionProofStore : IRecoverableExecutionProofStore
 {
     private readonly IExecutionProofStore _inner;
     private readonly IExecutionProofHeadAnchor _anchor;
@@ -58,6 +71,46 @@ public sealed class AnchoredExecutionProofStore : IExecutionProofStore
             ExecutionProofLedger.VerifySnapshot(snapshot.Records, anchoredHead);
             if (snapshot.Head != anchoredHead)
                 throw new InvalidDataException("Execution proof snapshot head does not match the external monotonic anchor.");
+            return snapshot;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<StoredExecutionProofSnapshot?> ReconcileAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProject(projectId);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var snapshot = await _inner.LoadAsync(projectId, cancellationToken).ConfigureAwait(false);
+            var anchoredHead = await _anchor.LoadAsync(projectId, cancellationToken).ConfigureAwait(false);
+
+            if (snapshot is null && anchoredHead is null) return null;
+            if (snapshot is null)
+                throw new InvalidDataException("Execution proof head anchor exists without its authenticated snapshot.");
+
+            ValidateSnapshotCandidate(projectId, snapshot);
+
+            if (anchoredHead is not null && anchoredHead == snapshot.Head)
+                return snapshot;
+
+            var previous = PreviousHead(snapshot.Records);
+            var effectiveAnchor = anchoredHead ?? ExecutionProofHead.Empty;
+            if (effectiveAnchor != previous)
+                throw new InvalidDataException(
+                    "Execution proof reconciliation rejected a snapshot/anchor divergence that is not the exact pending predecessor CAS.");
+
+            await _anchor.AdvanceAsync(projectId, previous, snapshot.Head, cancellationToken).ConfigureAwait(false);
+
+            var confirmed = await _anchor.LoadAsync(projectId, cancellationToken).ConfigureAwait(false);
+            if (confirmed != snapshot.Head)
+                throw new InvalidDataException("Execution proof reconciliation could not confirm the advanced external anchor.");
+
             return snapshot;
         }
         finally
@@ -101,7 +154,7 @@ public sealed class AnchoredExecutionProofStore : IExecutionProofStore
                     "Execution proof head anchor does not equal the required predecessor; rollback, fork or concurrent advance detected.");
 
             // Write data first. If the process dies before CAS, Load fails closed because snapshot and
-            // anchor disagree. A retry with the same candidate can safely finish the transition.
+            // anchor disagree. ReconcileAsync or an exact retry can safely finish the transition.
             await _inner.SaveAsync(projectId, records, head, cancellationToken).ConfigureAwait(false);
             await _anchor.AdvanceAsync(projectId, previous, head, cancellationToken).ConfigureAwait(false);
         }
@@ -109,6 +162,17 @@ public sealed class AnchoredExecutionProofStore : IExecutionProofStore
         {
             _gate.Release();
         }
+    }
+
+    private static void ValidateSnapshotCandidate(Guid projectId, StoredExecutionProofSnapshot snapshot)
+    {
+        if (snapshot.ProjectId != projectId)
+            throw new InvalidDataException("Execution proof reconciliation received a snapshot for another project.");
+        if (snapshot.Head.EntryCount <= 0 || snapshot.Records.Count == 0)
+            throw new InvalidDataException("Execution proof reconciliation requires a non-empty authenticated snapshot.");
+        if (snapshot.Records.Any(record => record.Event.ProjectId != projectId))
+            throw new InvalidDataException("Execution proof reconciliation rejects mixed-project snapshots.");
+        ExecutionProofLedger.VerifySnapshot(snapshot.Records, snapshot.Head);
     }
 
     private static ExecutionProofHead PreviousHead(IReadOnlyList<ExecutionProofRecord> records)
