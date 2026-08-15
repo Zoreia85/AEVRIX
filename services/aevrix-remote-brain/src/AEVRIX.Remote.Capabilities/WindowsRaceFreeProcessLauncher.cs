@@ -70,9 +70,9 @@ internal static class WindowsRaceFreeProcessLauncher
         ArgumentNullException.ThrowIfNull(jobPolicy);
         jobPolicy.Validate();
 
-        using var stdout = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
-        using var stderr = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
-        using var stdin = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
+        var stdout = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
+        var stderr = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
+        var stdin = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
 
         var startup = new StartupInfo
         {
@@ -84,11 +84,11 @@ internal static class WindowsRaceFreeProcessLauncher
         };
 
         var commandLine = new StringBuilder(BuildCommandLine(executablePath, arguments));
-        var environmentBlock = BuildEnvironmentBlock(environment);
-        var environmentPointer = Marshal.StringToHGlobalUni(environmentBlock);
+        var environmentPointer = Marshal.StringToHGlobalUni(BuildEnvironmentBlock(environment));
         ProcessInformation processInfo = default;
         WindowsJobObjectLease? jobLease = null;
         Process? process = null;
+        var ownershipTransferred = false;
 
         try
         {
@@ -123,11 +123,8 @@ internal static class WindowsRaceFreeProcessLauncher
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not resume the governed adapter primary thread.");
                 }
 
-                return new WindowsRaceFreeProcessLaunch(
-                    process,
-                    Transfer(stdout),
-                    Transfer(stderr),
-                    jobLease);
+                ownershipTransferred = true;
+                return new WindowsRaceFreeProcessLaunch(process, stdout, stderr, jobLease);
             }
             catch
             {
@@ -142,13 +139,13 @@ internal static class WindowsRaceFreeProcessLauncher
             Marshal.FreeHGlobal(environmentPointer);
             if (processInfo.hThread != IntPtr.Zero) NativeMethods.CloseHandle(processInfo.hThread);
             if (processInfo.hProcess != IntPtr.Zero) NativeMethods.CloseHandle(processInfo.hProcess);
+            if (!ownershipTransferred)
+            {
+                stdout.Dispose();
+                stderr.Dispose();
+                stdin.Dispose();
+            }
         }
-    }
-
-    private static AnonymousPipeServerStream Transfer(AnonymousPipeServerStream stream)
-    {
-        // Ownership is transferred to WindowsRaceFreeProcessLaunch; suppress disposal by the caller's using scope.
-        return new AnonymousPipeServerStream(PipeDirection.In, stream.SafePipeHandle);
     }
 
     private static string BuildEnvironmentBlock(IReadOnlyDictionary<string, string> environment)
