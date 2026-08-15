@@ -9,7 +9,7 @@ public sealed class MissionDirectorTests
     public async Task ExecuteAsync_RespectsDependenciesAndProducesOrderedResults()
     {
         var log = new List<string>();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new StubSpecialist(MissionSpecialistKind.StaticAnalysis, log),
             new StubSpecialist(MissionSpecialistKind.Reconstruction, log)
         ], new FixedTimeProvider());
@@ -30,7 +30,7 @@ public sealed class MissionDirectorTests
     public async Task ExecuteAsync_BlocksDependentTaskWhenRequiredDependencyFails()
     {
         var log = new List<string>();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new StubSpecialist(MissionSpecialistKind.DynamicAnalysis, log, failTaskId: "probe"),
             new StubSpecialist(MissionSpecialistKind.Documentation, log)
         ], new FixedTimeProvider());
@@ -50,7 +50,7 @@ public sealed class MissionDirectorTests
     [TestMethod]
     public async Task ExecuteAsync_RejectsEvidenceEscalationOutsideTaskBoundary()
     {
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new StubSpecialist(MissionSpecialistKind.NetworkBehavior, [], extraEvidenceId: "ev-forged")
         ], new FixedTimeProvider());
 
@@ -66,7 +66,7 @@ public sealed class MissionDirectorTests
     [TestMethod]
     public async Task ExecuteAsync_FailsClosedWhenRequiredSpecialistIsMissing()
     {
-        var director = new MissionDirector([], new FixedTimeProvider());
+        var director = TestProofBoundMissionDirector.Create([], new FixedTimeProvider());
         var plan = Plan([Task("vision", MissionSpecialistKind.VisionOcr)]);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => director.ExecuteAsync(plan));
@@ -87,7 +87,7 @@ public sealed class MissionDirectorTests
     public async Task ExecuteAsync_EnforcesMaximumConcurrency()
     {
         var tracker = new ConcurrencyTracker();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new StubSpecialist(MissionSpecialistKind.StaticAnalysis, [], tracker: tracker),
             new StubSpecialist(MissionSpecialistKind.DynamicAnalysis, [], tracker: tracker),
             new StubSpecialist(MissionSpecialistKind.StructuralAnalysis, [], tracker: tracker)
