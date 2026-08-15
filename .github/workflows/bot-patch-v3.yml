@@ -1,0 +1,40 @@
+name: AEVRIX Bot Patch Queue V3 Marker Cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".aevrix/queue/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aevrix-bot-patch-authoritative
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout triggering revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || 'main' }}
+          fetch-depth: 2
+
+      - name: Remove marker only when this run still owns main tip
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=2
+          ORIGIN_MAIN="$(git rev-parse origin/main)"
+          if [ "$ORIGIN_MAIN" != "$GITHUB_SHA" ]; then
+            echo "main advanced to $ORIGIN_MAIN; marker cleanup does not own the tip and will not restore anything."
+            exit 0
+          fi
+          SAFE_PARENT="$(git rev-parse "${GITHUB_SHA}^")"
+          git push --force-with-lease=main:${GITHUB_SHA} origin "${SAFE_PARENT}:refs/heads/main"
