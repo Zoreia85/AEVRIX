@@ -31,7 +31,8 @@ public sealed record OutOfProcessExecutionPolicy(
     int MaximumStdoutBytes = 1_048_576,
     int MaximumStderrBytes = 262_144,
     IReadOnlyList<string>? InheritedEnvironmentKeys = null,
-    IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null)
+    IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null,
+    WindowsJobObjectPolicy? WindowsJobObject = null)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -53,6 +54,7 @@ public sealed record OutOfProcessExecutionPolicy(
         ValidateEnvironmentKeys(
             AllowedRequestedEnvironmentKeys ?? DefaultAllowedRequestedEnvironmentKeys,
             nameof(AllowedRequestedEnvironmentKeys));
+        WindowsJobObject?.Validate();
         return this;
     }
 
@@ -116,6 +118,9 @@ public sealed record OutOfProcessExecutionAttestation(
     bool ProcessTreeKillEnforced,
     bool WorkspaceContainmentVerified,
     bool EnvironmentAllowlistApplied,
+    bool WindowsJobObjectAssigned,
+    bool ProcessMemoryLimitEnforced,
+    bool ActiveProcessLimitEnforced,
     bool NetworkIsolationEnforced,
     bool CpuMemoryLimitsEnforced,
     bool FilesystemIsolationEnforced);
@@ -131,8 +136,10 @@ public sealed record OutOfProcessExecutionResult(
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
-/// It deliberately does not claim network isolation, filesystem ACL isolation or CPU/memory
-/// isolation; those require a stronger restricted-process/container/VM runtime.
+/// On Windows it can additionally assign the launched process to a governed Job Object for
+/// per-process memory and active-process limits. Job assignment occurs immediately after launch,
+/// so this increment does not claim race-free suspended-start containment, CPU, network or
+/// filesystem ACL isolation.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -196,13 +203,19 @@ public sealed class PinnedOutOfProcessRuntime
             throw new InvalidOperationException("Pinned adapter process could not be started.");
         }
 
-        process.StandardInput.Close();
-
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         runtimeCancellation.CancelAfter(_policy.MaximumRuntime);
+        WindowsJobObjectLease? jobLease = null;
 
         try
         {
+            if (_policy.WindowsJobObject is not null)
+            {
+                jobLease = WindowsJobObjectLease.CreateAndAssign(process, _policy.WindowsJobObject);
+            }
+
+            process.StandardInput.Close();
+
             var stdout = ReadBoundedAsync(
                 process.StandardOutput.BaseStream,
                 _policy.MaximumStdoutBytes,
@@ -226,6 +239,9 @@ public sealed class PinnedOutOfProcessRuntime
                     ProcessTreeKillEnforced: true,
                     WorkspaceContainmentVerified: true,
                     EnvironmentAllowlistApplied: true,
+                    WindowsJobObjectAssigned: jobLease is not null,
+                    ProcessMemoryLimitEnforced: jobLease is not null,
+                    ActiveProcessLimitEnforced: jobLease is not null,
                     NetworkIsolationEnforced: false,
                     CpuMemoryLimitsEnforced: false,
                     FilesystemIsolationEnforced: false));
@@ -247,6 +263,10 @@ public sealed class PinnedOutOfProcessRuntime
             KillTree(process);
             await ObserveExitAsync(process).ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            jobLease?.Dispose();
         }
     }
 

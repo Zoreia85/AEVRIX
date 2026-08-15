@@ -28,6 +28,68 @@ public sealed class PinnedOutOfProcessRuntimeTests
         Assert.IsFalse(result.Attestation.FilesystemIsolationEnforced);
     }
 
+
+    [TestMethod]
+    public async Task ExecuteAsync_AssignsGovernedWindowsJobObjectAndReportsGranularEnforcement()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var runtime = new PinnedOutOfProcessRuntime(
+            Descriptor(CommandProcessor()),
+            workspace.Path,
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(5),
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1)));
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", "echo JOB-OBJECT-OK"],
+            workspace.Path));
+
+        Assert.AreEqual(0, result.ExitCode);
+        Assert.IsTrue(result.Attestation.WindowsJobObjectAssigned);
+        Assert.IsTrue(result.Attestation.ProcessMemoryLimitEnforced);
+        Assert.IsTrue(result.Attestation.ActiveProcessLimitEnforced);
+        Assert.IsFalse(result.Attestation.CpuMemoryLimitsEnforced);
+        Assert.IsFalse(result.Attestation.NetworkIsolationEnforced);
+        Assert.IsFalse(result.Attestation.FilesystemIsolationEnforced);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_JobObjectWithSingleProcessLimitBlocksDelayedChildCreation()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var marker = Path.Combine(workspace.Path, "child-marker.txt");
+        var child = CommandProcessor().Replace("\"", "\"\"");
+        var command =
+            $"for /L %i in (1,1,200000) do @set /a a=%i >nul & " +
+            $"start /wait \"\" \"{child}\" /d /c \"echo CHILD>{marker}\" & " +
+            $"if exist \"{marker}\" (echo CHILD-ESCAPED) else echo CHILD-BLOCKED";
+
+        var runtime = new PinnedOutOfProcessRuntime(
+            Descriptor(CommandProcessor()),
+            workspace.Path,
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(10),
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1)));
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", command],
+            workspace.Path));
+
+        Assert.IsFalse(File.Exists(marker), "A child process escaped the runtime Job Object active-process limit.");
+        StringAssert.Contains(result.StandardOutput, "CHILD-BLOCKED");
+    }
+
+    [TestMethod]
+    public void Policy_RejectsInvalidEmbeddedWindowsJobObjectLimits()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(5),
+                WindowsJobObject: new WindowsJobObjectPolicy(8_388_608, 1)).Validate());
+    }
+
     [TestMethod]
     public async Task ExecuteAsync_KillsLongRunningProcessTreeOnTimeout()
     {
