@@ -15,6 +15,10 @@ public sealed class WindowsJobObjectContainmentTests
             new WindowsJobObjectPolicy(268_435_456, 0).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new WindowsJobObjectPolicy(268_435_456, 65).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new WindowsJobObjectPolicy(268_435_456, 1, 0).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new WindowsJobObjectPolicy(268_435_456, 1, 101).Validate());
     }
 
     [TestMethod]
@@ -31,6 +35,25 @@ public sealed class WindowsJobObjectContainmentTests
 
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.IsTrue(process.HasExited);
+    }
+
+    [TestMethod]
+    public async Task CpuHardCap_IsAcceptedByWindowsKernelAndReported()
+    {
+        RequireWindows();
+        using var process = StartCommand("for /L %i in (1,1,1000000) do @set /a a=%i >nul");
+        using var lease = WindowsJobObjectLease.CreateAndAssign(
+            process,
+            new WindowsJobObjectPolicy(268_435_456, 1, 25));
+
+        Assert.IsTrue(lease.CpuRateLimitEnforced);
+        Assert.AreEqual(25, lease.Policy.MaximumCpuRatePercent);
+
+        if (!process.HasExited)
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [TestMethod]
