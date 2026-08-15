@@ -34,7 +34,7 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         var attestation = Sign(key, evidence, Now.AddMinutes(-1), Now.AddMinutes(4));
         var tampered = evidence with { PromotionDigestSha256 = H('9') };
 
-        Assert.ThrowsException<InvalidDataException>(() => Verifier(key).Verify(attestation, tampered));
+        ExpectInvalid(() => Verifier(key).Verify(attestation, tampered));
     }
 
     [TestMethod]
@@ -46,7 +46,7 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         var forged = Sign(attackerKey, evidence, Now.AddMinutes(-1), Now.AddMinutes(4),
             advertisedFingerprintKey: trustedKey);
 
-        Assert.ThrowsException<InvalidDataException>(() => Verifier(trustedKey).Verify(forged, evidence));
+        ExpectInvalid(() => Verifier(trustedKey).Verify(forged, evidence));
     }
 
     [TestMethod]
@@ -57,7 +57,7 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         var evidence = Evidence();
         var attestation = Sign(signingKey, evidence, Now.AddMinutes(-1), Now.AddMinutes(4));
 
-        Assert.ThrowsException<InvalidDataException>(() => Verifier(otherPinnedKey).Verify(attestation, evidence));
+        ExpectInvalid(() => Verifier(otherPinnedKey).Verify(attestation, evidence));
     }
 
     [TestMethod]
@@ -71,9 +71,9 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         var future = Sign(key, evidence, Now.AddMinutes(1), Now.AddMinutes(2));
         var overlong = Sign(key, evidence, Now.AddMinutes(-1), Now.AddMinutes(20));
 
-        Assert.ThrowsException<InvalidDataException>(() => verifier.Verify(expired, evidence));
-        Assert.ThrowsException<InvalidDataException>(() => verifier.Verify(future, evidence));
-        Assert.ThrowsException<InvalidDataException>(() => verifier.Verify(overlong, evidence));
+        ExpectInvalid(() => verifier.Verify(expired, evidence));
+        ExpectInvalid(() => verifier.Verify(future, evidence));
+        ExpectInvalid(() => verifier.Verify(overlong, evidence));
     }
 
     [TestMethod]
@@ -84,10 +84,10 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         var attestation = Sign(key, evidence, Now.AddMinutes(-1), Now.AddMinutes(4));
         var verifier = Verifier(key);
 
-        Assert.ThrowsException<InvalidDataException>(() => verifier.Verify(
+        ExpectInvalid(() => verifier.Verify(
             attestation with { ProjectId = Guid.Parse("33333333-3333-3333-3333-333333333333") },
             evidence));
-        Assert.ThrowsException<InvalidDataException>(() => verifier.Verify(
+        ExpectInvalid(() => verifier.Verify(
             attestation with { HeadEntryCount = evidence.LedgerHead.EntryCount + 1 },
             evidence));
     }
@@ -100,7 +100,7 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         var attestation = Sign(key, evidence, Now.AddMinutes(-1), Now.AddMinutes(4));
         var staleAuthorization = evidence with { AuthorizationRecordHashSha256 = H('8') };
 
-        Assert.ThrowsException<InvalidDataException>(() => Verifier(key).Verify(attestation, staleAuthorization));
+        ExpectInvalid(() => Verifier(key).Verify(attestation, staleAuthorization));
     }
 
     private static PromotionAuthorityAttestationVerifier Verifier(ECDsa key)
@@ -164,6 +164,18 @@ public sealed class PromotionAuthorityAttestationVerifierTests
         {
             CryptographicOperations.ZeroMemory(payload);
             CryptographicOperations.ZeroMemory(signature);
+        }
+    }
+
+    private static void ExpectInvalid(Action action)
+    {
+        try
+        {
+            action();
+            Assert.Fail("Expected InvalidDataException was not thrown.");
+        }
+        catch (InvalidDataException)
+        {
         }
     }
 
