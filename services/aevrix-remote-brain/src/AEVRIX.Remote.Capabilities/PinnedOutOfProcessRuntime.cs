@@ -33,7 +33,8 @@ public sealed record OutOfProcessExecutionPolicy(
     IReadOnlyList<string>? InheritedEnvironmentKeys = null,
     IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null,
     WindowsJobObjectPolicy? WindowsJobObject = null,
-    bool RequireRaceFreeJobAssignment = false)
+    bool RequireRaceFreeJobAssignment = false,
+    bool RequireRestrictedToken = false)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -56,6 +57,13 @@ public sealed record OutOfProcessExecutionPolicy(
         if (RequireRaceFreeJobAssignment && WindowsJobObject is null)
         {
             throw new ArgumentException("Race-free Job Object assignment requires a Windows Job Object policy.", nameof(RequireRaceFreeJobAssignment));
+        }
+
+        if (RequireRestrictedToken && !RequireRaceFreeJobAssignment)
+        {
+            throw new ArgumentException(
+                "Restricted-token process launch is available only through the strict race-free Windows launcher.",
+                nameof(RequireRestrictedToken));
         }
 
         return this;
@@ -124,7 +132,8 @@ public sealed record OutOfProcessExecutionAttestation(
     bool RaceFreeJobAssignmentEnforced,
     bool NetworkIsolationEnforced,
     bool CpuMemoryLimitsEnforced,
-    bool FilesystemIsolationEnforced);
+    bool FilesystemIsolationEnforced,
+    bool RestrictedTokenEnforced = false);
 
 public sealed record OutOfProcessExecutionResult(
     int ExitCode,
@@ -137,8 +146,9 @@ public sealed record OutOfProcessExecutionResult(
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
-/// On Windows, strict Job Object workloads are created suspended, assigned to the configured
-/// Job Object before any adapter instruction executes, and resumed only after assignment succeeds.
+/// On Windows, strict workloads are created suspended, optionally under a DISABLE_MAX_PRIVILEGE
+/// primary token, assigned to the configured Job Object before any adapter instruction executes,
+/// verified, and resumed only after those controls succeed.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -247,12 +257,16 @@ public sealed class PinnedOutOfProcessRuntime
             ?? throw new InvalidOperationException("Race-free Job Object assignment requires a Job Object policy.");
         var environment = BuildMinimalEnvironment(request.Environment);
         var started = Stopwatch.GetTimestamp();
+        using var restrictedToken = _policy.RequireRestrictedToken
+            ? WindowsRestrictedTokenLease.Create()
+            : null;
         using var launch = WindowsRaceFreeProcessLauncher.Start(
             Path.GetFullPath(_executable.ExecutablePath),
             request.Arguments,
             workingDirectory,
             environment,
-            jobPolicy);
+            jobPolicy,
+            restrictedToken);
         var process = launch.Process;
 
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -273,7 +287,8 @@ public sealed class PinnedOutOfProcessRuntime
                     true, true, true, true,
                     false,
                     launch.JobLease.CpuRateLimitEnforced,
-                    false));
+                    false,
+                    launch.RestrictedTokenEnforced));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
