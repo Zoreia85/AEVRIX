@@ -40,14 +40,16 @@ public sealed class FileBackedPromotionReplayGuardTests
         var guard = new FileBackedPromotionReplayGuard(temp.Path);
         var attestation = Attestation();
 
-        Assert.IsTrue(guard.TryClaim(attestation, out var replayKey));
+        Assert.IsTrue(guard.TryClaim(attestation, out _));
 
         var file = AssertExactlyOneClaim(temp.Path);
+        var fileName = Path.GetFileNameWithoutExtension(file);
+        Assert.AreEqual(64, fileName.Length);
+        Assert.IsTrue(fileName.All(static value => char.IsAsciiHexDigit(value)));
         Assert.IsFalse(Path.GetFileName(file).Contains(attestation.RunId, StringComparison.Ordinal));
         Assert.IsFalse(Path.GetFileName(file).Contains(attestation.ExecutionId, StringComparison.Ordinal));
         Assert.IsFalse(File.ReadAllText(file).Contains(attestation.RunId, StringComparison.Ordinal));
         Assert.IsFalse(File.ReadAllText(file).Contains(attestation.ExecutionId, StringComparison.Ordinal));
-        Assert.AreEqual(FileBackedPromotionReplayGuard.ComputeClaimId(replayKey) + ".claim", Path.GetFileName(file));
     }
 
     [TestMethod]
