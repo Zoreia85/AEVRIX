@@ -11,7 +11,6 @@ namespace Aevrix.Remote.Capabilities;
 /// This is an identity/lifecycle primitive only; it does not by itself attest process, network
 /// or filesystem isolation until a launcher applies the AppContainer security capabilities.
 /// </summary>
-[SupportedOSPlatform("windows")]
 public sealed class WindowsAppContainerProfileLease : IDisposable
 {
     private const int S_OK = 0;
@@ -42,6 +41,7 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
         }
     }
 
+    [SupportedOSPlatform("windows")]
     public static WindowsAppContainerProfileLease Create()
     {
         if (!OperatingSystem.IsWindows())
