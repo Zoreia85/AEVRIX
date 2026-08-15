@@ -137,9 +137,9 @@ public sealed record OutOfProcessExecutionResult(
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
 /// On Windows it can additionally assign the launched process to a governed Job Object for
-/// per-process memory and active-process limits. Job assignment occurs immediately after launch,
-/// so this increment does not claim race-free suspended-start containment, CPU, network or
-/// filesystem ACL isolation.
+/// per-process memory, active-process and optional CPU hard-cap limits. Job assignment occurs
+/// immediately after launch, so this increment does not claim race-free suspended-start,
+/// network or filesystem ACL isolation.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -243,7 +243,7 @@ public sealed class PinnedOutOfProcessRuntime
                     ProcessMemoryLimitEnforced: jobLease is not null,
                     ActiveProcessLimitEnforced: jobLease is not null,
                     NetworkIsolationEnforced: false,
-                    CpuMemoryLimitsEnforced: false,
+                    CpuMemoryLimitsEnforced: jobLease?.CpuRateLimitEnforced == true,
                     FilesystemIsolationEnforced: false));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
