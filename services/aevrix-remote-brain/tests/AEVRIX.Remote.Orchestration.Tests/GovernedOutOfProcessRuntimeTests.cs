@@ -76,6 +76,7 @@ public sealed class GovernedOutOfProcessRuntimeTests
         var decision = runtime.EvaluateAuthority();
         Assert.IsTrue(decision.LaunchAuthorized);
         Assert.AreEqual("AuthorizedUnrestrictedLocalProcess", decision.DecisionCode);
+        Assert.AreEqual("local-unrestricted", decision.SelectedBackendId);
 
         var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
             ["/d", "/c", "echo UNIFIED-AUTHORITY-GATE"],
@@ -88,6 +89,69 @@ public sealed class GovernedOutOfProcessRuntimeTests
     }
 
     [TestMethod]
+    public void EvaluateAuthority_SelectsHighestPriorityCompatibleBackend()
+    {
+        var low = new StubIsolationBackend("restricted-low", 10, canEnforce: true, networkEnforced: true, filesystemEnforced: true);
+        var high = new StubIsolationBackend("restricted-high", 20, canEnforce: true, networkEnforced: true, filesystemEnforced: true);
+        var runtime = new GovernedOutOfProcessRuntime(
+            [low, high],
+            RestrictedAuthority());
+
+        var decision = runtime.EvaluateAuthority();
+
+        Assert.IsTrue(decision.LaunchAuthorized);
+        Assert.AreEqual("AuthorizedByIsolationBackend", decision.DecisionCode);
+        Assert.AreEqual("restricted-high", decision.SelectedBackendId);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_RejectsBackendThatClaimsIsolationWithoutAttestation()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "misleading-backend",
+            100,
+            canEnforce: true,
+            networkEnforced: false,
+            filesystemEnforced: true);
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+        Assert.AreEqual(1, backend.ExecutionCount);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_AllowsRestrictedBackendOnlyWhenAttestationProvesAuthority()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "attested-backend",
+            100,
+            canEnforce: true,
+            networkEnforced: true,
+            filesystemEnforced: true);
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest([], workspace.Path));
+
+        Assert.AreEqual(0, result.ExitCode);
+        Assert.IsTrue(result.Attestation.NetworkIsolationEnforced);
+        Assert.IsTrue(result.Attestation.FilesystemIsolationEnforced);
+        Assert.AreEqual(1, backend.ExecutionCount);
+    }
+
+    [TestMethod]
+    public void Constructor_RejectsDuplicateBackendIds()
+    {
+        var one = new StubIsolationBackend("duplicate-backend", 1, true, true, true);
+        var two = new StubIsolationBackend("duplicate-backend", 2, true, true, true);
+
+        Assert.Throws<ArgumentException>(() =>
+            new GovernedOutOfProcessRuntime([one, two], RestrictedAuthority()));
+    }
+
+    [TestMethod]
     public void Policy_ValidatesBothAuthorities()
     {
         Assert.Throws<ArgumentException>(() =>
@@ -95,6 +159,11 @@ public sealed class GovernedOutOfProcessRuntimeTests
                 new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.Allowlisted),
                 new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted)).Validate());
     }
+
+    private static OutOfProcessAuthorityPolicy RestrictedAuthority() =>
+        new(
+            new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
+            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly));
 
     private static GovernedOutOfProcessRuntime Runtime(
         string workspaceRoot,
@@ -129,6 +198,46 @@ public sealed class GovernedOutOfProcessRuntimeTests
         if (!OperatingSystem.IsWindows())
         {
             Assert.Inconclusive("Governed process runtime integration test requires the Windows CI runner.");
+        }
+    }
+
+    private sealed class StubIsolationBackend(
+        string backendId,
+        int priority,
+        bool canEnforce,
+        bool networkEnforced,
+        bool filesystemEnforced) : IOutOfProcessIsolationBackend
+    {
+        public string BackendId => backendId;
+        public int Priority => priority;
+        public int ExecutionCount { get; private set; }
+
+        public bool CanEnforce(OutOfProcessAuthorityPolicy authority) => canEnforce;
+
+        public Task<OutOfProcessExecutionResult> ExecuteAsync(
+            OutOfProcessAuthorityPolicy authority,
+            OutOfProcessExecutionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ExecutionCount++;
+            return Task.FromResult(new OutOfProcessExecutionResult(
+                0,
+                "stub",
+                string.Empty,
+                TimeSpan.FromMilliseconds(1),
+                new OutOfProcessExecutionAttestation(
+                    true,
+                    true,
+                    true,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    networkEnforced,
+                    false,
+                    filesystemEnforced)));
         }
     }
 
