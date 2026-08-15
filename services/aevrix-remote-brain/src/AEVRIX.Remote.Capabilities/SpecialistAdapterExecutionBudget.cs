@@ -4,7 +4,8 @@ namespace Aevrix.Remote.Capabilities;
 
 public sealed record SpecialistAdapterExecutionPolicy(
     TimeSpan AttemptTimeout,
-    bool FailoverOnTimeout = true)
+    bool FailoverOnTimeout = true,
+    SpecialistAdapterExecutionEnvelope? Envelope = null)
 {
     public static SpecialistAdapterExecutionPolicy Default { get; } =
         new(TimeSpan.FromMinutes(2));
@@ -19,6 +20,7 @@ public sealed record SpecialistAdapterExecutionPolicy(
                 "Adapter attempt timeout must be between 10 ms and 30 minutes.");
         }
 
+        Envelope?.Validate();
         return this;
     }
 }
@@ -29,6 +31,8 @@ public enum SpecialistAdapterAttemptOutcome
     Failed,
     TimedOut,
     EvidenceBoundaryRejected,
+    ExecutionEnvelopeRejected,
+    OutputBudgetRejected,
     CallerCancelled
 }
 
