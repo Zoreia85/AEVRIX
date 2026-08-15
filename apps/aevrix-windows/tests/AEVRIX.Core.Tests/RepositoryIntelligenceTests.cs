@@ -6,12 +6,12 @@ namespace Aevrix.Core.Tests;
 public sealed class RepositoryIntelligenceTests
 {
     [TestMethod]
-    public void InitialCatalog_HasTenUniqueFailClosedSeeds()
+    public void InitialCatalog_HasElevenUniqueFailClosedSeeds()
     {
         var seeds = RepositoryIntelligenceCatalog.InitialSeeds;
 
-        Assert.AreEqual(10, seeds.Count);
-        Assert.AreEqual(10, seeds.Select(seed => seed.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.AreEqual(11, seeds.Count);
+        Assert.AreEqual(11, seeds.Select(seed => seed.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.IsTrue(seeds.All(seed => !seed.CanExecute()));
         Assert.IsTrue(seeds.All(seed => seed.SecurityReview == RepositorySecurityReviewState.NeedsReview));
         Assert.IsTrue(seeds.All(seed => !seed.RuntimeAllowlisted));
@@ -26,6 +26,23 @@ public sealed class RepositoryIntelligenceTests
         CollectionAssert.Contains(scrapling.DeniedCapabilities.ToArray(), "captcha-bypass");
         CollectionAssert.Contains(scrapling.DeniedCapabilities.ToArray(), "cloudflare-bypass");
         CollectionAssert.Contains(scrapling.DeniedCapabilities.ToArray(), "access-control-evasion");
+    }
+
+    [TestMethod]
+    public void MicrosoftMxc_RemainsReferenceOnlyAndCannotExecute()
+    {
+        var mxc = RepositoryIntelligenceCatalog.Find("microsoft/mxc");
+
+        Assert.AreEqual(RepositoryIntegrationMode.Reference, mxc.IntegrationMode);
+        Assert.AreEqual("MIT", mxc.SpdxLicense);
+        Assert.AreEqual(RepositorySecurityReviewState.NeedsReview, mxc.SecurityReview);
+        Assert.IsFalse(mxc.RuntimeAllowlisted);
+        Assert.IsNull(mxc.PinnedRevision);
+        Assert.IsNull(mxc.ContentSha256);
+        Assert.IsFalse(mxc.CanExecute());
+        CollectionAssert.Contains(mxc.AllowedCapabilities.ToArray(), "sandbox-architecture-study");
+        CollectionAssert.Contains(mxc.DeniedCapabilities.ToArray(), "runtime-dependency");
+        CollectionAssert.Contains(mxc.DeniedCapabilities.ToArray(), "automatic-code-execution");
     }
 
     [TestMethod]
