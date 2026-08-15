@@ -16,25 +16,60 @@ public sealed class RaceFreeContainmentGateTests
     }
 
     [TestMethod]
-    public async Task ExecuteAsync_FailsClosedBeforeLaunchWhenRaceFreeAssignmentIsRequired()
+    public async Task ExecuteAsync_StrictModeAssignsJobBeforeAdapterRuns()
     {
         RequireWindows();
         using var workspace = new TempDirectory();
-        var marker = Path.Combine(workspace.Path, "should-not-exist.txt");
-        var runtime = new PinnedOutOfProcessRuntime(
-            Descriptor(CommandProcessor()),
-            workspace.Path,
-            new OutOfProcessExecutionPolicy(
-                TimeSpan.FromSeconds(3),
-                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 25),
-                RequireRaceFreeJobAssignment: true));
+        var marker = Path.Combine(workspace.Path, "race-free-marker.txt");
+        var runtime = StrictRuntime(workspace.Path);
 
-        await Assert.ThrowsAsync<PlatformNotSupportedException>(() => runtime.ExecuteAsync(
-            new OutOfProcessExecutionRequest(
-                ["/d", "/c", $"echo LAUNCHED>{marker}"],
-                workspace.Path)));
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", $"echo STRICT-RACE-FREE>{marker} & type {marker}"],
+            workspace.Path));
+
+        Assert.AreEqual(0, result.ExitCode);
+        Assert.IsTrue(File.Exists(marker));
+        StringAssert.Contains(result.StandardOutput, "STRICT-RACE-FREE");
+        Assert.IsTrue(result.Attestation.WindowsJobObjectAssigned);
+        Assert.IsTrue(result.Attestation.ProcessMemoryLimitEnforced);
+        Assert.IsTrue(result.Attestation.ActiveProcessLimitEnforced);
+        Assert.IsTrue(result.Attestation.RaceFreeJobAssignmentEnforced);
+        Assert.IsTrue(result.Attestation.CpuMemoryLimitsEnforced);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_StrictModePreservesBoundedOutputAndQuotedArguments()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var runtime = StrictRuntime(workspace.Path);
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", "echo VALUE WITH SPACES"],
+            workspace.Path));
+
+        Assert.AreEqual(0, result.ExitCode);
+        StringAssert.Contains(result.StandardOutput, "VALUE WITH SPACES");
+        Assert.IsTrue(result.Attestation.RaceFreeJobAssignmentEnforced);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_StrictModeStillEnforcesSingleProcessJobLimit()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var marker = Path.Combine(workspace.Path, "child-should-not-run.txt");
+        var child = CommandProcessor().Replace("\"", "\"\"");
+        var command = $"\"{child}\" /d /c \"echo CHILD>{marker}\" & if exist \"{marker}\" (echo CHILD-ESCAPED) else echo CHILD-BLOCKED";
+        var runtime = StrictRuntime(workspace.Path);
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", command],
+            workspace.Path));
 
         Assert.IsFalse(File.Exists(marker));
+        StringAssert.Contains(result.StandardOutput, "CHILD-BLOCKED");
+        Assert.IsTrue(result.Attestation.RaceFreeJobAssignmentEnforced);
     }
 
     [TestMethod]
@@ -56,6 +91,17 @@ public sealed class RaceFreeContainmentGateTests
         Assert.IsTrue(result.Attestation.WindowsJobObjectAssigned);
         Assert.IsFalse(result.Attestation.RaceFreeJobAssignmentEnforced);
     }
+
+    private static PinnedOutOfProcessRuntime StrictRuntime(string workspacePath) =>
+        new(
+            Descriptor(CommandProcessor()),
+            workspacePath,
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(5),
+                MaximumStdoutBytes: 65_536,
+                MaximumStderrBytes: 65_536,
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 25),
+                RequireRaceFreeJobAssignment: true));
 
     private static PinnedExecutableDescriptor Descriptor(string path)
     {
