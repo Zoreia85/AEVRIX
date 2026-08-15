@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-TEXT_SUFFIXES = {".cs", ".py", ".ps1", ".json", ".md", ".yml", ".yaml", ".xml", ".csproj", ".props", ".wxs"}
+TEXT_SUFFIXES = {".cs", ".go", ".mod", ".sum", ".py", ".ps1", ".json", ".md", ".yml", ".yaml", ".xml", ".csproj", ".props", ".wxs"}
 IGNORED_PARTS = {".git", "bin", "obj", "artifacts", "__pycache__", ".pytest_cache"}
 
 FORBIDDEN_BRANDING = re.compile("(?i)(" + "grupo" + "[ -]?" + "temper|" + "temper" + "researchstudio|" + "temper" + " research studio)")
