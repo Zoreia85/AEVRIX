@@ -11,6 +11,12 @@ public enum EvidenceClassification
     NeutralKnowledge
 }
 
+public enum EvidenceMetadataRetention
+{
+    Minimal,
+    Full
+}
+
 public sealed record StoredEvidenceArtifact(
     string EvidenceId,
     Guid ProjectId,
@@ -32,11 +38,15 @@ public sealed class EvidenceStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AevrixDataPaths _paths;
+    private readonly EvidenceMetadataRetention _metadataRetention;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public EvidenceStore(AevrixDataPaths paths)
+    public EvidenceStore(
+        AevrixDataPaths paths,
+        EvidenceMetadataRetention metadataRetention = EvidenceMetadataRetention.Minimal)
     {
         _paths = paths.EnsureCreated();
+        _metadataRetention = metadataRetention;
     }
 
     public Task<StoredEvidenceArtifact> StoreFileAsync(
@@ -139,21 +149,22 @@ public sealed class EvidenceStore
                 }
             }
 
+            var retainFullMetadata = _metadataRetention == EvidenceMetadataRetention.Full;
             var artifact = new StoredEvidenceArtifact(
                 EvidenceId: "EV-" + hash[..16].ToUpperInvariant(),
                 ProjectId: projectId,
                 CaptureId: captureId,
                 Classification: classification,
                 Kind: kind,
-                OriginalName: info.Name,
+                OriginalName: retainFullMetadata ? info.Name : "evidence" + extension,
                 RelativePath: "evidence/" + relative,
                 Sha256: hash,
                 SizeBytes: info.Length,
                 MediaType: mediaType,
                 StoredAt: DateTimeOffset.UtcNow,
                 Basis: basis,
-                SourceUri: sourceUri?.AbsoluteUri,
-                Description: description,
+                SourceUri: retainFullMetadata ? sourceUri?.AbsoluteUri : null,
+                Description: retainFullMetadata ? description : null,
                 CaptureRelativePath: captureRelativePath);
 
             await AppendIndexAsync(projectId, artifact, cancellationToken);
