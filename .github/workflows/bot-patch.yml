@@ -1,0 +1,14 @@
+name: AEVRIX Bot Patch (legacy disabled)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Legacy processor disabled
+        run: echo "Legacy issue-triggered patch processor is disabled; AEVRIX Bot Patch Queue V2 is authoritative."
