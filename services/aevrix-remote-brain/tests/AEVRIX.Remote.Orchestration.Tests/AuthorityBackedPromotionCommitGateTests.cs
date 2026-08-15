@@ -23,7 +23,7 @@ public sealed class AuthorityBackedPromotionCommitGateTests
             (attestation, _) =>
             {
                 callbackInvoked = true;
-                Assert.AreEqual(ledger.Head.EntryCount - 1, attestation.HeadEntryCount);
+                Assert.AreEqual(ledger.Head.EntryCount, attestation.HeadEntryCount);
                 return Task.FromResult("commit:authority123");
             });
 
