@@ -15,6 +15,7 @@ namespace Aevrix.Remote.Capabilities;
 public sealed class WindowsAppContainerProfileLease : IDisposable
 {
     private const int S_OK = 0;
+    private const int HResultAlreadyExists = unchecked((int)0x800700B7);
     private const int MaximumCreateAttempts = 4;
     private readonly IntPtr _profileSid;
     private bool _disposed;
@@ -62,7 +63,8 @@ public sealed class WindowsAppContainerProfileLease : IDisposable
             if (hr != S_OK)
             {
                 if (createdSid != IntPtr.Zero) _ = FreeSid(createdSid);
-                continue;
+                if (hr == HResultAlreadyExists) continue;
+                throw HResult(hr, "Could not create the ephemeral AppContainer profile.");
             }
 
             try
