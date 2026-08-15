@@ -63,8 +63,7 @@ public sealed class PinnedOutOfProcessRuntimeTests
         var child = CommandProcessor().Replace("\"", "\"\"");
         var command =
             $"for /L %i in (1,1,1000) do @set a=%i >nul & " +
-            $"start \"\" \"{child}\" /d /c \"echo CHILD>{marker}\" & " +
-            $"for /L %i in (1,1,3000) do @set b=%i >nul & " +
+            $"\"{child}\" /d /c \"echo CHILD>{marker}\" & " +
             $"if exist \"{marker}\" (echo CHILD-ESCAPED) else echo CHILD-BLOCKED";
 
         var runtime = new PinnedOutOfProcessRuntime(
