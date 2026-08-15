@@ -34,7 +34,8 @@ public sealed record OutOfProcessExecutionPolicy(
     IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null,
     WindowsJobObjectPolicy? WindowsJobObject = null,
     bool RequireRaceFreeJobAssignment = false,
-    bool RequireRestrictedToken = false)
+    bool RequireRestrictedToken = false,
+    bool RequireAppContainer = false)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -64,6 +65,13 @@ public sealed record OutOfProcessExecutionPolicy(
             throw new ArgumentException(
                 "Restricted-token process launch is available only through the strict race-free Windows launcher.",
                 nameof(RequireRestrictedToken));
+        }
+
+        if (RequireAppContainer && !RequireRaceFreeJobAssignment)
+        {
+            throw new ArgumentException(
+                "AppContainer process launch is available only through the strict race-free Windows launcher.",
+                nameof(RequireAppContainer));
         }
 
         return this;
@@ -133,7 +141,8 @@ public sealed record OutOfProcessExecutionAttestation(
     bool NetworkIsolationEnforced,
     bool CpuMemoryLimitsEnforced,
     bool FilesystemIsolationEnforced,
-    bool RestrictedTokenEnforced = false);
+    bool RestrictedTokenEnforced = false,
+    bool AppContainerEnforced = false);
 
 public sealed record OutOfProcessExecutionResult(
     int ExitCode,
@@ -146,9 +155,9 @@ public sealed record OutOfProcessExecutionResult(
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
-/// On Windows, strict workloads are created suspended, optionally under a DISABLE_MAX_PRIVILEGE
-/// primary token, assigned to the configured Job Object before any adapter instruction executes,
-/// verified, and resumed only after those controls succeed.
+/// On Windows, strict workloads are created suspended, optionally under a reduced primary token
+/// and/or an ephemeral AppContainer profile, assigned to the configured Job Object before any
+/// adapter instruction executes, verified, and resumed only after those controls succeed.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -260,13 +269,23 @@ public sealed class PinnedOutOfProcessRuntime
         using var restrictedToken = _policy.RequireRestrictedToken
             ? WindowsRestrictedTokenLease.Create()
             : null;
+        using var appContainer = _policy.RequireAppContainer
+            ? WindowsAppContainerProfileLease.Create()
+            : null;
+        using var appContainerWorkspaceAcl = appContainer is not null
+            ? WindowsSandboxWorkspaceAclLease.Create(
+                workingDirectory,
+                appContainer.AppContainerSid,
+                SandboxWorkspaceAccess.ReadWrite)
+            : null;
         using var launch = WindowsRaceFreeProcessLauncher.Start(
             Path.GetFullPath(_executable.ExecutablePath),
             request.Arguments,
             workingDirectory,
             environment,
             jobPolicy,
-            restrictedToken);
+            restrictedToken,
+            appContainer);
         var process = launch.Process;
 
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -288,7 +307,8 @@ public sealed class PinnedOutOfProcessRuntime
                     false,
                     launch.JobLease.CpuRateLimitEnforced,
                     false,
-                    launch.RestrictedTokenEnforced));
+                    launch.RestrictedTokenEnforced,
+                    launch.AppContainerEnforced));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
