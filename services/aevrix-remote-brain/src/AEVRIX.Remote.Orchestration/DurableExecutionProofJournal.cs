@@ -93,7 +93,7 @@ public sealed class DurableExecutionProofJournal
             var appended = candidate.Append(item);
             var records = candidate.Snapshot();
             var head = candidate.Head;
-            var pending = new PendingCandidate(records.ToArray(), head, appended);
+            var pending = new PendingCandidate(records.ToArray(), head);
 
             try
             {
@@ -257,8 +257,8 @@ public sealed class DurableExecutionProofJournal
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(head);
-        if (records.Any(record => record.Event.ProjectId != projectId))
-            throw new InvalidDataException("Execution proof snapshot contains records from another project.");
+        if (records.Any(record => record is null || record.Event.ProjectId != projectId))
+            throw new InvalidDataException("Execution proof snapshot contains a null or cross-project record.");
 
         ExecutionProofLedger.VerifySnapshot(records, head);
         var rebuilt = new ExecutionProofLedger();
@@ -307,6 +307,5 @@ public sealed class DurableExecutionProofJournal
 
     private sealed record PendingCandidate(
         ExecutionProofRecord[] Records,
-        ExecutionProofHead Head,
-        ExecutionProofRecord AppendedRecord);
+        ExecutionProofHead Head);
 }
