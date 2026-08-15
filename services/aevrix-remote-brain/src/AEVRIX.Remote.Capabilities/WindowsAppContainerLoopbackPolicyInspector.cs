@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 
 namespace Aevrix.Remote.Capabilities;
 
@@ -15,7 +14,6 @@ public interface IAppContainerLoopbackPolicyInspector
 /// the zero-capability backend refuses to attest no-network isolation. This deliberately accepts
 /// false negatives rather than assuming an exemption belongs to a different container.
 /// </summary>
-[SupportedOSPlatform("windows")]
 public sealed class WindowsAppContainerLoopbackPolicyInspector : IAppContainerLoopbackPolicyInspector
 {
     private const uint ErrorSuccess = 0;
