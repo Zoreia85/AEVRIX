@@ -121,20 +121,27 @@ mission
 
 ### Governed local process execution
 
-Pinned local adapters are not allowed to infer sandbox authority from working-directory containment alone. `GovernedOutOfProcessRuntime` is the single authority boundary that evaluates network and filesystem policy together before any launch.
+Pinned adapters use `GovernedOutOfProcessRuntime` as the single authority boundary for network and filesystem policy. The boundary now routes through the replaceable `IOutOfProcessIsolationBackend` contract rather than embedding one sandbox technology.
 
-The currently implemented local backend can launch only when both authorities are `Unrestricted`. Any requested `None`, `LoopbackOnly`, `Allowlisted`, `WorkspaceOnly` or `WorkspaceReadOnly` boundary is rejected before process creation until an OS-level enforcement backend proves that isolation. This prevents a caller from accidentally applying only one of the independent authority gates and silently launching with broader host access.
+The current `LocalUnrestrictedOutOfProcessBackend` deliberately supports only `Unrestricted` network and filesystem authority. Requests for `None`, `LoopbackOnly`, `Allowlisted`, `WorkspaceOnly` or `WorkspaceReadOnly` remain fail-closed unless a registered backend can enforce the complete authority profile.
+
+Backends are bounded, uniquely identified and deterministically ranked by priority. A backend declaration that it can enforce a policy is not sufficient: after execution, the authority boundary independently checks the returned attestation and rejects a result that fails to prove required network or filesystem isolation. This creates the insertion point for future AppContainer/restricted-token, container and VM implementations without weakening the default local-process path.
 
 ```text
 Pinned executable + SHA-256
-  -> unified network/filesystem authority decision
-  -> deny before launch if requested isolation is unavailable
-  -> race-free Job Object launch / process budgets
-  -> bounded output + cancellation
-  -> adapter result
+  -> unified network/filesystem authority policy
+  -> isolation backend selection
+       -> local-unrestricted (current)
+       -> AppContainer/restricted token (future)
+       -> container (future)
+       -> VM (future)
+  -> deny before launch when no backend can enforce the full policy
+  -> backend execution
+  -> independent attestation check
+  -> Evidence Boundary / Judge remain downstream
 ```
 
-The authority decision is not evidence and does not weaken the downstream Evidence Boundary or Judge. Future AppContainer, restricted-token, container or VM implementations can replace the deny-only decision for constrained scopes only after tests demonstrate actual enforcement.
+The authority decision and backend attestation are execution-security metadata, not evidence about the analyzed target. A future backend may only enable constrained scopes after tests demonstrate real OS/runtime enforcement.
 
 ### Evidence Bus / candidate fusion
 
