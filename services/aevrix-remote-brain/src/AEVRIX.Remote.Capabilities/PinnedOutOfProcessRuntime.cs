@@ -8,9 +8,11 @@ public sealed record PinnedExecutableDescriptor(string ExecutablePath, string Sh
 {
     public PinnedExecutableDescriptor Validate()
     {
-        if (string.IsNullOrWhiteSpace(ExecutablePath) || !Path.IsPathFullyQualified(ExecutablePath))
+        if (string.IsNullOrWhiteSpace(ExecutablePath)
+            || !Path.IsPathFullyQualified(ExecutablePath)
+            || ExecutablePath.Length > 2_048)
         {
-            throw new ArgumentException("Executable path must be absolute.", nameof(ExecutablePath));
+            throw new ArgumentException("Executable path must be a bounded absolute path.", nameof(ExecutablePath));
         }
 
         if (string.IsNullOrWhiteSpace(Sha256)
@@ -28,7 +30,8 @@ public sealed record OutOfProcessExecutionPolicy(
     TimeSpan MaximumRuntime,
     int MaximumStdoutBytes = 1_048_576,
     int MaximumStderrBytes = 262_144,
-    IReadOnlyList<string>? InheritedEnvironmentKeys = null)
+    IReadOnlyList<string>? InheritedEnvironmentKeys = null,
+    IReadOnlyList<string>? AllowedRequestedEnvironmentKeys = null)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -44,20 +47,32 @@ public sealed record OutOfProcessExecutionPolicy(
             throw new ArgumentOutOfRangeException(nameof(MaximumStdoutBytes));
         }
 
-        var keys = InheritedEnvironmentKeys ?? DefaultInheritedEnvironmentKeys;
-        if (keys.Count > 32
-            || keys.Any(key => string.IsNullOrWhiteSpace(key)
-                || key.Length > 128
-                || key.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-'))))
-        {
-            throw new ArgumentException("Inherited environment key allowlist is invalid.", nameof(InheritedEnvironmentKeys));
-        }
-
+        ValidateEnvironmentKeys(
+            InheritedEnvironmentKeys ?? DefaultInheritedEnvironmentKeys,
+            nameof(InheritedEnvironmentKeys));
+        ValidateEnvironmentKeys(
+            AllowedRequestedEnvironmentKeys ?? DefaultAllowedRequestedEnvironmentKeys,
+            nameof(AllowedRequestedEnvironmentKeys));
         return this;
     }
 
     internal static IReadOnlyList<string> DefaultInheritedEnvironmentKeys { get; } =
         ["SystemRoot", "WINDIR", "TEMP", "TMP"];
+
+    internal static IReadOnlyList<string> DefaultAllowedRequestedEnvironmentKeys { get; } =
+        Array.Empty<string>();
+
+    private static void ValidateEnvironmentKeys(IReadOnlyList<string> keys, string parameterName)
+    {
+        if (keys.Count > 32
+            || keys.Any(key => string.IsNullOrWhiteSpace(key)
+                || key.Length > 128
+                || key.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-')))
+            || keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() != keys.Count)
+        {
+            throw new ArgumentException("Environment key allowlist is invalid.", parameterName);
+        }
+    }
 }
 
 public sealed record OutOfProcessExecutionRequest(
@@ -74,9 +89,11 @@ public sealed record OutOfProcessExecutionRequest(
             throw new ArgumentException("Process arguments exceed safe bounds.", nameof(Arguments));
         }
 
-        if (string.IsNullOrWhiteSpace(WorkingDirectory) || !Path.IsPathFullyQualified(WorkingDirectory))
+        if (string.IsNullOrWhiteSpace(WorkingDirectory)
+            || !Path.IsPathFullyQualified(WorkingDirectory)
+            || WorkingDirectory.Length > 2_048)
         {
-            throw new ArgumentException("Working directory must be absolute.", nameof(WorkingDirectory));
+            throw new ArgumentException("Working directory must be a bounded absolute path.", nameof(WorkingDirectory));
         }
 
         if (Environment is { Count: > 64 }
@@ -100,7 +117,8 @@ public sealed record OutOfProcessExecutionAttestation(
     bool WorkspaceContainmentVerified,
     bool EnvironmentAllowlistApplied,
     bool NetworkIsolationEnforced,
-    bool CpuMemoryLimitsEnforced);
+    bool CpuMemoryLimitsEnforced,
+    bool FilesystemIsolationEnforced);
 
 public sealed record OutOfProcessExecutionResult(
     int ExitCode,
@@ -111,9 +129,10 @@ public sealed record OutOfProcessExecutionResult(
 
 /// <summary>
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
-/// executable hash verification, workspace containment, bounded stdout/stderr, a minimal
-/// environment and process-tree termination on timeout/cancellation. It deliberately does
-/// not claim network or CPU/memory isolation; those require a stronger container/VM runtime.
+/// executable hash verification, governed working-directory containment, bounded stdout/stderr,
+/// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
+/// It deliberately does not claim network isolation, filesystem ACL isolation or CPU/memory
+/// isolation; those require a stronger restricted-process/container/VM runtime.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -128,9 +147,11 @@ public sealed class PinnedOutOfProcessRuntime
     {
         _executable = (executable ?? throw new ArgumentNullException(nameof(executable))).Validate();
         _policy = (policy ?? throw new ArgumentNullException(nameof(policy))).Validate();
-        if (string.IsNullOrWhiteSpace(workspaceRoot) || !Path.IsPathFullyQualified(workspaceRoot))
+        if (string.IsNullOrWhiteSpace(workspaceRoot)
+            || !Path.IsPathFullyQualified(workspaceRoot)
+            || workspaceRoot.Length > 2_048)
         {
-            throw new ArgumentException("Workspace root must be absolute.", nameof(workspaceRoot));
+            throw new ArgumentException("Workspace root must be a bounded absolute path.", nameof(workspaceRoot));
         }
 
         _workspaceRoot = NormalizeDirectory(workspaceRoot);
@@ -145,7 +166,8 @@ public sealed class PinnedOutOfProcessRuntime
         cancellationToken.ThrowIfCancellationRequested();
 
         var workingDirectory = EnsureContainedWorkspace(request.WorkingDirectory);
-        VerifyExecutableHash();
+        ValidateRequestedEnvironment(request.Environment);
+        using var executableLock = VerifyExecutableHashAndLock();
 
         var startInfo = new ProcessStartInfo
         {
@@ -154,7 +176,7 @@ public sealed class PinnedOutOfProcessRuntime
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            RedirectStandardInput = false,
+            RedirectStandardInput = true,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
@@ -173,6 +195,8 @@ public sealed class PinnedOutOfProcessRuntime
         {
             throw new InvalidOperationException("Pinned adapter process could not be started.");
         }
+
+        process.StandardInput.Close();
 
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         runtimeCancellation.CancelAfter(_policy.MaximumRuntime);
@@ -203,7 +227,8 @@ public sealed class PinnedOutOfProcessRuntime
                     WorkspaceContainmentVerified: true,
                     EnvironmentAllowlistApplied: true,
                     NetworkIsolationEnforced: false,
-                    CpuMemoryLimitsEnforced: false));
+                    CpuMemoryLimitsEnforced: false,
+                    FilesystemIsolationEnforced: false));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -225,7 +250,7 @@ public sealed class PinnedOutOfProcessRuntime
         }
     }
 
-    private void VerifyExecutableHash()
+    private FileStream VerifyExecutableHashAndLock()
     {
         var path = Path.GetFullPath(_executable.ExecutablePath);
         if (!File.Exists(path))
@@ -238,13 +263,30 @@ public sealed class PinnedOutOfProcessRuntime
             throw new InvalidOperationException("Pinned adapter executable cannot be a reparse point.");
         }
 
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var actual = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
-        if (!CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(actual),
-                Convert.FromHexString(_executable.Sha256)))
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        try
         {
-            throw new InvalidDataException("Pinned adapter executable hash does not match the approved SHA-256.");
+            var actualHash = SHA256.HashData(stream);
+            var expectedHash = Convert.FromHexString(_executable.Sha256);
+            try
+            {
+                if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
+                {
+                    throw new InvalidDataException("Pinned adapter executable hash does not match the approved SHA-256.");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(actualHash);
+                CryptographicOperations.ZeroMemory(expectedHash);
+            }
+
+            return stream;
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
         }
     }
 
@@ -285,6 +327,28 @@ public sealed class PinnedOutOfProcessRuntime
         }
 
         throw new UnauthorizedAccessException("Process working directory escaped the governed workspace root.");
+    }
+
+    private void ValidateRequestedEnvironment(IReadOnlyDictionary<string, string>? requested)
+    {
+        if (requested is null || requested.Count == 0)
+        {
+            return;
+        }
+
+        var allowed = (_policy.AllowedRequestedEnvironmentKeys
+                ?? OutOfProcessExecutionPolicy.DefaultAllowedRequestedEnvironmentKeys)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var denied = requested.Keys
+            .Where(key => !allowed.Contains(key))
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (denied.Length > 0)
+        {
+            throw new UnauthorizedAccessException(
+                "Requested process environment contains keys outside the explicit allowlist.");
+        }
     }
 
     private void ApplyMinimalEnvironment(
