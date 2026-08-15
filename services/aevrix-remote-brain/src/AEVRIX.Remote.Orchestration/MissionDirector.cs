@@ -237,12 +237,38 @@ public sealed class MissionDirector
         _specialists = list.ToDictionary(s => s.Kind);
     }
 
-    public async Task<MissionExecutionResult> ExecuteAsync(
+    public Task<MissionExecutionResult> ExecuteAsync(
         MissionPlan plan,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(plan);
+        return ExecuteCoreAsync(plan, plan.Tasks, cancellationToken);
+    }
+
+    /// <summary>
+    /// Uses non-authoritative QIR hints only to decide which already-authorized ready task
+    /// consumes bounded execution capacity first. Hints never become evidence and cannot
+    /// mutate mission scope, dependencies, objectives, evidence ids or reconstruction authority.
+    /// </summary>
+    public Task<MissionExecutionResult> ExecuteWithQirHintsAsync(
+        MissionPlan plan,
+        IReadOnlyCollection<QirMissionHint> hints,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(hints);
+        var prioritized = new QirMissionPlanPrioritizer().Prioritize(plan, hints);
+        return ExecuteCoreAsync(plan, prioritized.Tasks, cancellationToken);
+    }
+
+    private async Task<MissionExecutionResult> ExecuteCoreAsync(
+        MissionPlan plan,
+        IReadOnlyList<MissionTaskSpec> schedulingOrder,
+        CancellationToken cancellationToken)
+    {
         plan.Validate();
         cancellationToken.ThrowIfCancellationRequested();
+        EnsureSchedulingOrderPreservesAuthority(plan, schedulingOrder);
 
         var missingKinds = plan.Tasks.Select(task => task.Specialist).Distinct().Where(kind => !_specialists.ContainsKey(kind)).ToArray();
         if (missingKinds.Length > 0)
@@ -250,15 +276,13 @@ public sealed class MissionDirector
             throw new InvalidOperationException($"Mission cannot start because specialist(s) are unavailable: {string.Join(", ", missingKinds)}.");
         }
 
-        var byId = plan.Tasks.ToDictionary(task => task.TaskId, StringComparer.OrdinalIgnoreCase);
         var results = new ConcurrentDictionary<string, SpecialistTaskResult>(StringComparer.OrdinalIgnoreCase);
-        using var concurrency = new SemaphoreSlim(plan.MaximumConcurrency, plan.MaximumConcurrency);
 
         while (results.Count < plan.Tasks.Count)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var ready = plan.Tasks
+            var ready = schedulingOrder
                 .Where(task => !results.ContainsKey(task.TaskId))
                 .Where(task => task.DependsOn.All(results.ContainsKey))
                 .ToArray();
@@ -268,8 +292,27 @@ public sealed class MissionDirector
                 throw new InvalidOperationException("Mission scheduler made no progress despite a validated acyclic plan.");
             }
 
-            var executions = ready.Select(task => ExecuteReadyTaskAsync(task)).ToArray();
-            await Task.WhenAll(executions).ConfigureAwait(false);
+            var cursor = -1;
+            var workerCount = Math.Min(plan.MaximumConcurrency, ready.Length);
+
+            async Task DrainReadyAsync()
+            {
+                while (true)
+                {
+                    var index = Interlocked.Increment(ref cursor);
+                    if (index >= ready.Length)
+                    {
+                        return;
+                    }
+
+                    await ExecuteReadyTaskAsync(ready[index]).ConfigureAwait(false);
+                }
+            }
+
+            var workers = Enumerable.Range(0, workerCount)
+                .Select(_ => DrainReadyAsync())
+                .ToArray();
+            await Task.WhenAll(workers).ConfigureAwait(false);
         }
 
         var ordered = plan.Tasks.Select(task => results[task.TaskId]).ToArray();
@@ -303,59 +346,75 @@ public sealed class MissionDirector
                 return;
             }
 
-            await concurrency.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var context = new SpecialistExecutionContext(
+                plan.MissionId,
+                plan.ProjectId,
+                plan.TargetId,
+                task,
+                dependencyResults);
+
             try
             {
-                var context = new SpecialistExecutionContext(
-                    plan.MissionId,
-                    plan.ProjectId,
-                    plan.TargetId,
-                    task,
-                    dependencyResults);
+                var output = (await _specialists[task.Specialist]
+                    .ExecuteAsync(context, cancellationToken)
+                    .ConfigureAwait(false)).Validate();
 
-                try
+                if (output.EvidenceIds.Except(task.EvidenceIds, StringComparer.OrdinalIgnoreCase).Any())
                 {
-                    var output = (await _specialists[task.Specialist]
-                        .ExecuteAsync(context, cancellationToken)
-                        .ConfigureAwait(false)).Validate();
+                    throw new InvalidDataException("Specialist output cites evidence outside the task evidence boundary.");
+                }
 
-                    if (output.EvidenceIds.Except(task.EvidenceIds, StringComparer.OrdinalIgnoreCase).Any())
-                    {
-                        throw new InvalidDataException("Specialist output cites evidence outside the task evidence boundary.");
-                    }
-
-                    results[task.TaskId] = new SpecialistTaskResult(
-                        task.TaskId,
-                        task.Specialist,
-                        MissionTaskState.Succeeded,
-                        output.Summary,
-                        output.Confidence,
-                        output.EvidenceIds,
-                        output.ArtifactIds,
-                        null,
-                        _time.GetUtcNow());
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    results[task.TaskId] = new SpecialistTaskResult(
-                        task.TaskId,
-                        task.Specialist,
-                        MissionTaskState.Failed,
-                        "Specialist execution failed.",
-                        0,
-                        [],
-                        [],
-                        ex.GetType().Name,
-                        _time.GetUtcNow());
-                }
+                results[task.TaskId] = new SpecialistTaskResult(
+                    task.TaskId,
+                    task.Specialist,
+                    MissionTaskState.Succeeded,
+                    output.Summary,
+                    output.Confidence,
+                    output.EvidenceIds,
+                    output.ArtifactIds,
+                    null,
+                    _time.GetUtcNow());
             }
-            finally
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                concurrency.Release();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                results[task.TaskId] = new SpecialistTaskResult(
+                    task.TaskId,
+                    task.Specialist,
+                    MissionTaskState.Failed,
+                    "Specialist execution failed.",
+                    0,
+                    [],
+                    [],
+                    ex.GetType().Name,
+                    _time.GetUtcNow());
+            }
+        }
+    }
+
+    private static void EnsureSchedulingOrderPreservesAuthority(
+        MissionPlan plan,
+        IReadOnlyList<MissionTaskSpec> schedulingOrder)
+    {
+        ArgumentNullException.ThrowIfNull(schedulingOrder);
+        if (schedulingOrder.Count != plan.Tasks.Count)
+        {
+            throw new InvalidDataException("Mission scheduling order changed task cardinality.");
+        }
+
+        var authoritative = plan.Tasks.ToDictionary(task => task.TaskId, StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var task in schedulingOrder)
+        {
+            if (task is null
+                || !seen.Add(task.TaskId)
+                || !authoritative.TryGetValue(task.TaskId, out var original)
+                || task != original)
+            {
+                throw new InvalidDataException("Mission scheduling order changed governed task authority.");
             }
         }
     }
