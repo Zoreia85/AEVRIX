@@ -20,6 +20,8 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
     private readonly int _maximumAttempts;
     private readonly TimeSpan _maximumObservationAge;
     private readonly TimeProvider _time;
+    private readonly SpecialistAdapterExecutionPolicy _executionPolicy;
+    private readonly ISpecialistAdapterAttemptObserver _observer;
 
     public AdaptiveMissionSpecialist(
         MissionSpecialistKind kind,
@@ -28,7 +30,9 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
         IEnumerable<IMissionSpecialistProviderAdapter> providers,
         int maximumAttempts = 3,
         TimeSpan? maximumObservationAge = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        SpecialistAdapterExecutionPolicy? executionPolicy = null,
+        ISpecialistAdapterAttemptObserver? observer = null)
     {
         McpServerDescriptor.ValidateId(capability, nameof(capability));
         ArgumentNullException.ThrowIfNull(broker);
@@ -74,6 +78,8 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
         _broker = broker;
         _maximumAttempts = maximumAttempts;
         _time = timeProvider ?? TimeProvider.System;
+        _executionPolicy = (executionPolicy ?? SpecialistAdapterExecutionPolicy.Default).Validate();
+        _observer = observer ?? NullSpecialistAdapterAttemptObserver.Instance;
     }
 
     public MissionSpecialistKind Kind { get; }
@@ -110,11 +116,13 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
             cancellationToken.ThrowIfCancellationRequested();
             var provider = _providers[rank.ProviderId];
             var started = Stopwatch.GetTimestamp();
+            using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
             try
             {
-                var output = (await provider
-                    .ExecuteAsync(context, cancellationToken)
+                var providerTask = provider.ExecuteAsync(context, attemptCancellation.Token);
+                var output = (await providerTask
+                    .WaitAsync(_executionPolicy.AttemptTimeout, cancellationToken)
                     .ConfigureAwait(false))
                     .Validate();
 
@@ -124,20 +132,62 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
 
                 if (unknownEvidence.Length > 0)
                 {
-                    throw new InvalidDataException(
-                        "Provider output exceeded the governed evidence boundary.");
+                    Record(provider.ProviderId, succeeded: false, observedQuality: 0, started);
+                    await ObserveSafelyAsync(
+                        provider.ProviderId,
+                        SpecialistAdapterAttemptOutcome.EvidenceBoundaryRejected,
+                        started,
+                        output.Confidence,
+                        nameof(InvalidDataException)).ConfigureAwait(false);
+                    failures.Add(new InvalidDataException(
+                        "Provider output exceeded the governed evidence boundary."));
+                    continue;
                 }
 
                 Record(provider.ProviderId, succeeded: true, output.Confidence, started);
+                await ObserveSafelyAsync(
+                    provider.ProviderId,
+                    SpecialistAdapterAttemptOutcome.Succeeded,
+                    started,
+                    output.Confidence,
+                    errorType: null).ConfigureAwait(false);
                 return output;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                attemptCancellation.Cancel();
                 throw;
+            }
+            catch (TimeoutException exception)
+            {
+                attemptCancellation.Cancel();
+                Record(provider.ProviderId, succeeded: false, observedQuality: 0, started);
+                await ObserveSafelyAsync(
+                    provider.ProviderId,
+                    SpecialistAdapterAttemptOutcome.TimedOut,
+                    started,
+                    outputConfidence: null,
+                    nameof(TimeoutException)).ConfigureAwait(false);
+
+                var timeout = new TimeoutException(
+                    $"Adapter '{provider.ProviderId}' exceeded its governed attempt timeout.",
+                    exception);
+                if (!_executionPolicy.FailoverOnTimeout)
+                {
+                    throw timeout;
+                }
+
+                failures.Add(timeout);
             }
             catch (Exception exception)
             {
                 Record(provider.ProviderId, succeeded: false, observedQuality: 0, started);
+                await ObserveSafelyAsync(
+                    provider.ProviderId,
+                    SpecialistAdapterAttemptOutcome.Failed,
+                    started,
+                    outputConfidence: null,
+                    exception.GetType().Name).ConfigureAwait(false);
                 failures.Add(exception);
             }
         }
@@ -165,5 +215,33 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
             observedQuality,
             Stopwatch.GetElapsedTime(started).TotalMilliseconds,
             observedAt);
+    }
+
+    private async ValueTask ObserveSafelyAsync(
+        string providerId,
+        SpecialistAdapterAttemptOutcome outcome,
+        long started,
+        double? outputConfidence,
+        string? errorType)
+    {
+        var telemetry = new SpecialistAdapterAttemptTelemetry(
+            providerId,
+            _capability,
+            Kind,
+            outcome,
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            outputConfidence,
+            errorType,
+            _time.GetUtcNow()).Validate();
+
+        try
+        {
+            await _observer.ObserveAsync(telemetry, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Observability is deliberately non-authoritative: telemetry sink failures
+            // must never change provider selection, evidence, or mission results.
+        }
     }
 }
