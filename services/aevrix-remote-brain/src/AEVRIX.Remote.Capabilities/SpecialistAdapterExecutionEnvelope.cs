@@ -77,17 +77,17 @@ public sealed record SpecialistAdapterExecutionEnvelope(
 }
 
 public sealed record SpecialistAdapterExecutionProfile(
-    AdapterNetworkScope MaximumNetworkScope,
-    AdapterWorkspaceScope MaximumWorkspaceScope,
+    AdapterNetworkScope EnforcedNetworkScope,
+    AdapterWorkspaceScope EnforcedWorkspaceScope,
     AgentIsolationLevel IsolationLevel)
 {
     public SpecialistAdapterExecutionProfile Validate()
     {
-        if (!Enum.IsDefined(MaximumNetworkScope)
-            || !Enum.IsDefined(MaximumWorkspaceScope)
+        if (!Enum.IsDefined(EnforcedNetworkScope)
+            || !Enum.IsDefined(EnforcedWorkspaceScope)
             || !Enum.IsDefined(IsolationLevel))
         {
-            throw new ArgumentOutOfRangeException(nameof(MaximumNetworkScope));
+            throw new ArgumentOutOfRangeException(nameof(EnforcedNetworkScope));
         }
 
         return this;
@@ -98,8 +98,8 @@ public sealed record SpecialistAdapterExecutionProfile(
         envelope.Validate();
         Validate();
 
-        return MaximumNetworkScope >= envelope.NetworkScope
-            && MaximumWorkspaceScope >= envelope.WorkspaceScope
+        return EnforcedNetworkScope <= envelope.NetworkScope
+            && EnforcedWorkspaceScope <= envelope.WorkspaceScope
             && IsolationStrength(IsolationLevel) >= IsolationStrength(envelope.MinimumIsolation);
     }
 
