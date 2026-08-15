@@ -10,6 +10,12 @@ public sealed class WindowsRestrictedTokenLeaseTests
     [TestMethod]
     public void Create_ProducesPrimaryTokenWithMaximumPrivilegesDisabled()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Windows restricted-token primitive requires Windows.");
+            return;
+        }
+
         using var lease = WindowsRestrictedTokenLease.Create();
 
         Assert.IsTrue(lease.IsPrimaryToken);
@@ -21,6 +27,12 @@ public sealed class WindowsRestrictedTokenLeaseTests
     [TestMethod]
     public void Dispose_ClosesRestrictedTokenHandle()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Windows restricted-token primitive requires Windows.");
+            return;
+        }
+
         var lease = WindowsRestrictedTokenLease.Create();
         lease.Dispose();
 
