@@ -237,6 +237,26 @@ public sealed class MissionDirector
         _specialists = list.ToDictionary(s => s.Kind);
     }
 
+    public async Task<MissionExecutionResult> ExecuteWithQirHintsAsync(
+        MissionPlan plan,
+        IReadOnlyCollection<QirMissionHint> hints,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(hints);
+
+        var prioritized = new QirMissionPlanPrioritizer().Prioritize(plan, hints);
+        var execution = await ExecuteAsync(prioritized, cancellationToken).ConfigureAwait(false);
+        var byId = execution.TaskResults.ToDictionary(
+            item => item.TaskId,
+            StringComparer.OrdinalIgnoreCase);
+
+        return execution with
+        {
+            TaskResults = plan.Tasks.Select(task => byId[task.TaskId]).ToArray()
+        };
+    }
+
     public async Task<MissionExecutionResult> ExecuteAsync(
         MissionPlan plan,
         CancellationToken cancellationToken = default)
@@ -261,6 +281,7 @@ public sealed class MissionDirector
             var ready = plan.Tasks
                 .Where(task => !results.ContainsKey(task.TaskId))
                 .Where(task => task.DependsOn.All(results.ContainsKey))
+                .Take(plan.MaximumConcurrency)
                 .ToArray();
 
             if (ready.Length == 0)
