@@ -32,11 +32,9 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
                 WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 25),
                 RequireRaceFreeJobAssignment: true,
                 RequireAppContainer: true));
-        var authority = new OutOfProcessAuthorityPolicy(
-            new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
-            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted));
+        var authority = NetworkNoneAuthority();
         var governed = new GovernedOutOfProcessRuntime(
-            [new WindowsZeroCapabilityAppContainerBackend(runtime)],
+            [new WindowsZeroCapabilityAppContainerBackend(runtime, loopbackPolicy: new StubLoopbackInspector(0))],
             authority);
 
         var result = await governed.ExecuteAsync(new OutOfProcessExecutionRequest(
@@ -63,6 +61,40 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_BlocksBeforeLaunchWhenAnyGlobalLoopbackExemptionExists()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var marker = Path.Combine(workspace.Path, "should-not-exist.txt");
+        var runtime = new PinnedOutOfProcessRuntime(
+            Descriptor(CommandProcessor()),
+            workspace.Path,
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(5),
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1),
+                RequireRaceFreeJobAssignment: true,
+                RequireAppContainer: true));
+        var backend = new WindowsZeroCapabilityAppContainerBackend(
+            runtime,
+            loopbackPolicy: new StubLoopbackInspector(1));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => backend.ExecuteAsync(
+            NetworkNoneAuthority(),
+            new OutOfProcessExecutionRequest(["/d", "/c", $"echo launched>\"{marker}\""], workspace.Path)));
+
+        Assert.IsFalse(File.Exists(marker), "Network=None backend launched a process despite a configured loopback exemption.");
+    }
+
+    [TestMethod]
+    public void NativeLoopbackInspector_ReturnsBoundedNonNegativeCount()
+    {
+        RequireWindows();
+        var count = new WindowsAppContainerLoopbackPolicyInspector().GetLoopbackExemptionCount();
+        Assert.IsTrue(count >= 0);
+        Assert.IsTrue(count <= 65_536, "Windows returned an implausibly large AppContainer loopback exemption table.");
+    }
+
+    [TestMethod]
     public void CanEnforce_AcceptsOnlyNetworkNoneWithUnrestrictedFilesystem()
     {
         if (!OperatingSystem.IsWindows())
@@ -72,18 +104,18 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
         }
 
         using var workspace = new TempDirectory();
-        var backend = new WindowsZeroCapabilityAppContainerBackend(new PinnedOutOfProcessRuntime(
-            Descriptor(CommandProcessor()),
-            workspace.Path,
-            new OutOfProcessExecutionPolicy(
-                TimeSpan.FromSeconds(5),
-                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1),
-                RequireRaceFreeJobAssignment: true,
-                RequireAppContainer: true)));
+        var backend = new WindowsZeroCapabilityAppContainerBackend(
+            new PinnedOutOfProcessRuntime(
+                Descriptor(CommandProcessor()),
+                workspace.Path,
+                new OutOfProcessExecutionPolicy(
+                    TimeSpan.FromSeconds(5),
+                    WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1),
+                    RequireRaceFreeJobAssignment: true,
+                    RequireAppContainer: true)),
+            loopbackPolicy: new StubLoopbackInspector(0));
 
-        Assert.IsTrue(backend.CanEnforce(new OutOfProcessAuthorityPolicy(
-            new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
-            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted))));
+        Assert.IsTrue(backend.CanEnforce(NetworkNoneAuthority()));
         Assert.IsFalse(backend.CanEnforce(new OutOfProcessAuthorityPolicy(
             new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.LoopbackOnly),
             new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted))));
@@ -91,6 +123,10 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
             new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
             new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly))));
     }
+
+    private static OutOfProcessAuthorityPolicy NetworkNoneAuthority() => new(
+        new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
+        new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted));
 
     private static PinnedExecutableDescriptor Descriptor(string path)
     {
@@ -119,6 +155,11 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
         {
             Assert.Inconclusive("Zero-capability AppContainer network isolation test requires Windows.");
         }
+    }
+
+    private sealed class StubLoopbackInspector(int count) : IAppContainerLoopbackPolicyInspector
+    {
+        public int GetLoopbackExemptionCount() => count;
     }
 
     private sealed class TempDirectory : IDisposable
