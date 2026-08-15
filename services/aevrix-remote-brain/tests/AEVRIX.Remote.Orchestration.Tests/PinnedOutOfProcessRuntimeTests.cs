@@ -28,7 +28,6 @@ public sealed class PinnedOutOfProcessRuntimeTests
         Assert.IsFalse(result.Attestation.FilesystemIsolationEnforced);
     }
 
-
     [TestMethod]
     public async Task ExecuteAsync_AssignsGovernedWindowsJobObjectAndReportsGranularEnforcement()
     {
@@ -39,7 +38,7 @@ public sealed class PinnedOutOfProcessRuntimeTests
             workspace.Path,
             new OutOfProcessExecutionPolicy(
                 TimeSpan.FromSeconds(5),
-                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1)));
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 25)));
 
         var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
             ["/d", "/c", "echo JOB-OBJECT-OK"],
@@ -49,7 +48,7 @@ public sealed class PinnedOutOfProcessRuntimeTests
         Assert.IsTrue(result.Attestation.WindowsJobObjectAssigned);
         Assert.IsTrue(result.Attestation.ProcessMemoryLimitEnforced);
         Assert.IsTrue(result.Attestation.ActiveProcessLimitEnforced);
-        Assert.IsFalse(result.Attestation.CpuMemoryLimitsEnforced);
+        Assert.IsTrue(result.Attestation.CpuMemoryLimitsEnforced);
         Assert.IsFalse(result.Attestation.NetworkIsolationEnforced);
         Assert.IsFalse(result.Attestation.FilesystemIsolationEnforced);
     }
@@ -88,6 +87,10 @@ public sealed class PinnedOutOfProcessRuntimeTests
             new OutOfProcessExecutionPolicy(
                 TimeSpan.FromSeconds(5),
                 WindowsJobObject: new WindowsJobObjectPolicy(8_388_608, 1)).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(5),
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 101)).Validate());
     }
 
     [TestMethod]
