@@ -7,6 +7,8 @@ import json
 import re
 from pathlib import Path
 
+from repository_intelligence_audit import audit_registry
+
 ROOT = Path(__file__).resolve().parents[2]
 TEXT_SUFFIXES = {".cs", ".go", ".mod", ".sum", ".py", ".ps1", ".json", ".md", ".yml", ".yaml", ".xml", ".csproj", ".props", ".wxs"}
 IGNORED_PARTS = {".git", "bin", "obj", "artifacts", "__pycache__", ".pytest_cache"}
@@ -105,6 +107,14 @@ def main() -> int:
 
     audit_patch_queue_policy(failures)
     audit_privacy_root_policy(failures)
+
+    registry_path = ROOT / "docs" / "manifests" / "repository-intelligence.json"
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        failures.append(f"repository intelligence registry cannot be read: {exc}")
+    else:
+        failures.extend(f"repository intelligence: {failure}" for failure in audit_registry(registry))
 
     manifest = []
     for path in sorted(files):

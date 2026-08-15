@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,10 +33,22 @@ DISCOVERY_ONLY = {
 }
 
 
+def _is_utc_timestamp(value: object) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+
 def audit_registry(data: dict) -> list[str]:
     failures: list[str] = []
     if data.get("schemaVersion") != 1:
         failures.append("schemaVersion must be 1")
+    if not _is_utc_timestamp(data.get("verifiedAtUtc")):
+        failures.append("verifiedAtUtc must be an ISO-8601 UTC timestamp ending in Z")
 
     policy = data.get("policy") or {}
     if policy.get("defaultRuntimeApproval") != "Denied":
