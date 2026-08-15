@@ -56,7 +56,7 @@ public sealed class WindowsSandboxRestrictingTokenLeaseTests
 
         using var baseToken = WindowsRestrictedTokenLease.Create();
 
-        Assert.ThrowsException<System.ComponentModel.Win32Exception>(() =>
+        Assert.Throws<System.ComponentModel.Win32Exception>(() =>
             WindowsSandboxRestrictingTokenLease.Create(baseToken, "not-a-sid"));
     }
 
