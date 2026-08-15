@@ -1,0 +1,247 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace Aevrix.Remote.Capabilities;
+
+public sealed record WindowsJobObjectPolicy(
+    long MaximumProcessMemoryBytes,
+    int MaximumActiveProcesses = 1,
+    int? MaximumCpuRatePercent = null)
+{
+    public WindowsJobObjectPolicy Validate()
+    {
+        if (MaximumProcessMemoryBytes is < 16_777_216 or > 68_719_476_736)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumProcessMemoryBytes));
+        }
+
+        if (MaximumActiveProcesses is < 1 or > 64)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumActiveProcesses));
+        }
+
+        if (MaximumCpuRatePercent is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumCpuRatePercent));
+        }
+
+        return this;
+    }
+}
+
+/// <summary>
+/// Owns a Windows Job Object configured for AEVRIX adapter containment. Closing the lease
+/// terminates all processes that remain in the job. This primitive enforces process-count,
+/// per-process memory and, when configured, a hard CPU-rate cap. It does not claim network,
+/// filesystem ACL or race-free suspended-start isolation.
+/// </summary>
+public sealed class WindowsJobObjectLease : IDisposable
+{
+    private const uint JobObjectLimitActiveProcess = 0x00000008;
+    private const uint JobObjectLimitProcessMemory = 0x00000100;
+    private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+    private const int JobObjectExtendedLimitInformationClass = 9;
+    private const int JobObjectCpuRateControlInformationClass = 15;
+    private const uint JobObjectCpuRateControlEnable = 0x1;
+    private const uint JobObjectCpuRateControlHardCap = 0x4;
+
+    private readonly SafeJobHandle _handle;
+    private bool _disposed;
+
+    private WindowsJobObjectLease(SafeJobHandle handle, WindowsJobObjectPolicy policy)
+    {
+        _handle = handle;
+        Policy = policy;
+    }
+
+    public WindowsJobObjectPolicy Policy { get; }
+    public bool CpuRateLimitEnforced => Policy.MaximumCpuRatePercent.HasValue;
+
+    public static WindowsJobObjectLease CreateAndAssign(Process process, WindowsJobObjectPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(policy);
+        policy.Validate();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Windows Job Object containment requires Windows.");
+        }
+
+        if (process.HasExited)
+        {
+            throw new InvalidOperationException("Cannot assign an exited process to a governed Job Object.");
+        }
+
+        var handle = NativeMethods.CreateJobObjectW(IntPtr.Zero, null);
+        if (handle.IsInvalid)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create the governed Windows Job Object.");
+        }
+
+        try
+        {
+            ConfigureLimits(handle, policy);
+            ConfigureCpuRate(handle, policy);
+            if (!NativeMethods.AssignProcessToJobObject(handle, process.Handle))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not assign the adapter process to the governed Windows Job Object.");
+            }
+
+            return new WindowsJobObjectLease(handle, policy);
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private static void ConfigureLimits(SafeJobHandle handle, WindowsJobObjectPolicy policy)
+    {
+        var information = new JobObjectExtendedLimitInformation
+        {
+            BasicLimitInformation = new JobObjectBasicLimitInformation
+            {
+                LimitFlags = JobObjectLimitKillOnJobClose
+                    | JobObjectLimitActiveProcess
+                    | JobObjectLimitProcessMemory,
+                ActiveProcessLimit = checked((uint)policy.MaximumActiveProcesses)
+            },
+            ProcessMemoryLimit = checked((UIntPtr)(ulong)policy.MaximumProcessMemoryBytes)
+        };
+
+        SetInformation(handle, JobObjectExtendedLimitInformationClass, information,
+            "Could not configure governed Windows Job Object limits.");
+    }
+
+    private static void ConfigureCpuRate(SafeJobHandle handle, WindowsJobObjectPolicy policy)
+    {
+        if (!policy.MaximumCpuRatePercent.HasValue)
+        {
+            return;
+        }
+
+        var information = new JobObjectCpuRateControlInformation
+        {
+            ControlFlags = JobObjectCpuRateControlEnable | JobObjectCpuRateControlHardCap,
+            CpuRate = checked((uint)policy.MaximumCpuRatePercent.Value * 100u)
+        };
+
+        SetInformation(handle, JobObjectCpuRateControlInformationClass, information,
+            "Could not configure governed Windows Job Object CPU hard cap.");
+    }
+
+    private static void SetInformation<T>(
+        SafeJobHandle handle,
+        int informationClass,
+        T information,
+        string errorMessage) where T : struct
+    {
+        var size = Marshal.SizeOf<T>();
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(information, buffer, false);
+            if (!NativeMethods.SetInformationJobObject(
+                    handle,
+                    informationClass,
+                    buffer,
+                    checked((uint)size)))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), errorMessage);
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _handle.Dispose();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectBasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectExtendedLimitInformation
+    {
+        public JobObjectBasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectCpuRateControlInformation
+    {
+        public uint ControlFlags;
+        public uint CpuRate;
+    }
+
+    private sealed class SafeJobHandle : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public SafeJobHandle() : base(ownsHandle: true)
+        {
+        }
+
+        protected override bool ReleaseHandle() => NativeMethods.CloseHandle(handle);
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern SafeJobHandle CreateJobObjectW(IntPtr jobAttributes, string? name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SetInformationJobObject(
+            SafeJobHandle job,
+            int jobObjectInformationClass,
+            IntPtr jobObjectInformation,
+            uint jobObjectInformationLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool AssignProcessToJobObject(SafeJobHandle job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CloseHandle(IntPtr handle);
+    }
+}
