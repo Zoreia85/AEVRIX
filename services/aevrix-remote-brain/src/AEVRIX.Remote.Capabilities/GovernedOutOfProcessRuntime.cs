@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Aevrix.Remote.Capabilities;
 
 public sealed record OutOfProcessAuthorityPolicy(
@@ -13,6 +16,27 @@ public sealed record OutOfProcessAuthorityPolicy(
 
     public bool RequiresUnavailableIsolationBackend =>
         Network.RequiresIsolation || Filesystem.RequiresIsolation;
+
+    /// <summary>
+    /// Deterministic, non-secret binding for the exact authority profile. Backends must return
+    /// this value after execution so an attestation cannot be accidentally replayed across a
+    /// different network/filesystem policy.
+    /// </summary>
+    public string ComputeFingerprint()
+    {
+        Validate();
+        var endpoints = (Network.AllowedEndpoints ?? Array.Empty<NetworkEndpointRule>())
+            .Select(endpoint => $"{endpoint.Host.Trim().ToLowerInvariant()}:{endpoint.Port}")
+            .OrderBy(value => value, StringComparer.Ordinal);
+        var canonical = string.Join("\n", new[]
+        {
+            "aevrix-authority-v1",
+            $"network={Network.Scope}",
+            $"endpoints={string.Join("|", endpoints)}",
+            $"filesystem={Filesystem.Scope}"
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
 }
 
 public sealed record OutOfProcessAuthorityDecision(
@@ -24,6 +48,26 @@ public sealed record OutOfProcessAuthorityDecision(
 {
     public bool RequiresNetworkIsolation => NetworkScope != OutOfProcessNetworkScope.Unrestricted;
     public bool RequiresFilesystemIsolation => FilesystemScope != OutOfProcessFilesystemScope.Unrestricted;
+}
+
+public sealed record IsolationAuthorityAttestation(
+    string BackendId,
+    string AuthorityFingerprint)
+{
+    public IsolationAuthorityAttestation Validate()
+    {
+        if (!GovernedOutOfProcessRuntime.IsSafeBackendId(BackendId))
+        {
+            throw new InvalidDataException("Isolation attestation backend id is invalid.");
+        }
+        if (string.IsNullOrWhiteSpace(AuthorityFingerprint)
+            || AuthorityFingerprint.Length != 64
+            || !AuthorityFingerprint.All(Uri.IsHexDigit))
+        {
+            throw new InvalidDataException("Isolation attestation authority fingerprint is invalid.");
+        }
+        return this;
+    }
 }
 
 /// <summary>
@@ -40,6 +84,10 @@ public interface IOutOfProcessIsolationBackend
         OutOfProcessAuthorityPolicy authority,
         OutOfProcessExecutionRequest request,
         CancellationToken cancellationToken = default);
+
+    IsolationAuthorityAttestation AttestAuthority(
+        OutOfProcessAuthorityPolicy authority,
+        OutOfProcessExecutionResult execution);
 }
 
 /// <summary>
@@ -82,12 +130,22 @@ public sealed class LocalUnrestrictedOutOfProcessBackend : IOutOfProcessIsolatio
 
         return _runtime.ExecuteAsync(request, cancellationToken);
     }
+
+    public IsolationAuthorityAttestation AttestAuthority(
+        OutOfProcessAuthorityPolicy authority,
+        OutOfProcessExecutionResult execution)
+    {
+        ArgumentNullException.ThrowIfNull(authority);
+        ArgumentNullException.ThrowIfNull(execution);
+        return new IsolationAuthorityAttestation(BackendId, authority.ComputeFingerprint());
+    }
 }
 
 /// <summary>
 /// Single execution-authority boundary for pinned adapters. It chooses only a registered backend
 /// that declares it can enforce the complete network/filesystem authority profile. After execution,
-/// the boundary independently verifies the backend attestation before returning the result.
+/// the boundary independently verifies both the enforcement flags and an attestation binding the
+/// exact backend identity to the exact requested authority fingerprint.
 /// </summary>
 public sealed class GovernedOutOfProcessRuntime
 {
@@ -204,13 +262,39 @@ public sealed class GovernedOutOfProcessRuntime
         var backend = _backends.Single(item =>
             string.Equals(item.BackendId, decision.SelectedBackendId, StringComparison.OrdinalIgnoreCase));
         var result = await backend.ExecuteAsync(_authority, request, cancellationToken).ConfigureAwait(false);
-        ValidateAttestation(result.Attestation);
+        ValidateAttestation(backend, result);
         return result;
     }
 
-    private void ValidateAttestation(OutOfProcessExecutionAttestation attestation)
+    private void ValidateAttestation(IOutOfProcessIsolationBackend backend, OutOfProcessExecutionResult result)
     {
-        ArgumentNullException.ThrowIfNull(attestation);
+        ArgumentNullException.ThrowIfNull(backend);
+        ArgumentNullException.ThrowIfNull(result);
+        var attestation = result.Attestation ?? throw new InvalidDataException("Execution backend returned no execution attestation.");
+        var binding = (backend.AttestAuthority(_authority, result)
+            ?? throw new InvalidDataException("Execution backend returned no authority binding.")).Validate();
+
+        if (!string.Equals(binding.BackendId, backend.BackendId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Execution authority attestation is bound to a different backend identity.");
+        }
+
+        var expected = _authority.ComputeFingerprint();
+        var expectedBytes = Convert.FromHexString(expected);
+        var actualBytes = Convert.FromHexString(binding.AuthorityFingerprint);
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes))
+            {
+                throw new InvalidDataException("Execution authority attestation is bound to a different authority policy.");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(expectedBytes);
+            CryptographicOperations.ZeroMemory(actualBytes);
+        }
+
         if (_authority.Network.RequiresIsolation && !attestation.NetworkIsolationEnforced)
         {
             throw new InvalidDataException("Selected execution backend did not attest the required network isolation.");
@@ -222,7 +306,7 @@ public sealed class GovernedOutOfProcessRuntime
         }
     }
 
-    private static bool IsSafeBackendId(string value) =>
+    internal static bool IsSafeBackendId(string value) =>
         !string.IsNullOrWhiteSpace(value)
         && value.Length is >= 3 and <= 96
         && value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.');
