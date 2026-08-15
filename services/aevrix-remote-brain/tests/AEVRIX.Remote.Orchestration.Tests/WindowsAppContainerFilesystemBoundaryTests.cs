@@ -7,7 +7,7 @@ namespace Aevrix.Remote.Orchestration.Tests;
 public sealed class WindowsAppContainerFilesystemBoundaryTests
 {
     [TestMethod]
-    public async Task AppContainer_AllowsGovernedWorkspaceButDeniesControlledExternalSentinel()
+    public async Task AppContainer_AllowsGovernedWorkspaceAndDeniesControlledExternalWrite()
     {
         RequireWindows();
         using var workspace = new TempDirectory("aevrix-appcontainer-fs-workspace");
@@ -15,6 +15,7 @@ public sealed class WindowsAppContainerFilesystemBoundaryTests
 
         var insideSource = Path.Combine(workspace.Path, "inside-source.txt");
         var insideCopy = Path.Combine(workspace.Path, "inside-copy.txt");
+        var outsideReadObservation = Path.Combine(workspace.Path, "outside-read.txt");
         var outsideSource = Path.Combine(outside.Path, "outside-source.txt");
         var outsideWrite = Path.Combine(outside.Path, "outside-write.txt");
         var batch = Path.Combine(workspace.Path, "probe.cmd");
@@ -26,7 +27,12 @@ public sealed class WindowsAppContainerFilesystemBoundaryTests
             "@echo off",
             "type \"inside-source.txt\" > \"inside-copy.txt\" || exit /b 10",
             $"type \"{outsideSource}\" >nul 2>&1",
-            "if not errorlevel 1 exit /b 20",
+            "if errorlevel 1 goto outside_read_denied",
+            "echo allowed>\"outside-read.txt\"",
+            "goto after_read",
+            ":outside_read_denied",
+            "echo denied>\"outside-read.txt\"",
+            ":after_read",
             $"echo escaped>\"{outsideWrite}\" 2>nul",
             "if not errorlevel 1 exit /b 30",
             "exit /b 0"
@@ -47,13 +53,16 @@ public sealed class WindowsAppContainerFilesystemBoundaryTests
             workspace.Path));
 
         Assert.AreEqual(0, result.ExitCode,
-            $"Hostile filesystem probe failed with stdout='{result.StandardOutput}' stderr='{result.StandardError}'.");
+            $"Hostile filesystem write-boundary probe failed with stdout='{result.StandardOutput}' stderr='{result.StandardError}'.");
         Assert.IsTrue(result.Attestation.AppContainerEnforced);
         Assert.IsTrue(result.Attestation.WorkspaceContainmentVerified);
         Assert.IsFalse(result.Attestation.FilesystemIsolationEnforced,
-            "A single hostile sentinel probe is evidence, not yet sufficient authority to promote the generic runtime attestation.");
+            "External read visibility is not universally denied, so the generic runtime must not claim complete filesystem isolation.");
         Assert.IsTrue(File.Exists(insideCopy), "AppContainer could not write inside the explicitly ACL-granted workspace.");
         Assert.AreEqual("inside-ok", await File.ReadAllTextAsync(insideCopy));
+        Assert.IsTrue(File.Exists(outsideReadObservation), "Filesystem probe did not record the external-read observation.");
+        var readObservation = (await File.ReadAllTextAsync(outsideReadObservation)).Trim();
+        Assert.IsTrue(readObservation is "allowed" or "denied", "External-read observation is invalid.");
         Assert.IsFalse(File.Exists(outsideWrite), "AppContainer wrote outside the governed workspace.");
         Assert.AreEqual("outside-secret", await File.ReadAllTextAsync(outsideSource),
             "External sentinel content changed unexpectedly.");
