@@ -19,19 +19,12 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
             return;
         }
 
-        using var workspace = new TempDirectory();
+        using var workspace = new TempDirectory("network");
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        var runtime = new PinnedOutOfProcessRuntime(
-            Descriptor(curl),
-            workspace.Path,
-            new OutOfProcessExecutionPolicy(
-                TimeSpan.FromSeconds(8),
-                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 25),
-                RequireRaceFreeJobAssignment: true,
-                RequireAppContainer: true));
+        var runtime = Runtime(curl, workspace.Path);
         var authority = NetworkNoneAuthority();
         var governed = new GovernedOutOfProcessRuntime(
             [new WindowsZeroCapabilityAppContainerBackend(runtime, loopbackPolicy: new StubLoopbackInspector(0))],
@@ -61,19 +54,60 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_WorkspaceOnlyAllowsWriteInsideGovernedWorkspace()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory("inside");
+        var marker = Path.Combine(workspace.Path, "inside-marker.txt");
+        var governed = GovernedCommandRuntime(workspace.Path, WorkspaceOnlyAuthority());
+
+        var result = await governed.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", $"echo workspace-ok>\"{marker}\""],
+            workspace.Path));
+
+        Assert.AreEqual(0, result.ExitCode, result.StandardError);
+        Assert.IsTrue(File.Exists(marker), "WorkspaceOnly AppContainer could not create a file inside its governed workspace.");
+        StringAssert.Contains(File.ReadAllText(marker), "workspace-ok");
+        Assert.IsTrue(result.Attestation.AppContainerEnforced);
+        Assert.IsTrue(result.Attestation.NetworkIsolationEnforced);
+        Assert.IsTrue(result.Attestation.FilesystemIsolationEnforced);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_WorkspaceOnlyDeniesControlledReadAndWriteOutsideWorkspace()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory("workspace");
+        using var outside = new TempDirectory("outside");
+        var outsideSentinel = Path.Combine(outside.Path, "outside-sentinel.txt");
+        var outsideWrite = Path.Combine(outside.Path, "should-not-be-created.txt");
+        File.WriteAllText(outsideSentinel, "aevrix-controlled-outside-sentinel");
+
+        var governed = GovernedCommandRuntime(workspace.Path, WorkspaceOnlyAuthority());
+
+        var read = await governed.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", $"type \"{outsideSentinel}\""],
+            workspace.Path));
+        Assert.AreNotEqual(0, read.ExitCode, "WorkspaceOnly AppContainer unexpectedly read a controlled file outside the governed workspace.");
+        Assert.IsFalse(read.StandardOutput.Contains("aevrix-controlled-outside-sentinel", StringComparison.Ordinal),
+            "Outside sentinel content escaped the WorkspaceOnly filesystem boundary.");
+        Assert.IsTrue(read.Attestation.FilesystemIsolationEnforced);
+
+        var write = await governed.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", $"echo escaped>\"{outsideWrite}\""],
+            workspace.Path));
+        Assert.AreNotEqual(0, write.ExitCode, "WorkspaceOnly AppContainer unexpectedly wrote outside the governed workspace.");
+        Assert.IsFalse(File.Exists(outsideWrite), "A file was created outside the governed workspace.");
+        Assert.IsTrue(write.Attestation.FilesystemIsolationEnforced);
+    }
+
+    [TestMethod]
     public async Task ExecuteAsync_BlocksBeforeLaunchWhenAnyGlobalLoopbackExemptionExists()
     {
         RequireWindows();
-        using var workspace = new TempDirectory();
+        using var workspace = new TempDirectory("blocked");
         var marker = Path.Combine(workspace.Path, "should-not-exist.txt");
-        var runtime = new PinnedOutOfProcessRuntime(
-            Descriptor(CommandProcessor()),
-            workspace.Path,
-            new OutOfProcessExecutionPolicy(
-                TimeSpan.FromSeconds(5),
-                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1),
-                RequireRaceFreeJobAssignment: true,
-                RequireAppContainer: true));
+        var runtime = Runtime(CommandProcessor(), workspace.Path);
         var backend = new WindowsZeroCapabilityAppContainerBackend(
             runtime,
             loopbackPolicy: new StubLoopbackInspector(1));
@@ -95,7 +129,7 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
     }
 
     [TestMethod]
-    public void CanEnforce_AcceptsOnlyNetworkNoneWithUnrestrictedFilesystem()
+    public void CanEnforce_AcceptsOnlyNetworkNoneWithSupportedFilesystemScopes()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -103,30 +137,47 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
             return;
         }
 
-        using var workspace = new TempDirectory();
+        using var workspace = new TempDirectory("selection");
         var backend = new WindowsZeroCapabilityAppContainerBackend(
-            new PinnedOutOfProcessRuntime(
-                Descriptor(CommandProcessor()),
-                workspace.Path,
-                new OutOfProcessExecutionPolicy(
-                    TimeSpan.FromSeconds(5),
-                    WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1),
-                    RequireRaceFreeJobAssignment: true,
-                    RequireAppContainer: true)),
+            Runtime(CommandProcessor(), workspace.Path),
             loopbackPolicy: new StubLoopbackInspector(0));
 
         Assert.IsTrue(backend.CanEnforce(NetworkNoneAuthority()));
-        Assert.IsFalse(backend.CanEnforce(new OutOfProcessAuthorityPolicy(
-            new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.LoopbackOnly),
-            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted))));
+        Assert.IsTrue(backend.CanEnforce(WorkspaceOnlyAuthority()));
         Assert.IsFalse(backend.CanEnforce(new OutOfProcessAuthorityPolicy(
             new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
+            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceReadOnly))));
+        Assert.IsFalse(backend.CanEnforce(new OutOfProcessAuthorityPolicy(
+            new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.LoopbackOnly),
             new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly))));
     }
+
+    private static GovernedOutOfProcessRuntime GovernedCommandRuntime(
+        string workspaceRoot,
+        OutOfProcessAuthorityPolicy authority) =>
+        new(
+            [new WindowsZeroCapabilityAppContainerBackend(
+                Runtime(CommandProcessor(), workspaceRoot),
+                loopbackPolicy: new StubLoopbackInspector(0))],
+            authority);
+
+    private static PinnedOutOfProcessRuntime Runtime(string executable, string workspaceRoot) =>
+        new(
+            Descriptor(executable),
+            workspaceRoot,
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(8),
+                WindowsJobObject: new WindowsJobObjectPolicy(268_435_456, 1, 25),
+                RequireRaceFreeJobAssignment: true,
+                RequireAppContainer: true));
 
     private static OutOfProcessAuthorityPolicy NetworkNoneAuthority() => new(
         new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
         new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.Unrestricted));
+
+    private static OutOfProcessAuthorityPolicy WorkspaceOnlyAuthority() => new(
+        new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.None),
+        new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly));
 
     private static PinnedExecutableDescriptor Descriptor(string path)
     {
@@ -153,7 +204,7 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
     {
         if (!OperatingSystem.IsWindows())
         {
-            Assert.Inconclusive("Zero-capability AppContainer network isolation test requires Windows.");
+            Assert.Inconclusive("Zero-capability AppContainer isolation test requires Windows.");
         }
     }
 
@@ -164,11 +215,12 @@ public sealed class WindowsZeroCapabilityAppContainerBackendTests
 
     private sealed class TempDirectory : IDisposable
     {
-        public TempDirectory()
+        public TempDirectory(string purpose)
         {
             Path = System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(),
-                "aevrix-appcontainer-network-tests",
+                "aevrix-appcontainer-isolation-tests",
+                purpose,
                 Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Path);
         }
