@@ -25,7 +25,12 @@ public sealed record WindowsJobObjectPolicy(
     }
 }
 
-internal sealed class WindowsJobObjectLease : IDisposable
+/// <summary>
+/// Owns a Windows Job Object configured for AEVRIX adapter containment. Closing the lease
+/// terminates all processes that remain in the job. This primitive enforces process-count and
+/// per-process memory limits; it does not claim network, filesystem ACL or CPU isolation.
+/// </summary>
+public sealed class WindowsJobObjectLease : IDisposable
 {
     private const uint JobObjectLimitActiveProcess = 0x00000008;
     private const uint JobObjectLimitProcessMemory = 0x00000100;
@@ -35,10 +40,13 @@ internal sealed class WindowsJobObjectLease : IDisposable
     private readonly SafeJobHandle _handle;
     private bool _disposed;
 
-    private WindowsJobObjectLease(SafeJobHandle handle)
+    private WindowsJobObjectLease(SafeJobHandle handle, WindowsJobObjectPolicy policy)
     {
         _handle = handle;
+        Policy = policy;
     }
+
+    public WindowsJobObjectPolicy Policy { get; }
 
     public static WindowsJobObjectLease CreateAndAssign(Process process, WindowsJobObjectPolicy policy)
     {
@@ -49,6 +57,11 @@ internal sealed class WindowsJobObjectLease : IDisposable
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException("Windows Job Object containment requires Windows.");
+        }
+
+        if (process.HasExited)
+        {
+            throw new InvalidOperationException("Cannot assign an exited process to a governed Job Object.");
         }
 
         var handle = NativeMethods.CreateJobObjectW(IntPtr.Zero, null);
@@ -65,7 +78,7 @@ internal sealed class WindowsJobObjectLease : IDisposable
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not assign the adapter process to the governed Windows Job Object.");
             }
 
-            return new WindowsJobObjectLease(handle);
+            return new WindowsJobObjectLease(handle, policy);
         }
         catch
         {
@@ -157,14 +170,14 @@ internal sealed class WindowsJobObjectLease : IDisposable
 
     private sealed class SafeJobHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
-        private SafeJobHandle() : base(ownsHandle: true)
+        public SafeJobHandle() : base(ownsHandle: true)
         {
         }
 
         protected override bool ReleaseHandle() => NativeMethods.CloseHandle(handle);
     }
 
-    private static partial class NativeMethods
+    private static class NativeMethods
     {
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         internal static extern SafeJobHandle CreateJobObjectW(IntPtr jobAttributes, string? name);
