@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>AEVRIX.Remote.Security</AssemblyName>
+    <RootNamespace>Aevrix.Remote.Security</RootNamespace>
+  </PropertyGroup>
+</Project>
