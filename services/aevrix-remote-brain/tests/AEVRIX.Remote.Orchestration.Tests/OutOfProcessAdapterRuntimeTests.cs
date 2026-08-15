@@ -89,13 +89,14 @@ public sealed class OutOfProcessAdapterRuntimeTests
     {
         using var workspace = new TemporaryWorkspace();
         var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "ping.exe");
+        var executableHash = await Sha256Async(executable);
         var runtime = new OutOfProcessAdapterRuntime();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => runtime.ExecuteAsync(
             new OutOfProcessExecutionRequest(
                 executable,
-                await Sha256Async(executable),
+                executableHash,
                 ["127.0.0.1", "-n", "20", "-w", "1000"],
                 workspace.Path,
                 TimeSpan.FromSeconds(10)),
