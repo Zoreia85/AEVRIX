@@ -35,7 +35,7 @@ public sealed class WindowsJobObjectLease : IDisposable
     private const uint JobObjectLimitActiveProcess = 0x00000008;
     private const uint JobObjectLimitProcessMemory = 0x00000100;
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
-    private const int JobObjectExtendedLimitInformation = 9;
+    private const int JobObjectExtendedLimitInformationClass = 9;
 
     private readonly SafeJobHandle _handle;
     private bool _disposed;
@@ -108,7 +108,7 @@ public sealed class WindowsJobObjectLease : IDisposable
             Marshal.StructureToPtr(information, buffer, false);
             if (!NativeMethods.SetInformationJobObject(
                     handle,
-                    JobObjectExtendedLimitInformation,
+                    JobObjectExtendedLimitInformationClass,
                     buffer,
                     checked((uint)size)))
             {
