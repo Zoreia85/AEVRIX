@@ -63,13 +63,10 @@ public sealed class WindowsAppContainerFilesystemBoundaryTests
         Assert.IsTrue(File.Exists(outsideReadObservation), "Filesystem probe did not record the external-read observation.");
         var readObservation = (await File.ReadAllTextAsync(outsideReadObservation)).Trim();
         Assert.IsTrue(readObservation is "allowed" or "denied", "External-read observation is invalid.");
-        TestContext.WriteLine($"Controlled external read observation: {readObservation}.");
         Assert.IsFalse(File.Exists(outsideWrite), "AppContainer wrote outside the governed workspace.");
         Assert.AreEqual("outside-secret", await File.ReadAllTextAsync(outsideSource),
             "External sentinel content changed unexpectedly.");
     }
-
-    public TestContext TestContext { get; set; } = null!;
 
     private static PinnedExecutableDescriptor Descriptor(string path)
     {
