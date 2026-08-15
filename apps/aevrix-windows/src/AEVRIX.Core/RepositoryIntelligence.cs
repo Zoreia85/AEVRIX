@@ -98,6 +98,7 @@ public sealed record RepositoryIntelligenceRecord(
 public static class RepositoryIntelligenceCatalog
 {
     private static readonly DateTimeOffset VerifiedAt = new(2026, 8, 14, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset MxcVerifiedAt = new(2026, 8, 15, 0, 0, 0, TimeSpan.Zero);
 
     public static IReadOnlyList<RepositoryIntelligenceRecord> InitialSeeds { get; } =
     [
@@ -110,7 +111,8 @@ public static class RepositoryIntelligenceCatalog
         Seed("nexu-io", "open-design", "Local-first reconstruction/design-studio architecture reference", RepositoryIntegrationMode.Adapter, "Apache-2.0", ["sandboxed-preview", "agent-runtime-adapter"], ["unreviewed-plugin-execution"]),
         Seed("public-apis", "public-apis", "Public API discovery catalog", RepositoryIntegrationMode.DiscoverySeed, "MIT", ["api-discovery"], ["automatic-credential-use"]),
         Seed("D4Vinci", "Scrapling", "Authorized web evidence collection and resilient parsing candidate", RepositoryIntegrationMode.Adapter, "BSD-3-Clause", ["authorized-public-web-fetch", "resilient-parsing"], ["anti-bot-bypass", "captcha-bypass", "cloudflare-bypass", "access-control-evasion"]),
-        Seed("ripienaar", "free-for-dev", "Infrastructure and cost-discovery reference", RepositoryIntegrationMode.Reference, null, ["service-discovery"], ["catalog-vendoring", "automatic-service-enrollment"])
+        Seed("ripienaar", "free-for-dev", "Infrastructure and cost-discovery reference", RepositoryIntegrationMode.Reference, null, ["service-discovery"], ["catalog-vendoring", "automatic-service-enrollment"]),
+        Seed("microsoft", "mxc", "Microsoft policy-driven isolation and containment architecture reference", RepositoryIntegrationMode.Reference, "MIT", ["sandbox-architecture-study", "isolation-policy-study", "containment-benchmark-design"], ["automatic-code-execution", "automatic-build", "runtime-dependency"], MxcVerifiedAt)
     ];
 
     public static RepositoryIntelligenceRecord Find(string fullName)
@@ -126,7 +128,8 @@ public static class RepositoryIntelligenceCatalog
         RepositoryIntegrationMode mode,
         string? license,
         IReadOnlyList<string> allowedCapabilities,
-        IReadOnlyList<string> deniedCapabilities)
+        IReadOnlyList<string> deniedCapabilities,
+        DateTimeOffset? verifiedAt = null)
     {
         var record = new RepositoryIntelligenceRecord(
             owner,
@@ -139,7 +142,7 @@ public static class RepositoryIntelligenceCatalog
             ContentSha256: null,
             SecurityReview: RepositorySecurityReviewState.NeedsReview,
             RuntimeAllowlisted: false,
-            LastVerifiedAt: VerifiedAt,
+            LastVerifiedAt: verifiedAt ?? VerifiedAt,
             AllowedCapabilities: allowedCapabilities,
             DeniedCapabilities: deniedCapabilities);
 
