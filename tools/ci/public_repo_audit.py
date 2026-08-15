@@ -5,7 +5,6 @@ import ast
 import hashlib
 import json
 import re
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +16,7 @@ PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
 LIKELY_SECRET = re.compile(r"(?im)^\s*(?:(?:const|static|readonly|var|string)\s+)*(?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password)\s*=\s*[\"'][^\"']{12,}[\"']")
 JSON_SECRET = re.compile(r"(?im)^\s*[\"](?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password)[\"]\s*:\s*[\"][^\"]{12,}[\"]")
 DIRECT_HTTP = re.compile(r"\bnew\s+HttpClient\s*\(")
+PATCH_QUEUE_GROUP = "group: aevrix-bot-patch-authoritative"
 
 
 def source_files():
@@ -29,6 +29,28 @@ def source_files():
 
 def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
+
+
+def audit_patch_queue_policy(failures: list[str]) -> None:
+    workflows = ROOT / ".github" / "workflows"
+    legacy = (workflows / "bot-patch.yml").read_text(encoding="utf-8")
+    authoritative = (workflows / "bot-patch-v2.yml").read_text(encoding="utf-8")
+    marker_cleanup = (workflows / "bot-patch-v3.yml").read_text(encoding="utf-8")
+
+    if "issues:" in legacy or "contents: write" in legacy:
+        failures.append("legacy patch processor must remain issue-disabled and read-only")
+    if PATCH_QUEUE_GROUP not in authoritative or PATCH_QUEUE_GROUP not in marker_cleanup:
+        failures.append("patch queue and marker cleanup must share one repository-wide concurrency group")
+    if "rm -rf .aevrix/queue" not in authoritative:
+        failures.append("authoritative patch queue must remove stale queue markers before promotion")
+    if "git push --force origin" in marker_cleanup:
+        failures.append("marker cleanup must never perform an unconditional force push")
+    if "git push --force-with-lease=main:${GITHUB_SHA}" not in marker_cleanup:
+        failures.append("marker cleanup must use an exact main-tip force-with-lease")
+    if 'if [ "$ORIGIN_MAIN" != "$GITHUB_SHA" ]' not in marker_cleanup:
+        failures.append("marker cleanup must verify that it still owns the main tip before restoring")
+    if "steps.discover" in marker_cleanup or "AEVRIX-PATCH-V1" in marker_cleanup:
+        failures.append("marker cleanup must not process patch payloads")
 
 
 def main() -> int:
@@ -63,6 +85,8 @@ def main() -> int:
         failures.append("LICENSE missing")
     if not (ROOT / "SECURITY.md").is_file():
         failures.append("SECURITY.md missing")
+
+    audit_patch_queue_policy(failures)
 
     manifest = []
     for path in sorted(files):
