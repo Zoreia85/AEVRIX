@@ -23,3 +23,9 @@ jobs:
 
       - name: Public source audit
         run: python3 tools/ci/public_repo_audit.py
+
+      - name: Repository intelligence audit
+        run: python3 tools/ci/repository_intelligence_audit.py
+
+      - name: Repository intelligence audit tests
+        run: python3 -m unittest tools.ci.test_repository_intelligence_audit
