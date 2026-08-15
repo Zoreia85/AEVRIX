@@ -7,7 +7,8 @@ namespace Aevrix.Remote.Capabilities;
 
 public sealed record WindowsJobObjectPolicy(
     long MaximumProcessMemoryBytes,
-    int MaximumActiveProcesses = 1)
+    int MaximumActiveProcesses = 1,
+    int? MaximumCpuRatePercent = null)
 {
     public WindowsJobObjectPolicy Validate()
     {
@@ -21,14 +22,20 @@ public sealed record WindowsJobObjectPolicy(
             throw new ArgumentOutOfRangeException(nameof(MaximumActiveProcesses));
         }
 
+        if (MaximumCpuRatePercent is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumCpuRatePercent));
+        }
+
         return this;
     }
 }
 
 /// <summary>
 /// Owns a Windows Job Object configured for AEVRIX adapter containment. Closing the lease
-/// terminates all processes that remain in the job. This primitive enforces process-count and
-/// per-process memory limits; it does not claim network, filesystem ACL or CPU isolation.
+/// terminates all processes that remain in the job. This primitive enforces process-count,
+/// per-process memory and, when configured, a hard CPU-rate cap. It does not claim network,
+/// filesystem ACL or race-free suspended-start isolation.
 /// </summary>
 public sealed class WindowsJobObjectLease : IDisposable
 {
@@ -36,6 +43,9 @@ public sealed class WindowsJobObjectLease : IDisposable
     private const uint JobObjectLimitProcessMemory = 0x00000100;
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
     private const int JobObjectExtendedLimitInformationClass = 9;
+    private const int JobObjectCpuRateControlInformationClass = 15;
+    private const uint JobObjectCpuRateControlEnable = 0x1;
+    private const uint JobObjectCpuRateControlHardCap = 0x4;
 
     private readonly SafeJobHandle _handle;
     private bool _disposed;
@@ -47,6 +57,7 @@ public sealed class WindowsJobObjectLease : IDisposable
     }
 
     public WindowsJobObjectPolicy Policy { get; }
+    public bool CpuRateLimitEnforced => Policy.MaximumCpuRatePercent.HasValue;
 
     public static WindowsJobObjectLease CreateAndAssign(Process process, WindowsJobObjectPolicy policy)
     {
@@ -72,7 +83,8 @@ public sealed class WindowsJobObjectLease : IDisposable
 
         try
         {
-            Configure(handle, policy);
+            ConfigureLimits(handle, policy);
+            ConfigureCpuRate(handle, policy);
             if (!NativeMethods.AssignProcessToJobObject(handle, process.Handle))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not assign the adapter process to the governed Windows Job Object.");
@@ -87,7 +99,7 @@ public sealed class WindowsJobObjectLease : IDisposable
         }
     }
 
-    private static void Configure(SafeJobHandle handle, WindowsJobObjectPolicy policy)
+    private static void ConfigureLimits(SafeJobHandle handle, WindowsJobObjectPolicy policy)
     {
         var information = new JobObjectExtendedLimitInformation
         {
@@ -101,18 +113,45 @@ public sealed class WindowsJobObjectLease : IDisposable
             ProcessMemoryLimit = checked((UIntPtr)(ulong)policy.MaximumProcessMemoryBytes)
         };
 
-        var size = Marshal.SizeOf<JobObjectExtendedLimitInformation>();
+        SetInformation(handle, JobObjectExtendedLimitInformationClass, information,
+            "Could not configure governed Windows Job Object limits.");
+    }
+
+    private static void ConfigureCpuRate(SafeJobHandle handle, WindowsJobObjectPolicy policy)
+    {
+        if (!policy.MaximumCpuRatePercent.HasValue)
+        {
+            return;
+        }
+
+        var information = new JobObjectCpuRateControlInformation
+        {
+            ControlFlags = JobObjectCpuRateControlEnable | JobObjectCpuRateControlHardCap,
+            CpuRate = checked((uint)policy.MaximumCpuRatePercent.Value * 100u)
+        };
+
+        SetInformation(handle, JobObjectCpuRateControlInformationClass, information,
+            "Could not configure governed Windows Job Object CPU hard cap.");
+    }
+
+    private static void SetInformation<T>(
+        SafeJobHandle handle,
+        int informationClass,
+        T information,
+        string errorMessage) where T : struct
+    {
+        var size = Marshal.SizeOf<T>();
         var buffer = Marshal.AllocHGlobal(size);
         try
         {
             Marshal.StructureToPtr(information, buffer, false);
             if (!NativeMethods.SetInformationJobObject(
                     handle,
-                    JobObjectExtendedLimitInformationClass,
+                    informationClass,
                     buffer,
                     checked((uint)size)))
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not configure governed Windows Job Object limits.");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), errorMessage);
             }
         }
         finally
@@ -166,6 +205,13 @@ public sealed class WindowsJobObjectLease : IDisposable
         public UIntPtr JobMemoryLimit;
         public UIntPtr PeakProcessMemoryUsed;
         public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectCpuRateControlInformation
+    {
+        public uint ControlFlags;
+        public uint CpuRate;
     }
 
     private sealed class SafeJobHandle : SafeHandleZeroOrMinusOneIsInvalid
