@@ -137,9 +137,8 @@ public sealed record OutOfProcessExecutionResult(
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
-/// Windows Job Object limits are assigned immediately after launch. Callers that require race-free
-/// pre-execution assignment must set RequireRaceFreeJobAssignment; this implementation fails closed
-/// until a suspended-start or process-creation Job-list launcher is integrated.
+/// On Windows, strict Job Object workloads are created suspended, assigned to the configured
+/// Job Object before any adapter instruction executes, and resumed only after assignment succeeds.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -164,14 +163,14 @@ public sealed class PinnedOutOfProcessRuntime
         request.Validate();
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_policy.RequireRaceFreeJobAssignment)
-        {
-            throw new PlatformNotSupportedException("This runtime cannot yet guarantee race-free Job Object assignment before adapter code begins executing.");
-        }
-
         var workingDirectory = EnsureContainedWorkspace(request.WorkingDirectory);
         ValidateRequestedEnvironment(request.Environment);
         using var executableLock = VerifyExecutableHashAndLock();
+
+        if (_policy.RequireRaceFreeJobAssignment)
+        {
+            return await ExecuteRaceFreeWindowsAsync(request, workingDirectory, cancellationToken).ConfigureAwait(false);
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -234,6 +233,63 @@ public sealed class PinnedOutOfProcessRuntime
         finally { jobLease?.Dispose(); }
     }
 
+    private async Task<OutOfProcessExecutionResult> ExecuteRaceFreeWindowsAsync(
+        OutOfProcessExecutionRequest request,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Race-free Job Object assignment requires Windows.");
+        }
+
+        var jobPolicy = _policy.WindowsJobObject
+            ?? throw new InvalidOperationException("Race-free Job Object assignment requires a Job Object policy.");
+        var environment = BuildMinimalEnvironment(request.Environment);
+        var started = Stopwatch.GetTimestamp();
+        using var launch = WindowsRaceFreeProcessLauncher.Start(
+            Path.GetFullPath(_executable.ExecutablePath),
+            request.Arguments,
+            workingDirectory,
+            environment,
+            jobPolicy);
+        var process = launch.Process;
+
+        using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        runtimeCancellation.CancelAfter(_policy.MaximumRuntime);
+        try
+        {
+            var stdout = ReadBoundedAsync(launch.StandardOutput, _policy.MaximumStdoutBytes, process, runtimeCancellation.Token);
+            var stderr = ReadBoundedAsync(launch.StandardError, _policy.MaximumStderrBytes, process, runtimeCancellation.Token);
+            var wait = process.WaitForExitAsync(runtimeCancellation.Token);
+            await Task.WhenAll(wait, stdout, stderr).ConfigureAwait(false);
+            return new OutOfProcessExecutionResult(
+                process.ExitCode,
+                Encoding.UTF8.GetString(stdout.Result),
+                Encoding.UTF8.GetString(stderr.Result),
+                Stopwatch.GetElapsedTime(started),
+                new OutOfProcessExecutionAttestation(
+                    true, true, true, true,
+                    true, true, true, true,
+                    false,
+                    launch.JobLease.CpuRateLimitEnforced,
+                    false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            KillTree(process); await ObserveExitAsync(process).ConfigureAwait(false); throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            KillTree(process); await ObserveExitAsync(process).ConfigureAwait(false);
+            throw new TimeoutException("Pinned adapter process exceeded its governed runtime.", exception);
+        }
+        catch
+        {
+            KillTree(process); await ObserveExitAsync(process).ConfigureAwait(false); throw;
+        }
+    }
+
     private FileStream VerifyExecutableHashAndLock()
     {
         var path = Path.GetFullPath(_executable.ExecutablePath);
@@ -278,13 +334,27 @@ public sealed class PinnedOutOfProcessRuntime
         if (requested.Keys.Any(key => !allowed.Contains(key))) throw new UnauthorizedAccessException("Requested process environment contains keys outside the explicit allowlist.");
     }
 
+    private Dictionary<string, string> BuildMinimalEnvironment(IReadOnlyDictionary<string, string>? requested)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var inheritedKeys = _policy.InheritedEnvironmentKeys ?? OutOfProcessExecutionPolicy.DefaultInheritedEnvironmentKeys;
+        foreach (var key in inheritedKeys)
+        {
+            var value = Environment.GetEnvironmentVariable(key);
+            if (value is not null) result[key] = value;
+        }
+        if (requested is not null)
+        {
+            foreach (var pair in requested) result[pair.Key] = pair.Value;
+        }
+        return result;
+    }
+
     private void ApplyMinimalEnvironment(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string>? requested)
     {
-        var inheritedKeys = _policy.InheritedEnvironmentKeys ?? OutOfProcessExecutionPolicy.DefaultInheritedEnvironmentKeys;
-        var inherited = inheritedKeys.Select(key => (Key: key, Value: Environment.GetEnvironmentVariable(key))).Where(item => item.Value is not null).ToArray();
+        var environment = BuildMinimalEnvironment(requested);
         startInfo.Environment.Clear();
-        foreach (var item in inherited) startInfo.Environment[item.Key] = item.Value!;
-        if (requested is not null) foreach (var pair in requested) startInfo.Environment[pair.Key] = pair.Value;
+        foreach (var pair in environment) startInfo.Environment[pair.Key] = pair.Value;
     }
 
     private static async Task<byte[]> ReadBoundedAsync(Stream stream, int maximumBytes, Process process, CancellationToken cancellationToken)
