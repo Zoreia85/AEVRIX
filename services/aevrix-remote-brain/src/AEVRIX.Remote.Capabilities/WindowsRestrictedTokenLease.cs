@@ -6,8 +6,9 @@ using Microsoft.Win32.SafeHandles;
 namespace Aevrix.Remote.Capabilities;
 
 /// <summary>
-/// Owns a Windows primary access token created with DISABLE_MAX_PRIVILEGE and explicitly
-/// lowered to Low mandatory integrity. This is a privilege/integrity reduction primitive only:
+/// Owns a Windows primary access token created with DISABLE_MAX_PRIVILEGE, with the
+/// BUILTIN\Administrators SID made deny-only when present, and explicitly lowered to
+/// Low mandatory integrity. This is a privilege/identity/integrity reduction primitive only:
 /// it does not itself enforce filesystem or network isolation and must not be used to attest either.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -18,32 +19,39 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     private const uint TokenQuery = 0x0008;
     private const uint TokenAdjustDefault = 0x0080;
     private const uint DisableMaxPrivilege = 0x00000001;
+    private const int TokenGroups = 2;
     private const int TokenPrivileges = 3;
     private const int TokenType = 8;
     private const int TokenIntegrityLevel = 25;
     private const int TokenPrimary = 1;
     private const uint SePrivilegeEnabled = 0x00000002;
+    private const uint SeGroupEnabled = 0x00000004;
+    private const uint SeGroupUseForDenyOnly = 0x00000010;
     private const uint SeGroupIntegrity = 0x00000020;
     private const int ErrorInsufficientBuffer = 122;
     private const uint LowIntegrityRid = 4096;
     private const string LowIntegritySid = "S-1-16-4096";
+    private const string BuiltinAdministratorsSid = "S-1-5-32-544";
 
     private readonly SafeAccessTokenHandle _token;
 
     private WindowsRestrictedTokenLease(
         SafeAccessTokenHandle token,
         int enabledPrivilegeCount,
-        bool lowIntegrityEnforced)
+        bool lowIntegrityEnforced,
+        bool administratorSidRestricted)
     {
         _token = token;
         EnabledPrivilegeCount = enabledPrivilegeCount;
         LowIntegrityEnforced = lowIntegrityEnforced;
+        AdministratorSidRestricted = administratorSidRestricted;
     }
 
     public int EnabledPrivilegeCount { get; }
     public bool IsPrimaryToken => !_token.IsClosed && ReadTokenType(_token) == TokenPrimary;
     public bool MaximumPrivilegesDisabled => EnabledPrivilegeCount <= 1;
     public bool LowIntegrityEnforced { get; }
+    public bool AdministratorSidRestricted { get; }
     public bool IsClosed => _token.IsClosed;
 
     internal IntPtr DangerousTokenHandle
@@ -71,52 +79,89 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
 
         using (processToken)
         {
-            if (!CreateRestrictedToken(
-                    processToken,
-                    DisableMaxPrivilege,
-                    0,
-                    IntPtr.Zero,
-                    0,
-                    IntPtr.Zero,
-                    0,
-                    IntPtr.Zero,
-                    out var restrictedToken))
+            if (!ConvertStringSidToSidW(BuiltinAdministratorsSid, out var administratorsSid))
             {
-                throw Win32("CreateRestrictedToken failed.");
+                throw Win32("ConvertStringSidToSidW(Administrators) failed.");
             }
 
+            var disabledSidBuffer = IntPtr.Zero;
             try
             {
-                var tokenType = ReadTokenType(restrictedToken);
-                if (tokenType != TokenPrimary)
+                if (!IsValidSid(administratorsSid))
                 {
-                    throw new InvalidOperationException("Restricted token is not a primary token.");
+                    throw new InvalidDataException("Administrators SID conversion returned an invalid SID.");
                 }
 
-                var enabledPrivileges = CountEnabledPrivileges(restrictedToken);
-                if (enabledPrivileges > 1)
+                disabledSidBuffer = Marshal.AllocHGlobal(Marshal.SizeOf<SidAndAttributes>());
+                Marshal.StructureToPtr(
+                    new SidAndAttributes { Sid = administratorsSid, Attributes = 0 },
+                    disabledSidBuffer,
+                    false);
+
+                if (!CreateRestrictedToken(
+                        processToken,
+                        DisableMaxPrivilege,
+                        1,
+                        disabledSidBuffer,
+                        0,
+                        IntPtr.Zero,
+                        0,
+                        IntPtr.Zero,
+                        out var restrictedToken))
                 {
-                    throw new InvalidOperationException(
-                        "Restricted token retained more enabled privileges than permitted by DISABLE_MAX_PRIVILEGE policy.");
+                    throw Win32("CreateRestrictedToken failed.");
                 }
 
-                ApplyLowIntegrity(restrictedToken);
-                var lowIntegrityEnforced = ReadIntegrityRid(restrictedToken) == LowIntegrityRid;
-                if (!lowIntegrityEnforced)
+                try
                 {
-                    throw new InvalidOperationException(
-                        "Restricted token did not retain the required Low mandatory integrity level.");
-                }
+                    var tokenType = ReadTokenType(restrictedToken);
+                    if (tokenType != TokenPrimary)
+                    {
+                        throw new InvalidOperationException("Restricted token is not a primary token.");
+                    }
 
-                return new WindowsRestrictedTokenLease(
-                    restrictedToken,
-                    enabledPrivileges,
-                    lowIntegrityEnforced);
+                    var enabledPrivileges = CountEnabledPrivileges(restrictedToken);
+                    if (enabledPrivileges > 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted token retained more enabled privileges than permitted by DISABLE_MAX_PRIVILEGE policy.");
+                    }
+
+                    var administratorSidRestricted = IsSidDenyOnlyOrAbsent(restrictedToken, administratorsSid);
+                    if (!administratorSidRestricted)
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted token retained an enabled BUILTIN\\Administrators SID.");
+                    }
+
+                    ApplyLowIntegrity(restrictedToken);
+                    var lowIntegrityEnforced = ReadIntegrityRid(restrictedToken) == LowIntegrityRid;
+                    if (!lowIntegrityEnforced)
+                    {
+                        throw new InvalidOperationException(
+                            "Restricted token did not retain the required Low mandatory integrity level.");
+                    }
+
+                    return new WindowsRestrictedTokenLease(
+                        restrictedToken,
+                        enabledPrivileges,
+                        lowIntegrityEnforced,
+                        administratorSidRestricted);
+                }
+                catch
+                {
+                    restrictedToken.Dispose();
+                    throw;
+                }
             }
-            catch
+            finally
             {
-                restrictedToken.Dispose();
-                throw;
+                if (disabledSidBuffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(disabledSidBuffer);
+                }
+
+                _ = LocalFree(administratorsSid);
             }
         }
     }
@@ -131,6 +176,24 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     {
         using var processToken = OpenChildProcessToken(processHandle);
         return ReadIntegrityRid(processToken) == LowIntegrityRid;
+    }
+
+    internal static bool ProcessTokenHasAdministratorSidRestricted(IntPtr processHandle)
+    {
+        using var processToken = OpenChildProcessToken(processHandle);
+        if (!ConvertStringSidToSidW(BuiltinAdministratorsSid, out var administratorsSid))
+        {
+            throw Win32("ConvertStringSidToSidW(Administrators) failed.");
+        }
+
+        try
+        {
+            return IsSidDenyOnlyOrAbsent(processToken, administratorsSid);
+        }
+        finally
+        {
+            _ = LocalFree(administratorsSid);
+        }
     }
 
     public void Dispose() => _token.Dispose();
@@ -266,6 +329,57 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
         }
     }
 
+    private static bool IsSidDenyOnlyOrAbsent(SafeAccessTokenHandle token, IntPtr sid)
+    {
+        _ = GetTokenInformation(token, TokenGroups, IntPtr.Zero, 0, out var requiredBytes);
+        var error = Marshal.GetLastPInvokeError();
+        if (requiredBytes <= 0 || error != ErrorInsufficientBuffer)
+        {
+            throw Win32("GetTokenInformation(TokenGroups) size query failed.");
+        }
+
+        var buffer = Marshal.AllocHGlobal(requiredBytes);
+        try
+        {
+            if (!GetTokenInformation(token, TokenGroups, buffer, requiredBytes, out _))
+            {
+                throw Win32("GetTokenInformation(TokenGroups) failed.");
+            }
+
+            var groupCount = Marshal.ReadInt32(buffer);
+            if (groupCount is < 0 or > 4096)
+            {
+                throw new InvalidDataException("Restricted token group count is outside safe bounds.");
+            }
+
+            var entrySize = Marshal.SizeOf<SidAndAttributes>();
+            var firstEntryOffset = IntPtr.Size == 8 ? 8 : sizeof(uint);
+            for (var index = 0; index < groupCount; index++)
+            {
+                var entryOffset = checked(firstEntryOffset + (index * entrySize));
+                if (entryOffset + entrySize > requiredBytes)
+                {
+                    throw new InvalidDataException("Restricted token group buffer is malformed.");
+                }
+
+                var entry = Marshal.PtrToStructure<SidAndAttributes>(IntPtr.Add(buffer, entryOffset));
+                if (entry.Sid == IntPtr.Zero || !EqualSid(entry.Sid, sid))
+                {
+                    continue;
+                }
+
+                return (entry.Attributes & SeGroupUseForDenyOnly) != 0
+                    && (entry.Attributes & SeGroupEnabled) == 0;
+            }
+
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     private static int CountEnabledPrivileges(SafeAccessTokenHandle token)
     {
         _ = GetTokenInformation(token, TokenPrivileges, IntPtr.Zero, 0, out var requiredBytes);
@@ -378,6 +492,10 @@ public sealed class WindowsRestrictedTokenLease : IDisposable
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsValidSid(IntPtr sid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EqualSid(IntPtr sid1, IntPtr sid2);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern int GetLengthSid(IntPtr sid);
