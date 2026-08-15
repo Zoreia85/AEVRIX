@@ -125,7 +125,8 @@ internal static class WindowsRaceFreeProcessLauncher
             };
 
             var commandLine = new StringBuilder(BuildCommandLine(executablePath, arguments));
-            environmentPointer = Marshal.StringToHGlobalUni(BuildEnvironmentBlock(environment));
+            var effectiveEnvironment = BuildLaunchEnvironment(environment, appContainerProfile);
+            environmentPointer = Marshal.StringToHGlobalUni(BuildEnvironmentBlock(effectiveEnvironment));
             var creationFlags = CreateSuspended | CreateNoWindow | CreateUnicodeEnvironment | ExtendedStartupInfoPresent;
 
             var created = restrictedToken is null
@@ -320,6 +321,22 @@ internal static class WindowsRaceFreeProcessLauncher
             handleList = IntPtr.Zero;
             throw;
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static IReadOnlyDictionary<string, string> BuildLaunchEnvironment(
+        IReadOnlyDictionary<string, string> environment,
+        WindowsAppContainerProfileLease? appContainerProfile)
+    {
+        if (appContainerProfile is null) return environment;
+
+        var result = new Dictionary<string, string>(environment, StringComparer.OrdinalIgnoreCase)
+        {
+            ["LOCALAPPDATA"] = appContainerProfile.ProfileFolderPath,
+            ["TEMP"] = appContainerProfile.TempFolderPath,
+            ["TMP"] = appContainerProfile.TempFolderPath
+        };
+        return result;
     }
 
     private static bool ProcessTokenIsAppContainer(IntPtr processHandle)
