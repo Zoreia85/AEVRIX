@@ -53,6 +53,23 @@ def audit_patch_queue_policy(failures: list[str]) -> None:
         failures.append("marker cleanup must not process patch payloads")
 
 
+def audit_privacy_root_policy(failures: list[str]) -> None:
+    workflow = (ROOT / ".github" / "workflows" / "privacy-root-rewrite.yml").read_text(encoding="utf-8")
+
+    if "branches: [main]" not in workflow:
+        failures.append("privacy root rewrite must monitor pushes to main")
+    if "paths:" in workflow:
+        failures.append("privacy root rewrite must not be path-filtered")
+    if "github.actor != 'github-actions[bot]'" not in workflow:
+        failures.append("privacy root rewrite must skip bot-authored canonical roots")
+    if 'git config user.name "github-actions[bot]"' not in workflow or 'git config user.email "41898282+github-actions[bot]@users.noreply.github.com"' not in workflow:
+        failures.append("privacy root rewrite must commit with bot/noreply identity")
+    if "python3 tools/ci/public_repo_audit.py" not in workflow:
+        failures.append("privacy root rewrite must audit the public tree before rewriting history")
+    if "git checkout --orphan privacy-safe-main" not in workflow:
+        failures.append("privacy root rewrite must replace user-authored ancestry with an orphan root")
+
+
 def main() -> int:
     failures: list[str] = []
     warnings: list[str] = []
@@ -87,6 +104,7 @@ def main() -> int:
         failures.append("SECURITY.md missing")
 
     audit_patch_queue_policy(failures)
+    audit_privacy_root_policy(failures)
 
     manifest = []
     for path in sorted(files):
