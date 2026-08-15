@@ -25,6 +25,7 @@ public sealed class PinnedOutOfProcessRuntimeTests
         Assert.IsTrue(result.Attestation.EnvironmentAllowlistApplied);
         Assert.IsFalse(result.Attestation.NetworkIsolationEnforced);
         Assert.IsFalse(result.Attestation.CpuMemoryLimitsEnforced);
+        Assert.IsFalse(result.Attestation.FilesystemIsolationEnforced);
     }
 
     [TestMethod]
@@ -113,6 +114,65 @@ public sealed class PinnedOutOfProcessRuntimeTests
         {
             Environment.SetEnvironmentVariable(key, before);
         }
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_RejectsRequestedEnvironmentByDefault()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var runtime = Runtime(workspace.Path, TimeSpan.FromSeconds(3));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest(
+                ["/d", "/c", "echo SHOULD-NOT-RUN"],
+                workspace.Path,
+                new Dictionary<string, string>
+                {
+                    ["AEVRIX_EXPLICIT_SECRET"] = "blocked"
+                })));
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_AllowsOnlyExplicitlyApprovedRequestedEnvironmentKeys()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        const string key = "AEVRIX_APPROVED_INPUT";
+        const string value = "approved-value";
+        var runtime = new PinnedOutOfProcessRuntime(
+            Descriptor(CommandProcessor()),
+            workspace.Path,
+            new OutOfProcessExecutionPolicy(
+                TimeSpan.FromSeconds(3),
+                AllowedRequestedEnvironmentKeys: [key]));
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", $"echo %{key}%"],
+            workspace.Path,
+            new Dictionary<string, string>
+            {
+                [key] = value
+            }));
+
+        Assert.AreEqual(0, result.ExitCode);
+        StringAssert.Contains(result.StandardOutput, value);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_ClosesChildStandardInput()
+    {
+        RequireWindows();
+        using var workspace = new TempDirectory();
+        var runtime = Runtime(workspace.Path, TimeSpan.FromSeconds(3));
+
+        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+            ["/d", "/c", "set /p A= & if defined A (echo INPUT-OPEN) else echo INPUT-CLOSED"],
+            workspace.Path));
+
+        Assert.AreEqual(0, result.ExitCode);
+        StringAssert.Contains(result.StandardOutput, "INPUT-CLOSED");
+        Assert.IsFalse(result.StandardOutput.Contains("INPUT-OPEN", StringComparison.Ordinal));
     }
 
     private static PinnedOutOfProcessRuntime Runtime(string workspaceRoot, TimeSpan timeout) =>
