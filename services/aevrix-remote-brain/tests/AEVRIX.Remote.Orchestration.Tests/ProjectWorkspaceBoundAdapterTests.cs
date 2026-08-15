@@ -44,7 +44,11 @@ public sealed class ProjectWorkspaceBoundAdapterTests
     {
         using var root = new TemporaryDirectory();
         var manager = new ProjectWorkspaceLeaseManager(new ProjectWorkspaceLeaseOptions(root.Path));
-        var inner = new WorkspaceAdapter("provider-a", shouldFail: false, writeFile: true);
+        var inner = new WorkspaceAdapter(
+            "provider-a",
+            shouldFail: false,
+            writeFile: true,
+            enforcedWorkspaceScope: AdapterWorkspaceScope.ReadOnly);
         var adapter = new ProjectWorkspaceBoundAdapter(inner, manager);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
@@ -59,7 +63,11 @@ public sealed class ProjectWorkspaceBoundAdapterTests
     {
         using var root = new TemporaryDirectory();
         var manager = new ProjectWorkspaceLeaseManager(new ProjectWorkspaceLeaseOptions(root.Path));
-        var inner = new WorkspaceAdapter("provider-a", shouldFail: false, writeFile: false);
+        var inner = new WorkspaceAdapter(
+            "provider-a",
+            shouldFail: false,
+            writeFile: false,
+            enforcedWorkspaceScope: AdapterWorkspaceScope.ReadOnly);
         var adapter = new ProjectWorkspaceBoundAdapter(inner, manager);
 
         await adapter.ExecuteAsync(Context(ProjectA), Envelope(AdapterWorkspaceScope.ReadOnly));
@@ -114,13 +122,15 @@ public sealed class ProjectWorkspaceBoundAdapterTests
     private sealed class WorkspaceAdapter(
         string providerId,
         bool shouldFail,
-        bool writeFile) : IProjectWorkspaceAwareMissionSpecialistProviderAdapter
+        bool writeFile,
+        AdapterWorkspaceScope enforcedWorkspaceScope = AdapterWorkspaceScope.ReadWrite)
+        : IProjectWorkspaceAwareMissionSpecialistProviderAdapter
     {
         public string ProviderId => providerId;
         public MissionSpecialistKind Kind => MissionSpecialistKind.StaticAnalysis;
         public SpecialistAdapterExecutionProfile ExecutionProfile { get; } = new(
             AdapterNetworkScope.None,
-            AdapterWorkspaceScope.ReadWrite,
+            enforcedWorkspaceScope,
             AgentIsolationLevel.Container);
         public string? ObservedRoot { get; private set; }
         public List<string> ObservedRoots { get; } = [];
