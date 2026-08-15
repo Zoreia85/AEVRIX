@@ -118,13 +118,54 @@ public sealed class AdaptiveMissionSpecialist : IMissionSpecialist
             var started = Stopwatch.GetTimestamp();
             using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+            IExecutionEnvelopeAwareMissionSpecialistProviderAdapter? governedProvider = null;
+            if (_executionPolicy.Envelope is { } envelope)
+            {
+                governedProvider = provider as IExecutionEnvelopeAwareMissionSpecialistProviderAdapter;
+                if (governedProvider is null || !governedProvider.ExecutionProfile.Validate().Satisfies(envelope))
+                {
+                    Record(provider.ProviderId, succeeded: false, observedQuality: 0, started);
+                    await ObserveSafelyAsync(
+                        provider.ProviderId,
+                        SpecialistAdapterAttemptOutcome.ExecutionEnvelopeRejected,
+                        started,
+                        outputConfidence: null,
+                        nameof(InvalidOperationException)).ConfigureAwait(false);
+                    failures.Add(new InvalidOperationException(
+                        $"Adapter '{provider.ProviderId}' cannot satisfy the governed execution envelope."));
+                    continue;
+                }
+            }
+
             try
             {
-                var providerTask = provider.ExecuteAsync(context, attemptCancellation.Token);
+                var providerTask = governedProvider is not null
+                    ? governedProvider.ExecuteAsync(context, _executionPolicy.Envelope!, attemptCancellation.Token)
+                    : provider.ExecuteAsync(context, attemptCancellation.Token);
                 var output = (await providerTask
                     .WaitAsync(_executionPolicy.AttemptTimeout, cancellationToken)
                     .ConfigureAwait(false))
                     .Validate();
+
+                if (_executionPolicy.Envelope is { } outputEnvelope)
+                {
+                    try
+                    {
+                        outputEnvelope.ValidateOutput(output);
+                    }
+                    catch (InvalidDataException exception)
+                    {
+                        Record(provider.ProviderId, succeeded: false, observedQuality: 0, started);
+                        await ObserveSafelyAsync(
+                            provider.ProviderId,
+                            SpecialistAdapterAttemptOutcome.OutputBudgetRejected,
+                            started,
+                            output.Confidence,
+                            nameof(InvalidDataException)).ConfigureAwait(false);
+                        failures.Add(exception);
+                        continue;
+                    }
+                }
 
                 var unknownEvidence = output.EvidenceIds
                     .Except(context.Task.EvidenceIds, StringComparer.OrdinalIgnoreCase)
