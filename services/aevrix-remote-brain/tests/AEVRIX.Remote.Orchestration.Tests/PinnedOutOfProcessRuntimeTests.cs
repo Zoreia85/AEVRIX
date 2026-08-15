@@ -37,7 +37,7 @@ public sealed class PinnedOutOfProcessRuntimeTests
 
         await Assert.ThrowsAsync<TimeoutException>(() => runtime.ExecuteAsync(
             new OutOfProcessExecutionRequest(
-                ["/d", "/c", "ping -n 20 127.0.0.1 >nul"],
+                ["/d", "/c", "for /L %i in (1,1,2147483647) do @set /a a=%i >nul"],
                 workspace.Path)));
 
         Assert.IsTrue(DateTimeOffset.UtcNow - started < TimeSpan.FromSeconds(5));
