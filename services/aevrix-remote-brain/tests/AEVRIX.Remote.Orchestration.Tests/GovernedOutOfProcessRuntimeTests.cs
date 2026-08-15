@@ -142,6 +142,65 @@ public sealed class GovernedOutOfProcessRuntimeTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_RejectsAuthorityBindingFromDifferentPolicy()
+    {
+        using var workspace = new TempDirectory();
+        var stalePolicy = new OutOfProcessAuthorityPolicy(
+            new OutOfProcessNetworkPolicy(OutOfProcessNetworkScope.LoopbackOnly),
+            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly));
+        var backend = new StubIsolationBackend(
+            "stale-attestation",
+            100,
+            true,
+            true,
+            true,
+            authorityFingerprintOverride: stalePolicy.ComputeFingerprint());
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_RejectsAuthorityBindingFromDifferentBackend()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "selected-backend",
+            100,
+            true,
+            true,
+            true,
+            backendIdOverride: "other-backend");
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+    }
+
+    [TestMethod]
+    public void ComputeFingerprint_IsDeterministicAndSensitiveToAuthority()
+    {
+        var one = new OutOfProcessAuthorityPolicy(
+            new OutOfProcessNetworkPolicy(
+                OutOfProcessNetworkScope.Allowlisted,
+                [new NetworkEndpointRule("LOCALHOST", 443), new NetworkEndpointRule("api.example.test", 8443)]),
+            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly));
+        var reordered = new OutOfProcessAuthorityPolicy(
+            new OutOfProcessNetworkPolicy(
+                OutOfProcessNetworkScope.Allowlisted,
+                [new NetworkEndpointRule("api.example.test", 8443), new NetworkEndpointRule("localhost", 443)]),
+            new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceOnly));
+        var changed = reordered with
+        {
+            Filesystem = new OutOfProcessFilesystemPolicy(OutOfProcessFilesystemScope.WorkspaceReadOnly)
+        };
+
+        Assert.AreEqual(one.ComputeFingerprint(), reordered.ComputeFingerprint());
+        Assert.AreNotEqual(one.ComputeFingerprint(), changed.ComputeFingerprint());
+    }
+
+    [TestMethod]
     public void Constructor_RejectsDuplicateBackendIds()
     {
         var one = new StubIsolationBackend("duplicate-backend", 1, true, true, true);
@@ -206,7 +265,9 @@ public sealed class GovernedOutOfProcessRuntimeTests
         int priority,
         bool canEnforce,
         bool networkEnforced,
-        bool filesystemEnforced) : IOutOfProcessIsolationBackend
+        bool filesystemEnforced,
+        string? backendIdOverride = null,
+        string? authorityFingerprintOverride = null) : IOutOfProcessIsolationBackend
     {
         public string BackendId => backendId;
         public int Priority => priority;
@@ -239,6 +300,13 @@ public sealed class GovernedOutOfProcessRuntimeTests
                     false,
                     filesystemEnforced)));
         }
+
+        public IsolationAuthorityAttestation AttestAuthority(
+            OutOfProcessAuthorityPolicy authority,
+            OutOfProcessExecutionResult execution) =>
+            new(
+                backendIdOverride ?? BackendId,
+                authorityFingerprintOverride ?? authority.ComputeFingerprint());
     }
 
     private sealed class TempDirectory : IDisposable
