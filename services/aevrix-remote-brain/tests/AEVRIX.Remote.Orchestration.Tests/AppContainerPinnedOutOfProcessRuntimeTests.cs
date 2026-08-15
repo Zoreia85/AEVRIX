@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Security.Cryptography;
 using Aevrix.Remote.Capabilities;
 
@@ -31,9 +32,18 @@ public sealed class AppContainerPinnedOutOfProcessRuntimeTests
                 RequireRaceFreeJobAssignment: true,
                 RequireAppContainer: true));
 
-        var result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
-            ["/d", "/c", $"echo APPCONTAINER-OK>{marker} & echo APPCONTAINER-OK"],
-            workspace.Path));
+        OutOfProcessExecutionResult result;
+        try
+        {
+            result = await runtime.ExecuteAsync(new OutOfProcessExecutionRequest(
+                ["/d", "/c", $"echo APPCONTAINER-OK>{marker} & echo APPCONTAINER-OK"],
+                workspace.Path));
+        }
+        catch (Win32Exception exception)
+        {
+            Assert.Fail($"AppContainer launch failed with Win32 error {exception.NativeErrorCode}: {exception.Message}");
+            throw;
+        }
 
         Assert.AreEqual(0, result.ExitCode);
         Assert.IsTrue(File.Exists(marker));
