@@ -77,6 +77,21 @@ public sealed record ResearchBrowserPolicy(
             throw new InvalidOperationException("Session failure window and cooldown must be positive.");
         }
 
+        if (RememberCredentials && !PersistTargetProfile)
+        {
+            throw new InvalidOperationException("Credential persistence requires an explicitly persistent target profile.");
+        }
+
+        if (AutomaticRelogin && (!PersistTargetProfile || !RememberCredentials))
+        {
+            throw new InvalidOperationException("Automatic relogin requires explicit profile and credential persistence.");
+        }
+
+        if ((PersistTargetProfile || RememberCredentials) && !ClearSiteDataWhenProjectDeleted)
+        {
+            throw new InvalidOperationException("Persistent browser state must be deleted with its project.");
+        }
+
         EgressPolicy.Validate();
         return this;
     }
@@ -87,14 +102,14 @@ public sealed record ResearchBrowserPolicy(
         EgressPolicy egressPolicy) => new ResearchBrowserPolicy(
             targetId,
             allowedHosts,
-            PersistTargetProfile: true,
-            RememberCredentials: true,
-            AutomaticRelogin: true,
+            PersistTargetProfile: false,
+            RememberCredentials: false,
+            AutomaticRelogin: false,
             PauseImmediatelyOnLogout: true,
             ShortWindowFailureThreshold: 3,
             FailureWindow: TimeSpan.FromMinutes(15),
             Cooldown: TimeSpan.FromMinutes(10),
-            ClearSiteDataWhenProjectDeleted: false,
+            ClearSiteDataWhenProjectDeleted: true,
             EgressPolicy: egressPolicy).Validate();
 }
 
