@@ -9,8 +9,14 @@ internal sealed record DesktopProjectSummary(
     string Domain,
     string Status,
     DateTimeOffset UpdatedAt,
+    DateTimeOffset? LastActivityAt,
     long SanitizedBytes,
-    long QuarantineBytes);
+    long QuarantineBytes)
+{
+    public bool RequiresAttention => QuarantineBytes > 0 || string.Equals(Status, "Blocked", StringComparison.OrdinalIgnoreCase) || string.Equals(Status, "Failed", StringComparison.OrdinalIgnoreCase);
+
+    public DateTimeOffset EffectiveActivityAt => LastActivityAt ?? UpdatedAt;
+}
 
 internal sealed record DesktopProjectCatalogState(
     bool Loaded,
@@ -44,16 +50,20 @@ internal sealed class DesktopProjectCatalogService
                     envelope.Project.Domain.ToString(),
                     envelope.Project.Status.ToString(),
                     envelope.UpdatedAt,
+                    envelope.Project.LastActivityAt,
                     envelope.Project.SanitizedBytes,
                     envelope.Project.QuarantineBytes))
+                .OrderByDescending(project => project.EffectiveActivityAt)
                 .ToArray();
 
-            return new DesktopProjectCatalogState(
-                true,
-                projects,
-                projects.Length == 0
-                    ? "Nenhum projeto local válido foi encontrado nesta estação."
-                    : $"{projects.Length} projeto(s) local(is) carregado(s) do repositório canônico.");
+            var attentionCount = projects.Count(project => project.RequiresAttention);
+            var detail = projects.Length == 0
+                ? "Nenhum projeto local válido foi encontrado nesta estação."
+                : attentionCount == 0
+                    ? $"{projects.Length} projeto(s) local(is) carregado(s); nenhum sinal local de quarentena/bloqueio."
+                    : $"{projects.Length} projeto(s) local(is) carregado(s); {attentionCount} exige(m) atenção por quarentena, bloqueio ou falha.";
+
+            return new DesktopProjectCatalogState(true, projects, detail);
         }
         catch (OperationCanceledException)
         {
