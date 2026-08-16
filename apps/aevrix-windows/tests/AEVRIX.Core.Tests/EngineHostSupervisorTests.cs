@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Aevrix.Core;
 using Aevrix.EngineHost;
 
@@ -114,6 +115,38 @@ public sealed class EngineHostSupervisorTests
     }
 
     [TestMethod]
+    public async Task StartAsync_RecoversAfterUnexpectedEngineHostExit()
+    {
+        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
+        await using var supervisor = new EngineHostSupervisor(
+            "dotnet",
+            new[] { engineAssembly },
+            startupTimeout: TimeSpan.FromSeconds(20),
+            requestTimeout: TimeSpan.FromSeconds(5));
+
+        await supervisor.StartAsync();
+        var processId = supervisor.ProcessId;
+        Assert.IsNotNull(processId);
+
+        await KillProcessAsync(processId.Value);
+
+        Assert.IsFalse(supervisor.IsRunning);
+        Assert.IsNull(supervisor.ProcessId);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await supervisor.SendAsync(new EnginePingCommand(Guid.NewGuid().ToString("N"))));
+
+        await supervisor.StartAsync();
+        var requestId = Guid.NewGuid().ToString("N");
+        var response = await supervisor.SendAsync(new EnginePingCommand(requestId));
+
+        Assert.IsTrue(response.Success);
+        Assert.AreEqual("pong", response.Code);
+        Assert.AreEqual(requestId, response.RequestId);
+        Assert.IsTrue(supervisor.IsRunning);
+        Assert.IsNotNull(supervisor.ProcessId);
+    }
+
+    [TestMethod]
     public async Task StartAsync_IsIdempotentWhileHealthy()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
@@ -165,5 +198,13 @@ public sealed class EngineHostSupervisorTests
 
         await Assert.ThrowsExactlyAsync<ObjectDisposedException>(async () =>
             await supervisor.StartAsync());
+    }
+
+    private static async Task KillProcessAsync(int processId)
+    {
+        using var process = Process.GetProcessById(processId);
+        process.Kill(entireProcessTree: true);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await process.WaitForExitAsync(timeout.Token);
     }
 }
