@@ -24,6 +24,16 @@ public sealed class CapabilitySourcePinningTests
     }
 
     [TestMethod]
+    public void Validate_RejectsNullRevisionAndContentDigestFailClosed()
+    {
+        var nullRevision = ValidSource() with { PinnedRevision = null! };
+        var nullContent = ValidSource() with { ContentSha256 = null! };
+
+        Assert.Throws<ArgumentException>(() => nullRevision.Validate());
+        Assert.Throws<ArgumentException>(() => nullContent.Validate());
+    }
+
+    [TestMethod]
     public void Validate_AcceptsFullSha1AndSha256ObjectIds()
     {
         ValidSource().Validate();

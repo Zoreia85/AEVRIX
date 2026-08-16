@@ -34,12 +34,12 @@ public sealed record CapabilitySource(
             throw new ArgumentException("Capability source SPDX license is missing or invalid.", nameof(SpdxLicense));
         }
 
-        if (!(PinnedRevision.Length is 40 or 64) || !IsNonZeroHex(PinnedRevision))
+        if (!IsFullGitObjectId(PinnedRevision))
         {
             throw new ArgumentException("Capability source revision must be a full non-zero Git object id (40 or 64 hexadecimal characters).", nameof(PinnedRevision));
         }
 
-        if (ContentSha256.Length != 64 || !IsNonZeroHex(ContentSha256))
+        if (!IsSha256Digest(ContentSha256))
         {
             throw new ArgumentException("Capability source content hash must be a non-zero SHA-256 hexadecimal digest.", nameof(ContentSha256));
         }
@@ -59,6 +59,16 @@ public sealed record CapabilitySource(
             && pieces.All(piece => piece.Length is > 0 and <= 100
                 && piece.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'));
     }
+
+    private static bool IsFullGitObjectId(string value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Length is 40 or 64
+        && IsNonZeroHex(value);
+
+    private static bool IsSha256Digest(string value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Length == 64
+        && IsNonZeroHex(value);
 
     private static bool IsNonZeroHex(string value) =>
         !string.IsNullOrWhiteSpace(value)
