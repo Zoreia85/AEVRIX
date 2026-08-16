@@ -19,8 +19,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-build-evidence-${{ github.ref }}
-  cancel-in-progress: true
+  group: desktop-build-evidence-${{ github.event_name }}-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -29,10 +29,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout exact current canonical candidate
+      - name: Checkout exact evidence candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
           persist-credentials: false
           fetch-depth: 1
 
