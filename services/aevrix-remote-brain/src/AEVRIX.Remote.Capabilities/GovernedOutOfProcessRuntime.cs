@@ -52,7 +52,9 @@ public sealed record OutOfProcessAuthorityDecision(
 
 public sealed record IsolationAuthorityAttestation(
     string BackendId,
-    string AuthorityFingerprint)
+    string AuthorityFingerprint,
+    bool FilesystemWriteBoundaryEnforced = false,
+    bool FilesystemReadIsolationEnforced = false)
 {
     public IsolationAuthorityAttestation Validate()
     {
@@ -74,6 +76,8 @@ public sealed record IsolationAuthorityAttestation(
 /// Replaceable execution backend for one authority profile. Backends may be local-process,
 /// AppContainer/restricted-token, container or VM implementations. Claiming support is not
 /// sufficient: the returned execution attestation is rechecked by the authority boundary.
+/// Filesystem-restricted authority requires independent proof of both an external-write boundary
+/// and external-read isolation; one must never be inferred from the other.
 /// </summary>
 public interface IOutOfProcessIsolationBackend
 {
@@ -144,8 +148,8 @@ public sealed class LocalUnrestrictedOutOfProcessBackend : IOutOfProcessIsolatio
 /// <summary>
 /// Single execution-authority boundary for pinned adapters. It chooses only a registered backend
 /// that declares it can enforce the complete network/filesystem authority profile. After execution,
-/// the boundary independently verifies both the enforcement flags and an attestation binding the
-/// exact backend identity to the exact requested authority fingerprint.
+/// the boundary independently verifies enforcement flags, granular filesystem proof when required,
+/// and an attestation binding the exact backend identity to the exact requested authority fingerprint.
 /// </summary>
 public sealed class GovernedOutOfProcessRuntime
 {
@@ -300,9 +304,20 @@ public sealed class GovernedOutOfProcessRuntime
             throw new InvalidDataException("Selected execution backend did not attest the required network isolation.");
         }
 
-        if (_authority.Filesystem.RequiresIsolation && !attestation.FilesystemIsolationEnforced)
+        if (_authority.Filesystem.RequiresIsolation)
         {
-            throw new InvalidDataException("Selected execution backend did not attest the required filesystem isolation.");
+            if (!attestation.FilesystemIsolationEnforced)
+            {
+                throw new InvalidDataException("Selected execution backend did not attest the required filesystem isolation.");
+            }
+            if (!binding.FilesystemWriteBoundaryEnforced)
+            {
+                throw new InvalidDataException("Selected execution backend did not attest an external-write filesystem boundary.");
+            }
+            if (!binding.FilesystemReadIsolationEnforced)
+            {
+                throw new InvalidDataException("Selected execution backend did not attest external-read filesystem isolation.");
+            }
         }
     }
 
