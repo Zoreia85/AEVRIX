@@ -29,6 +29,26 @@ public sealed class TrustedKnowledgeBlueprintProjectionValidationTests
                 new MissionKnowledgeItem("runtime", EvidenceFusionState.Convergent, knowledge)));
     }
 
+    [TestMethod]
+    public void ExecutionProvenanceBinder_RejectsPersonalDataBeforeBlueprintBinding()
+    {
+        var project = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var requirement = new BlueprintKnowledgeRequirement(
+            "BKR-pii-gate", project, "target-001", "runtime.framework", "Observed runtime.",
+            EvidenceObservationClass.Observed, EvidenceSensitivity.ProjectConfidential,
+            BlueprintKnowledgePromotionLevel.Reconstructable, 0.95, ["ev-pii"], "KN-pii", "VR-pii");
+        var observation = new EvidenceObservation(
+            "ev-pii", project, "target-001", "task-static", MissionSpecialistKind.StaticAnalysis,
+            EvidenceObservationClass.Observed, EvidenceSensitivity.PersonalData,
+            "runtime.framework", "dotnet", "Sanitized test observation.", 0.95, new string('a', 64),
+            DateTimeOffset.Parse("2026-08-16T03:00:00Z"), ["artifact-ref"], ["parent-evidence"],
+            ContainsPersonalData: true);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            new BlueprintExecutionProvenanceBinder().Bind(
+                requirement, "mission-alpha", [observation], [], ExecutionProofHead.Empty));
+    }
+
     private sealed class StaticRepository(CandidateKnowledge item) : ICandidateKnowledgeRepository
     {
         public Task StoreCandidateAsync(CandidateKnowledge candidate, CancellationToken cancellationToken = default) => Task.CompletedTask;
