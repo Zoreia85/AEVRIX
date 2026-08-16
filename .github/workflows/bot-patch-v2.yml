@@ -1,0 +1,250 @@
+name: AEVRIX Bot Patch Queue
+
+on:
+  issues:
+    types: [opened]
+  workflow_run:
+    workflows: ["Privacy-safe baseline import"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: aevrix-bot-patch-authoritative
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Find oldest owner patch issue
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          owner = repo.split("/", 1)[0]
+          api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "aevrix-bot-patch",
+          }
+          req = urllib.request.Request(
+              f"{api}/repos/{repo}/issues?state=open&sort=created&direction=asc&per_page=100",
+              headers=headers,
+          )
+          with urllib.request.urlopen(req) as response:
+              issues = json.loads(response.read())
+
+          selected = next((
+              issue for issue in issues
+              if "pull_request" not in issue
+              and issue.get("user", {}).get("login") == owner
+              and (issue.get("title") or "").startswith("[AEVRIX-PATCH]")
+          ), None)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              if selected is None:
+                  out.write("found=false\n")
+              else:
+                  out.write("found=true\n")
+                  out.write(f"number={selected['number']}\n")
+                  with open("/tmp/aevrix-patch-issue.json", "w", encoding="utf-8") as fh:
+                      json.dump({"number": selected["number"], "body": selected.get("body") or ""}, fh)
+          PY
+
+      - name: No queued patch
+        if: steps.discover.outputs.found != 'true'
+        run: echo "No owner-authored AEVRIX patch issue is queued."
+
+      - name: Decode owner patch
+        if: steps.discover.outputs.found == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+
+          with open("/tmp/aevrix-patch-issue.json", "r", encoding="utf-8") as fh:
+              issue = json.load(fh)
+          lines = (issue.get("body") or "").strip().splitlines()
+          if not lines or lines[0].strip() != "AEVRIX-PATCH-V1":
+              raise SystemExit("invalid patch envelope")
+          payload = "".join(line.strip() for line in lines[1:] if line.strip())
+          if len(payload) > 2_000_000:
+              raise SystemExit("patch payload too large")
+          try:
+              patch = base64.b64decode(payload, validate=True)
+          except Exception as exc:
+              raise SystemExit(f"invalid base64 payload: {exc}")
+          if not patch or len(patch) > 1_500_000:
+              raise SystemExit("invalid patch size")
+          with open("/tmp/aevrix.patch", "wb") as fh:
+              fh.write(patch)
+          PY
+
+      - name: Apply patch safely
+        if: steps.discover.outputs.found == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/aevrix.patch
+          git apply /tmp/aevrix.patch
+          if git diff --name-only --diff-filter=ACMR | grep -E '^\.github/workflows/'; then
+            echo "Workflow files cannot be changed through the patch bot."
+            exit 1
+          fi
+          if git diff --name-only --diff-filter=ACMR | grep -E '(^|/)(\.env|id_rsa|id_ed25519|.*\.pfx|.*\.p12|.*\.pem|.*\.key)$'; then
+            echo "Potential secret-bearing files are forbidden."
+            exit 1
+          fi
+          rm -rf .aevrix/queue
+
+      - name: Public source audit
+        if: steps.discover.outputs.found == 'true'
+        run: python3 tools/ci/public_repo_audit.py
+
+      - name: Setup .NET 10.0.400
+        if: steps.discover.outputs.found == 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.400"
+
+      - name: Test Windows Core
+        if: steps.discover.outputs.found == 'true'
+        run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
+
+      - name: Test Remote Security
+        if: steps.discover.outputs.found == 'true'
+        run: dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Security.Tests/AEVRIX.Remote.Security.Tests.csproj -c Release
+
+      - name: Test Orchestrator Judge
+        if: steps.discover.outputs.found == 'true'
+        run: dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Orchestration.Tests/AEVRIX.Remote.Orchestration.Tests.csproj -c Release
+
+      - name: Commit as GitHub bot
+        if: steps.discover.outputs.found == 'true'
+        id: commit
+        env:
+          ISSUE_NUMBER: ${{ steps.discover.outputs.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          validate_candidate() {
+            if git diff --name-only --diff-filter=ACMR | grep -E '^\.github/workflows/'; then
+              echo "Workflow files cannot be changed through the patch bot."
+              return 1
+            fi
+            if git diff --name-only --diff-filter=ACMR | grep -E '(^|/)(\.env|id_rsa|id_ed25519|.*\.pfx|.*\.p12|.*\.pem|.*\.key)$'; then
+              echo "Potential secret-bearing files are forbidden."
+              return 1
+            fi
+            rm -rf .aevrix/queue
+            python3 tools/ci/public_repo_audit.py
+            dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
+            dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Security.Tests/AEVRIX.Remote.Security.Tests.csproj -c Release
+            dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Orchestration.Tests/AEVRIX.Remote.Orchestration.Tests.csproj -c Release
+          }
+
+          commit_candidate() {
+            git add -A
+            if git diff --cached --quiet; then
+              return 0
+            fi
+            git commit -m "chore: apply owner patch #${ISSUE_NUMBER}"
+          }
+
+          commit_candidate
+
+          for attempt in 1 2 3; do
+            echo "Promotion attempt ${attempt}/3"
+            if git push origin HEAD:main; then
+              echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "main kept moving after three fully validated attempts."
+              exit 1
+            fi
+
+            echo "main moved; rebuilding the exact patch on the latest canonical root and rerunning every gate."
+            git fetch --depth=1 origin main
+            git reset --hard origin/main
+
+            if git apply --reverse --check /tmp/aevrix.patch >/dev/null 2>&1; then
+              echo "Exact patch is already present on canonical main."
+              echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            git apply --check /tmp/aevrix.patch
+            git apply /tmp/aevrix.patch
+            validate_candidate
+            commit_candidate
+          done
+
+      - name: Close patch issue
+        if: steps.discover.outputs.found == 'true' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.discover.outputs.number }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          issue = os.environ["ISSUE_NUMBER"]
+          sha = os.environ["COMMIT_SHA"]
+          api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "aevrix-bot-patch",
+          }
+
+          def send(path, payload, method="POST"):
+              req = urllib.request.Request(
+                  f"{api}/repos/{repo}/{path}",
+                  data=json.dumps(payload).encode(),
+                  headers=headers,
+                  method=method,
+              )
+              with urllib.request.urlopen(req) as response:
+                  response.read()
+
+          send(f"issues/{issue}/comments", {"body": f"Patch validated and committed by automation: `{sha}`."})
+          send(f"issues/{issue}", {"state": "closed", "state_reason": "completed"}, method="PATCH")
+          PY
