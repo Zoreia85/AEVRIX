@@ -85,6 +85,26 @@ public sealed class KeyedPromotionReplayGuardTests
     }
 
     [TestMethod]
+    public void FileStore_AtomicClaimSet_RejectsSymlinkLockFile()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var target = Path.Combine(temp.Path, "lock-target");
+        File.WriteAllText(target, "target");
+        var lockPath = Path.Combine(temp.Path, ".aevrix-promotion-claim-set.lock");
+        File.CreateSymbolicLink(lockPath, target);
+        var store = new FilePromotionClaimStore(temp.Path);
+
+        Assert.ThrowsExactly<IOException>(() =>
+            store.TryCreateIfNoneExist(new string('c', 64), Array.Empty<string>()));
+        Assert.AreEqual("target", File.ReadAllText(target));
+    }
+
+    [TestMethod]
     public void Dispose_FailsClosedForFurtherClaims()
     {
         var guard = new KeyedPromotionReplayGuard(new RecordingClaimStore(), Key(0x44));
