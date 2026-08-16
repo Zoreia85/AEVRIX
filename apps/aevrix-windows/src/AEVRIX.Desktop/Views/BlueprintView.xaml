@@ -1,0 +1,83 @@
+<UserControl
+    x:Class="AEVRIX.Desktop.Views.BlueprintView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <Grid Padding="32" RowSpacing="18" MaxWidth="1180" HorizontalAlignment="Stretch">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Spacing="8">
+                <TextBlock Text="BLUEPRINT" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                <TextBlock Text="Modelo reconstruível com proveniência" FontSize="34" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="Visualização somente leitura de blueprints já exportados. O Desktop valida manifesto, SHA-256 e invariantes antes de exibir qualquer modelo." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Grid Grid.Row="1" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="ProjectInput" Grid.Column="0" Header="Projeto" PlaceholderText="Selecione um projeto" SelectionChanged="ProjectInput_SelectionChanged" AutomationProperties.Name="Projeto do blueprint" />
+                <ComboBox x:Name="CaptureInput" Grid.Column="1" Header="Captura / export" PlaceholderText="Selecione uma captura validável" AutomationProperties.Name="Captura do blueprint" />
+                <Button x:Name="LoadButton" Grid.Column="2" Content="Validar e carregar" VerticalAlignment="Bottom" Click="LoadButton_Click" AutomationProperties.Name="Validar e carregar blueprint" />
+            </Grid>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12">
+                <ProgressRing x:Name="LoadingRing" Width="20" Height="20" IsActive="False" Visibility="Collapsed" AutomationProperties.Name="Validando blueprint" />
+                <TextBlock x:Name="StatusText" Text="Nenhum blueprint carregado." VerticalAlignment="Center" Opacity="0.72" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <InfoBar Grid.Row="3" IsOpen="True" IsClosable="False" Severity="Informational" Title="Sem síntese automática" Message="Esta superfície não gera nem sobrescreve blueprint. Ela apenas lê exports existentes depois de validação local de identidade e integridade." />
+
+            <Grid Grid.Row="4" ColumnSpacing="16" RowSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                    <StackPanel Spacing="6"><TextBlock Text="Readiness" FontWeight="SemiBold" /><TextBlock x:Name="ReadinessText" Text="—" FontSize="24" /></StackPanel>
+                </Border>
+                <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                    <StackPanel Spacing="6"><TextBlock Text="Grade" FontWeight="SemiBold" /><TextBlock x:Name="GradeText" Text="—" FontSize="24" /></StackPanel>
+                </Border>
+                <Border Grid.Column="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                    <StackPanel Spacing="6"><TextBlock Text="Rebuild independente" FontWeight="SemiBold" /><TextBlock x:Name="RebuildText" Text="Não verificado" FontSize="20" TextWrapping="Wrap" /></StackPanel>
+                </Border>
+                <Border Grid.Column="3" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                    <StackPanel Spacing="6"><TextBlock Text="Evidências" FontWeight="SemiBold" /><TextBlock x:Name="EvidenceCountText" Text="—" FontSize="24" /></StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="5" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Dimensões de readiness" FontSize="20" FontWeight="SemiBold" />
+                        <ListView x:Name="DimensionsList" SelectionMode="None" AutomationProperties.Name="Dimensões de readiness" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Bloqueios, limitações e perguntas abertas" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ConstraintsText" Text="Nenhum blueprint validado foi carregado." Opacity="0.72" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ModelCountsText" Text="Arquitetura/API/UI/comportamento: —" FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+                        <TextBlock x:Name="HashText" Text="SHA-256: —" FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </ScrollViewer>
+</UserControl>
