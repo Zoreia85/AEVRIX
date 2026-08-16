@@ -1,0 +1,84 @@
+name: Desktop patch envelope transport
+
+on:
+  push:
+    branches: [candidate/desktop-bot-patch-20260816-b]
+    paths:
+      - ".github/workflows/desktop-patch-envelope.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  envelope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_SHA: bffaa2d43ea2d9f7ed587fa186b64cbc422bc320
+    steps:
+      - name: Checkout transport candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and validate product-only patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git diff --binary "$BASE_SHA" HEAD -- \
+            apps/aevrix-windows/src/AEVRIX.Desktop \
+            apps/aevrix-windows/tests/AEVRIX.Core.Tests/EngineHostSupervisorTests.cs \
+            > /tmp/aevrix-desktop.patch
+          test -s /tmp/aevrix-desktop.patch
+          test "$(wc -c < /tmp/aevrix-desktop.patch)" -lt 1500000
+          git worktree add --detach /tmp/aevrix-base "$BASE_SHA"
+          git -C /tmp/aevrix-base apply --check /tmp/aevrix-desktop.patch
+          if grep -q '^diff --git a/\.github/workflows/' /tmp/aevrix-desktop.patch; then
+            echo "Workflow content leaked into product patch."
+            exit 1
+          fi
+
+      - name: Open authoritative patch issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.request
+
+          with open('/tmp/aevrix-desktop.patch', 'rb') as fh:
+              raw = fh.read()
+          encoded = base64.b64encode(raw).decode('ascii')
+          if len(encoded) > 2_000_000:
+              raise SystemExit('encoded patch exceeds queue limit')
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          api = os.environ.get('GITHUB_API_URL', 'https://api.github.com')
+          payload = {
+              'title': '[AEVRIX-PATCH] Desktop runtime, first-run, projects and evidence',
+              'body': 'AEVRIX-PATCH-V1\n' + encoded,
+          }
+          req = urllib.request.Request(
+              f'{api}/repos/{repo}/issues',
+              data=json.dumps(payload).encode('utf-8'),
+              headers={
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'aevrix-desktop-patch-envelope',
+              },
+              method='POST',
+          )
+          with urllib.request.urlopen(req) as response:
+              issue = json.loads(response.read())
+          print(f"opened patch issue #{issue['number']}")
+          PY
