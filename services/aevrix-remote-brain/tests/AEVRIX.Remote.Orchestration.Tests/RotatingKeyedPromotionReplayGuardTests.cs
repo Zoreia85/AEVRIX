@@ -6,6 +6,34 @@ namespace Aevrix.Remote.Orchestration.Tests;
 public sealed class RotatingKeyedPromotionReplayGuardTests
 {
     [TestMethod]
+    public async Task TryClaim_CompetingKeyGenerations_ExactlyOneWins()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new FilePromotionClaimStore(temp.Path);
+        var attestation = Attestation();
+        using var generationA = new RotatingKeyedPromotionReplayGuard(store, Key(0x61), [Key(0x62)]);
+        using var generationB = new RotatingKeyedPromotionReplayGuard(store, Key(0x62), [Key(0x61)]);
+        using var start = new ManualResetEventSlim(false);
+
+        var first = Task.Run(() =>
+        {
+            start.Wait();
+            return generationA.TryClaim(attestation, out _);
+        });
+        var second = Task.Run(() =>
+        {
+            start.Wait();
+            return generationB.TryClaim(attestation, out _);
+        });
+
+        start.Set();
+        var results = await Task.WhenAll(first, second);
+
+        Assert.AreEqual(1, results.Count(static result => result));
+        Assert.AreEqual(1, Directory.GetFiles(temp.Path, "*.claim").Length);
+    }
+
+    [TestMethod]
     public void TryClaim_PreRotationClaim_IsRejectedAfterRotation()
     {
         using var temp = new TemporaryDirectory();
