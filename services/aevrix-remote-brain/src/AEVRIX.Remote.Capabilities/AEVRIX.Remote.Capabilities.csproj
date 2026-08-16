@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>AEVRIX.Remote.Capabilities</AssemblyName>
+    <RootNamespace>Aevrix.Remote.Capabilities</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AEVRIX.Remote.Orchestration\AEVRIX.Remote.Orchestration.csproj" />
+  </ItemGroup>
+</Project>
