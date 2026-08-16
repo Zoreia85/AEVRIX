@@ -127,6 +127,88 @@ public sealed class RepositoryVerificationTests
         Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.revision.drift"));
     }
 
+    [TestMethod]
+    public void AbbreviatedRevisionCannotAuthorizeExecutableRuntime()
+    {
+        var record = new RepositoryIntelligenceRecord(
+            Owner: "example",
+            Name: "runtime",
+            CanonicalUrl: new Uri("https://github.com/example/runtime", UriKind.Absolute),
+            Purpose: "Abbreviated pin fixture",
+            IntegrationMode: RepositoryIntegrationMode.Adapter,
+            SpdxLicense: "MIT",
+            PinnedRevision: "0123456",
+            ContentSha256: new string('a', 64),
+            SecurityReview: RepositorySecurityReviewState.Approved,
+            RuntimeAllowlisted: false,
+            LastVerifiedAt: Now,
+            AllowedCapabilities: new[] { "analysis" },
+            DeniedCapabilities: Array.Empty<string>());
+
+        Assert.IsFalse(record.CanExecute());
+        AssertThrows<InvalidOperationException>(() => (record with { RuntimeAllowlisted = true }).Validate());
+    }
+
+    [TestMethod]
+    public void PlaceholderLicenseCannotAuthorizeExecutableRuntime()
+    {
+        foreach (var license in new[] { "NOASSERTION", "NONE", "UNKNOWN" })
+        {
+            var record = new RepositoryIntelligenceRecord(
+                Owner: "example",
+                Name: "runtime",
+                CanonicalUrl: new Uri("https://github.com/example/runtime", UriKind.Absolute),
+                Purpose: "License placeholder fixture",
+                IntegrationMode: RepositoryIntegrationMode.OptionalTool,
+                SpdxLicense: license,
+                PinnedRevision: "0123456789abcdef0123456789abcdef01234567",
+                ContentSha256: new string('d', 64),
+                SecurityReview: RepositorySecurityReviewState.Approved,
+                RuntimeAllowlisted: false,
+                LastVerifiedAt: Now,
+                AllowedCapabilities: new[] { "analysis" },
+                DeniedCapabilities: Array.Empty<string>());
+
+            Assert.IsFalse(record.CanExecute(), license);
+            AssertThrows<InvalidOperationException>(() => (record with { RuntimeAllowlisted = true }).Validate(), license);
+        }
+    }
+
+    [TestMethod]
+    public void ObservationRejectsAbbreviatedHeadRevision()
+    {
+        var observation = new RepositoryObservation(
+            FullName: "example/runtime",
+            CanonicalUrl: new Uri("https://github.com/example/runtime", UriKind.Absolute),
+            DefaultBranch: "main",
+            HeadRevision: "0123456",
+            SpdxLicense: "MIT",
+            Archived: false,
+            ObservedAt: Now,
+            ContentSha256: null);
+
+        AssertThrows<ArgumentException>(() => observation.Validate());
+    }
+
+    private static void AssertThrows<TException>(Action action, string? context = null)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            Assert.Fail($"Expected {typeof(TException).Name} but observed {exception.GetType().Name}. {context}");
+        }
+
+        Assert.Fail($"Expected {typeof(TException).Name} but no exception was thrown. {context}");
+    }
+
     private static RepositoryObservation Observation(
         string fullName,
         Uri canonicalUrl,

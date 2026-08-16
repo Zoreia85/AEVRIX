@@ -74,7 +74,7 @@ public sealed record RepositoryIntelligenceRecord(
 
         return RuntimeAllowlisted
             && SecurityReview == RepositorySecurityReviewState.Approved
-            && !string.IsNullOrWhiteSpace(SpdxLicense)
+            && HasVerifiedLicense(SpdxLicense)
             && IsPinnedRevision(PinnedRevision)
             && IsSha256(ContentSha256);
     }
@@ -86,7 +86,20 @@ public sealed record RepositoryIntelligenceRecord(
             return false;
         }
 
-        return value.All(Uri.IsHexDigit) && value.Length is >= 7 and <= 64;
+        return value.Length is 40 or 64 && value.All(Uri.IsHexDigit);
+    }
+
+    private static bool HasVerifiedLicense(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim();
+        return !string.Equals(normalized, "NOASSERTION", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(normalized, "NONE", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(normalized, "UNKNOWN", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsSha256(string? value)

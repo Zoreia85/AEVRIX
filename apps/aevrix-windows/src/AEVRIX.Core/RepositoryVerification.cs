@@ -37,9 +37,9 @@ public sealed record RepositoryObservation(
             throw new ArgumentException("Observed repository URL must be a clean HTTPS github.com URL.", nameof(CanonicalUrl));
         }
 
-        if (!IsHex(HeadRevision, 7, 64))
+        if (!IsExactGitRevision(HeadRevision))
         {
-            throw new ArgumentException("Observed head revision must be a hexadecimal Git revision.", nameof(HeadRevision));
+            throw new ArgumentException("Observed head revision must be a full 40- or 64-character hexadecimal Git revision.", nameof(HeadRevision));
         }
 
         if (ContentSha256 is not null && !IsHex(ContentSha256, 64, 64))
@@ -47,6 +47,9 @@ public sealed record RepositoryObservation(
             throw new ArgumentException("Observed content hash must be SHA-256 hexadecimal when supplied.", nameof(ContentSha256));
         }
     }
+
+    private static bool IsExactGitRevision(string value) =>
+        value.Length is 40 or 64 && value.All(Uri.IsHexDigit);
 
     private static bool IsHex(string value, int minimumLength, int maximumLength) =>
         value.Length >= minimumLength
