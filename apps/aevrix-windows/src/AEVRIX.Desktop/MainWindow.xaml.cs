@@ -9,9 +9,14 @@ namespace AEVRIX.Desktop;
 
 public sealed partial class MainWindow : Window
 {
-    private EngineHostSupervisor? _engineSupervisor;
     private readonly DispatcherTimer _engineHealthTimer;
+    private EngineHostSupervisor? _engineSupervisor;
     private bool _engineAuthenticated;
+    private bool _engineOperationInProgress;
+    private bool _engineHealthProbeInProgress;
+    private bool _engineStoppedByUser;
+    private bool _isClosing;
+    private DateTimeOffset _lastAuthenticatedProbeUtc = DateTimeOffset.MinValue;
 
     public MainWindow()
     {
@@ -56,8 +61,10 @@ public sealed partial class MainWindow : Window
 
     private async void StopEngineHostButton_Click(object sender, RoutedEventArgs e)
     {
-        SetEngineControlsBusy(true);
+        _engineOperationInProgress = true;
+        _engineStoppedByUser = true;
         _engineAuthenticated = false;
+        SetEngineControlsBusy(true);
         EngineHostStatusText.Text = "Parando";
         EngineHostDetailText.Text = "Encerrando o processo local supervisionado.";
 
@@ -79,14 +86,17 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            _engineOperationInProgress = false;
             SetEngineControlsBusy(false);
         }
     }
 
     private async Task VerifyEngineHostAsync(bool restart)
     {
-        SetEngineControlsBusy(true);
+        _engineOperationInProgress = true;
+        _engineStoppedByUser = false;
         _engineAuthenticated = false;
+        SetEngineControlsBusy(true);
         EngineHostStatusText.Text = restart ? "Reiniciando" : "Verificando";
         EngineHostDetailText.Text = restart
             ? "Encerrando qualquer sessão anterior antes de iniciar uma nova sessão autenticada."
@@ -101,34 +111,95 @@ public sealed partial class MainWindow : Window
             }
 
             await _engineSupervisor.StartAsync();
-
-            var requestId = Guid.NewGuid().ToString("N");
-            var response = await _engineSupervisor.SendAsync(new EnginePingCommand(requestId));
-
-            if (!response.Success ||
-                !string.Equals(response.Code, "pong", StringComparison.Ordinal) ||
-                !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
-            }
+            await RequireAuthenticatedPingAsync(_engineSupervisor);
 
             _engineAuthenticated = true;
-            EngineHostStatusText.Text = "Autenticado";
-            EngineHostDetailText.Text = _engineSupervisor.ProcessId is int processId
-                ? $"Ping real confirmado. Processo local supervisionado: PID {processId}."
-                : "Ping real confirmado em sessão local supervisionada.";
+            _lastAuthenticatedProbeUtc = DateTimeOffset.UtcNow;
+            RenderAuthenticatedEngineState("Ping real confirmado. Supervisão contínua ativada.");
         }
         catch (Exception ex)
         {
-            _engineAuthenticated = false;
             EngineHostStatusText.Text = "Bloqueado";
             EngineHostDetailText.Text = $"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.";
             await DisposeEngineSupervisorAsync();
         }
         finally
         {
+            _engineOperationInProgress = false;
             SetEngineControlsBusy(false);
         }
+    }
+
+    private async void EngineHealthTimer_Tick(object? sender, object e)
+    {
+        if (_isClosing ||
+            _engineOperationInProgress ||
+            _engineHealthProbeInProgress ||
+            !_engineAuthenticated ||
+            _engineSupervisor is null ||
+            _engineStoppedByUser)
+        {
+            return;
+        }
+
+        if (!_engineSupervisor.IsRunning)
+        {
+            _engineAuthenticated = false;
+            EngineHostStatusText.Text = "Interrompido";
+            EngineHostDetailText.Text = "O processo supervisionado encerrou inesperadamente. A sessão autenticada foi revogada e exige nova verificação ou reinício.";
+            await DisposeEngineSupervisorAsync();
+            SetEngineControlsBusy(false);
+            return;
+        }
+
+        if (DateTimeOffset.UtcNow - _lastAuthenticatedProbeUtc < TimeSpan.FromSeconds(5))
+        {
+            return;
+        }
+
+        _engineHealthProbeInProgress = true;
+        try
+        {
+            await RequireAuthenticatedPingAsync(_engineSupervisor);
+            _lastAuthenticatedProbeUtc = DateTimeOffset.UtcNow;
+            RenderAuthenticatedEngineState("Health-check autenticado confirmado automaticamente.");
+        }
+        catch (Exception ex)
+        {
+            _engineAuthenticated = false;
+            EngineHostStatusText.Text = "Bloqueado";
+            EngineHostDetailText.Text = $"A supervisão automática perdeu a prova autenticada ({ex.GetType().Name}). A sessão foi invalidada.";
+            await DisposeEngineSupervisorAsync();
+        }
+        finally
+        {
+            _engineHealthProbeInProgress = false;
+            if (!_isClosing)
+            {
+                SetEngineControlsBusy(false);
+            }
+        }
+    }
+
+    private static async Task RequireAuthenticatedPingAsync(EngineHostSupervisor supervisor)
+    {
+        var requestId = Guid.NewGuid().ToString("N");
+        var response = await supervisor.SendAsync(new EnginePingCommand(requestId));
+
+        if (!response.Success ||
+            !string.Equals(response.Code, "pong", StringComparison.Ordinal) ||
+            !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
+        }
+    }
+
+    private void RenderAuthenticatedEngineState(string message)
+    {
+        EngineHostStatusText.Text = "Autenticado";
+        EngineHostDetailText.Text = _engineSupervisor?.ProcessId is int processId
+            ? $"{message} Processo local supervisionado: PID {processId}."
+            : message;
     }
 
     private void SetEngineControlsBusy(bool busy)
@@ -162,20 +233,6 @@ public sealed partial class MainWindow : Window
         ShowSection("home", "Command Center");
     }
 
-    private void EngineHealthTimer_Tick(object? sender, object e)
-    {
-        if (!_engineAuthenticated || _engineSupervisor is { IsRunning: true })
-        {
-            return;
-        }
-
-        _engineAuthenticated = false;
-        EngineHostStatusText.Text = "Bloqueado";
-        EngineHostDetailText.Text =
-            "A sessão autenticada do EngineHost deixou de estar ativa. O estado saudável foi revogado automaticamente.";
-        SetEngineControlsBusy(false);
-    }
-
     private static EngineHostSupervisor CreateEngineSupervisor()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
@@ -188,6 +245,7 @@ public sealed partial class MainWindow : Window
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        _isClosing = true;
         _engineHealthTimer.Stop();
         await DisposeEngineSupervisorAsync();
     }
