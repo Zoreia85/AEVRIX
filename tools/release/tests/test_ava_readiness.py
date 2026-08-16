@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "ava-readiness.py"
+spec = importlib.util.spec_from_file_location("ava_readiness", MODULE_PATH)
+assert spec and spec.loader
+ava = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ava)
+
+
+class ReadinessModelTests(unittest.TestCase):
+    def test_valid_model(self):
+        model = {
+            "readinessPercent": 48,
+            "releaseDecision": "NOT_HOMOLOGATED",
+            "rules": {"weightsMustTotal": 100},
+            "gates": [
+                {"id": "a", "weight": 55, "points": 23, "status": "PARCIAL"},
+                {"id": "b", "weight": 45, "points": 25, "status": "BLOQUEADO"},
+            ],
+        }
+        self.assertEqual([], ava.validate_model(model))
+
+    def test_100_percent_requires_all_pass(self):
+        model = {
+            "readinessPercent": 100,
+            "releaseDecision": "NOT_HOMOLOGATED",
+            "rules": {"weightsMustTotal": 100},
+            "gates": [{"id": "a", "weight": 100, "points": 100, "status": "PARCIAL"}],
+        }
+        errors = ava.validate_model(model)
+        self.assertTrue(any("100% is forbidden" in error for error in errors))
+
+    def test_homologated_requires_100(self):
+        model = {
+            "readinessPercent": 99,
+            "releaseDecision": "HOMOLOGATED",
+            "rules": {"weightsMustTotal": 100},
+            "gates": [
+                {"id": "a", "weight": 99, "points": 99, "status": "PASS"},
+                {"id": "b", "weight": 1, "points": 0, "status": "PASS"},
+            ],
+        }
+        errors = ava.validate_model(model)
+        self.assertTrue(any("requires readinessPercent=100" in error for error in errors))
+
+
+class TrxTests(unittest.TestCase):
+    def _write_trx(self, counters: str) -> Path:
+        with tempfile.NamedTemporaryFile("w", suffix=".trx", delete=False, encoding="utf-8") as temp:
+            temp.write(f'<TestRun><ResultSummary><Counters {counters} /></ResultSummary></TestRun>')
+            return Path(temp.name)
+
+    def test_all_passed_trx_is_pass(self):
+        path = self._write_trx('total="3" executed="3" passed="3" failed="0" notExecuted="0"')
+        self.addCleanup(path.unlink, missing_ok=True)
+        result = ava.parse_trx(path)
+        self.assertEqual("PASS", result["status"])
+
+    def test_skipped_trx_is_fail(self):
+        path = self._write_trx('total="3" executed="2" passed="2" failed="0" notExecuted="1"')
+        self.addCleanup(path.unlink, missing_ok=True)
+        result = ava.parse_trx(path)
+        self.assertEqual("FAIL", result["status"])
+
+    def test_inconclusive_trx_is_fail(self):
+        path = self._write_trx('total="2" executed="2" passed="1" failed="0" inconclusive="1"')
+        self.addCleanup(path.unlink, missing_ok=True)
+        result = ava.parse_trx(path)
+        self.assertEqual("FAIL", result["status"])
+
+
+class ArtifactBuildTests(unittest.TestCase):
+    def test_required_executable_is_mandatory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "unrelated.dll").write_bytes(b"x")
+            evidence, files = ava.artifact_build_evidence(root, "success", "AEVRIX.Desktop.exe")
+            self.assertEqual("FAIL", evidence["status"])
+            self.assertFalse(evidence["requiredFilePresent"])
+            self.assertEqual(1, len(files))
+
+    def test_exact_desktop_executable_build_passes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "AEVRIX.Desktop.exe").write_bytes(b"desktop")
+            evidence, files = ava.artifact_build_evidence(root, "success", "AEVRIX.Desktop.exe")
+            self.assertEqual("PASS", evidence["status"])
+            self.assertTrue(evidence["requiredFilePresent"])
+            self.assertEqual(64, len(files[0]["sha256"]))
+
+
+class SoakTests(unittest.TestCase):
+    def _write(self, payload: dict) -> Path:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as temp:
+            json.dump(payload, temp)
+            path = Path(temp.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
+
+    def test_soak_requires_exact_engine_hash_binding(self):
+        payload = {
+            "pass": True,
+            "engineHostSha256": "a" * 64,
+            "requestedIterations": 10,
+            "completedIterations": 10,
+            "failures": [],
+        }
+        result = ava.parse_soak(self._write(payload), {"b" * 64})
+        self.assertEqual("FAIL", result["status"])
+
+    def test_valid_soak_passes(self):
+        digest = "c" * 64
+        payload = {
+            "pass": True,
+            "engineHostSha256": digest,
+            "requestedIterations": 250,
+            "completedIterations": 250,
+            "restartCount": 5,
+            "durationMilliseconds": 1234,
+            "failures": [],
+        }
+        result = ava.parse_soak(self._write(payload), {digest})
+        self.assertEqual("PASS", result["status"])
+
+
+class DesktopStartupTests(unittest.TestCase):
+    def _write(self, payload: dict) -> Path:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as temp:
+            json.dump(payload, temp)
+            path = Path(temp.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
+
+    def test_startup_requires_exact_desktop_hash_binding(self):
+        payload = {
+            "pass": True,
+            "desktopSha256": "a" * 64,
+            "aliveWindowSeconds": 5,
+            "aliveAfterWindow": True,
+            "cleanupVerified": True,
+            "failures": [],
+        }
+        result = ava.parse_desktop_startup(self._write(payload), {"b" * 64})
+        self.assertEqual("FAIL", result["status"])
+        self.assertFalse(result["desktopHashBoundToPublishedCandidate"])
+
+    def test_valid_startup_passes(self):
+        digest = "d" * 64
+        payload = {
+            "pass": True,
+            "desktopSha256": digest,
+            "aliveWindowSeconds": 5,
+            "aliveAfterWindow": True,
+            "cleanupVerified": True,
+            "processId": 1234,
+            "failures": [],
+        }
+        result = ava.parse_desktop_startup(self._write(payload), {digest})
+        self.assertEqual("PASS", result["status"])
+        self.assertTrue(result["cleanupVerified"])
+
+    def test_startup_without_cleanup_fails(self):
+        digest = "e" * 64
+        payload = {
+            "pass": True,
+            "desktopSha256": digest,
+            "aliveAfterWindow": True,
+            "cleanupVerified": False,
+            "failures": [],
+        }
+        result = ava.parse_desktop_startup(self._write(payload), {digest})
+        self.assertEqual("FAIL", result["status"])
+
+
+class ExternalEvidenceTests(unittest.TestCase):
+    def _write(self, payload: dict) -> Path:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as temp:
+            json.dump(payload, temp)
+            path = Path(temp.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
+
+    def test_commit_mismatch_rejected(self):
+        path = self._write({"sourceCommit": "other", "gates": {}})
+        _, errors = ava.load_external_evidence(path, "exact")
+        self.assertTrue(any("sourceCommit" in error for error in errors))
+
+    def test_external_cannot_override_automatic_gate(self):
+        path = self._write({
+            "sourceCommit": "exact",
+            "gates": {"core-tests": {
+                "status": "PASS", "evidenceRef": "manual:test", "evidenceSha256": "a" * 64
+            }},
+        })
+        accepted, errors = ava.load_external_evidence(path, "exact")
+        self.assertEqual({}, accepted)
+        self.assertTrue(any("cannot override" in error for error in errors))
+
+    def test_external_pass_requires_digest_and_reference(self):
+        path = self._write({"sourceCommit": "exact", "gates": {"installer-lifecycle": {"status": "PASS"}}})
+        accepted, errors = ava.load_external_evidence(path, "exact")
+        self.assertEqual({}, accepted)
+        self.assertTrue(any("evidenceSha256" in error for error in errors))
+
+    def test_valid_external_pass_accepted(self):
+        path = self._write({
+            "sourceCommit": "exact",
+            "gates": {"installer-lifecycle": {
+                "status": "PASS",
+                "evidenceRef": "ava:installer-run-001",
+                "evidenceSha256": "b" * 64,
+                "artifactSha256": "c" * 64,
+            }},
+        })
+        accepted, errors = ava.load_external_evidence(path, "exact")
+        self.assertEqual([], errors)
+        self.assertEqual("PASS", accepted["installer-lifecycle"]["status"])
+
+
+class DesktopSurfaceTests(unittest.TestCase):
+    def test_missing_desktop_surface_blocks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            src = root / "apps" / "aevrix-windows" / "src" / "AEVRIX.Core"
+            src.mkdir(parents=True)
+            (src / "AEVRIX.Core.csproj").write_text("<Project />", encoding="utf-8")
+            result = ava.discover_desktop_surface(root)
+            self.assertEqual("BLOQUEADO", result["status"])
+
+    def test_winui_surface_passes_physical_preflight_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            src = root / "apps" / "aevrix-windows" / "src" / "AEVRIX.Desktop"
+            src.mkdir(parents=True)
+            (src / "AEVRIX.Desktop.csproj").write_text(
+                "<Project><PropertyGroup><OutputType>WinExe</OutputType><UseWinUI>true</UseWinUI></PropertyGroup></Project>",
+                encoding="utf-8",
+            )
+            result = ava.discover_desktop_surface(root)
+            self.assertEqual("PASS", result["status"])
+
+
+if __name__ == "__main__":
+    unittest.main()

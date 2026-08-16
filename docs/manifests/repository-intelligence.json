@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 1,
+  "verifiedAtUtc": "2026-08-15T17:30:00Z",
+  "policy": {
+    "defaultRuntimeApproval": "Denied",
+    "requirePinnedRevisionForExecution": true,
+    "requireLicenseVerificationForVendoring": true,
+    "requireIndependentSecurityReviewForExecution": true,
+    "discoveryNeverImpliesExecutionApproval": true
+  },
+  "repositories": [
+    {
+      "repository": "ollama/ollama",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "integrationModes": [
+        "OptionalTool",
+        "Adapter"
+      ],
+      "runtimeApproval": "PendingPinnedAdapterReview",
+      "purpose": "Optional loopback local-model runtime via REST; never the AEVRIX brain.",
+      "securityConstraints": [
+        "loopback-default",
+        "no-implicit-model-pull",
+        "model-allowlist",
+        "bounded-io",
+        "judge-before-trust"
+      ]
+    },
+    {
+      "repository": "sindresorhus/awesome",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "CC0-1.0",
+      "integrationModes": [
+        "DiscoverySeed"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "Discovery index only.",
+      "securityConstraints": [
+        "never-auto-install",
+        "never-auto-execute",
+        "independent-license-review"
+      ]
+    },
+    {
+      "repository": "OpenHands/OpenHands",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "licenseScopeNote": "MIT applies outside enterprise/; enterprise/ is governed by PolyForm Free Trial 1.0.0 and must remain excluded from any AEVRIX adapter/runtime ingestion unless separately approved.",
+      "integrationModes": [
+        "Reference",
+        "OptionalTool"
+      ],
+      "runtimeApproval": "PendingSandboxReview",
+      "purpose": "Coding-agent reference and optional sandboxed backend; never unrestricted host access.",
+      "securityConstraints": [
+        "sandbox-required",
+        "workspace-scope",
+        "network-policy",
+        "no-host-secrets",
+        "judge-before-trust"
+      ]
+    },
+    {
+      "repository": "Shubhamsaboo/awesome-llm-apps",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "Apache-2.0",
+      "integrationModes": [
+        "Reference"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "Pattern and evaluation corpus for agents, RAG, self-improvement and multi-agent designs.",
+      "securityConstraints": [
+        "selective-benchmark-only",
+        "no-wholesale-copy",
+        "provenance-required"
+      ]
+    },
+    {
+      "repository": "langflow-ai/langflow",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "integrationModes": [
+        "Reference",
+        "Adapter"
+      ],
+      "runtimeApproval": "PendingPinnedAdapterReview",
+      "purpose": "Visual workflow, API/MCP exposure and observability reference/optional adapter.",
+      "securityConstraints": [
+        "permission-scoped",
+        "sandbox-external-components",
+        "pin-before-execution"
+      ]
+    },
+    {
+      "repository": "punkpeye/awesome-mcp-servers",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "integrationModes": [
+        "DiscoverySeed"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "MCP discovery catalog only.",
+      "securityConstraints": [
+        "per-server-license-review",
+        "per-server-security-score",
+        "permission-scope",
+        "never-auto-install",
+        "never-auto-execute"
+      ]
+    },
+    {
+      "repository": "nexu-io/open-design",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "Apache-2.0",
+      "licenseScopeNote": "Repository is Apache-2.0, with bundled skill subtrees retaining upstream MIT licenses and attribution; preserve per-component provenance.",
+      "integrationModes": [
+        "Reference",
+        "Adapter"
+      ],
+      "runtimeApproval": "PendingPinnedAdapterReview",
+      "purpose": "Local-first Reconstruction Studio/design reference with sandboxed previews and design-system adapters.",
+      "securityConstraints": [
+        "sandbox-preview",
+        "workspace-scope",
+        "pin-before-execution",
+        "provenance-required"
+      ]
+    },
+    {
+      "repository": "public-apis/public-apis",
+      "defaultBranch": "master",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "integrationModes": [
+        "DiscoverySeed"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "API discovery catalog only.",
+      "securityConstraints": [
+        "validate-api-terms",
+        "validate-auth",
+        "validate-quota",
+        "validate-privacy",
+        "validate-uptime",
+        "never-auto-call"
+      ]
+    },
+    {
+      "repository": "D4Vinci/Scrapling",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "BSD-3-Clause",
+      "upstreamUsageNote": "Upstream explicitly requires compliance with applicable scraping/privacy law, site terms and robots.txt; AEVRIX additionally forbids CAPTCHA, Cloudflare, anti-bot or access-control bypass/evasion.",
+      "upstreamRiskNote": "Observed upstream revision 5d213a2d4764002bfc4fed33c32fe09fa8b0bf7f advertises stealth/anti-bot/Turnstile-oriented surfaces. AEVRIX excludes those surfaces and may consume only an independently reviewed authorized-fetch/parsing subset.",
+      "integrationModes": [
+        "Reference",
+        "Adapter"
+      ],
+      "runtimeApproval": "PendingPinnedAdapterReview",
+      "purpose": "Authorized web evidence collection and resilient parsing only.",
+      "securityConstraints": [
+        "authorization-required",
+        "respect-access-controls",
+        "no-captcha-bypass",
+        "no-cloudflare-bypass",
+        "no-anti-bot-evasion",
+        "no-turnstile-bypass",
+        "no-stealth-browser-mode",
+        "no-agent-skill-import",
+        "no-broad-extras-auto-install",
+        "bounded-network-scope"
+      ]
+    },
+    {
+      "repository": "microsoft/mxc",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "pinnedRevision": "692275b84eaa3f83cd8582dc774bc5f354f46ccf",
+      "verifiedAtUtc": "2026-08-16T14:28:00Z",
+      "integrationModes": [
+        "Reference"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "Policy-driven layered isolation and containment architecture reference; candidate concepts only, never a security boundary or runtime dependency without a later independent approval.",
+      "securityConstraints": [
+        "reference-only",
+        "no-runtime-dependency",
+        "no-automatic-build",
+        "no-automatic-execution",
+        "upstream-preview-not-security-boundary",
+        "independent-backend-verification-required",
+        "pin-before-any-code-consumption"
+      ]
+    },
+    {
+      "repository": "ripienaar/free-for-dev",
+      "defaultBranch": "master",
+      "archived": false,
+      "licenseSpdx": "NOASSERTION",
+      "integrationModes": [
+        "Reference"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "Cost/infrastructure discovery reference only; free-tier terms must be revalidated.",
+      "securityConstraints": [
+        "no-vendoring-without-license",
+        "revalidate-provider-terms",
+        "no-catalog-copy"
+      ]
+    }
+  ]
+}
