@@ -3,20 +3,19 @@ using System.Security.Cryptography;
 namespace Aevrix.Remote.Orchestration;
 
 /// <summary>
-/// Preserves replay rejection during a coordinated HMAC-key rotation by checking aliases produced
-/// by retained previous keys before creating the current-key alias. This is safe for coordinated
-/// rotation against one lookup-capable claim store. Mixed-version multi-host rollout still requires
-/// deployment orchestration so all writers recognize the same retained-key window.
+/// Preserves replay rejection during HMAC-key rotation by submitting retained-key aliases and the
+/// current-key alias to one atomic claim-set persistence operation. Distributed deployments must
+/// provide an IAtomicPromotionClaimSetStore backed by a genuinely cross-host atomic primitive.
 /// </summary>
 public sealed class RotatingKeyedPromotionReplayGuard : IPromotionReplayGuard, IDisposable
 {
-    private readonly IPromotionClaimLookupStore _claimStore;
+    private readonly IAtomicPromotionClaimSetStore _claimStore;
     private readonly byte[] _currentKey;
     private readonly byte[][] _previousKeys;
     private bool _disposed;
 
     public RotatingKeyedPromotionReplayGuard(
-        IPromotionClaimLookupStore claimStore,
+        IAtomicPromotionClaimSetStore claimStore,
         ReadOnlySpan<byte> currentKey,
         IEnumerable<byte[]>? previousKeys = null)
     {
@@ -54,18 +53,12 @@ public sealed class RotatingKeyedPromotionReplayGuard : IPromotionReplayGuard, I
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(attestation);
 
-        foreach (var previousKey in _previousKeys)
-        {
-            var previousAlias = PromotionClaimIdDerivation.Derive(attestation, previousKey);
-            if (_claimStore.Exists(previousAlias))
-            {
-                replayKey = previousAlias;
-                return false;
-            }
-        }
+        var forbiddenAliases = _previousKeys
+            .Select(previousKey => PromotionClaimIdDerivation.Derive(attestation, previousKey))
+            .ToArray();
 
         replayKey = PromotionClaimIdDerivation.Derive(attestation, _currentKey);
-        return _claimStore.TryCreate(replayKey);
+        return _claimStore.TryCreateIfNoneExist(replayKey, forbiddenAliases);
     }
 
     public void Dispose()
