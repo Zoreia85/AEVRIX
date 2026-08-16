@@ -1,6 +1,6 @@
 name: Privacy-safe canonicalization
 
-# Canonicalization protocol v8.1.
+# Canonicalization protocol v8.2.
 # Non-bot main commits are replaced by one bot-authored commit whose parent is
 # the most recent canonical bot/noreply ancestor. This removes the entire
 # non-canonical segment while preserving the canonical ancestry before it.
