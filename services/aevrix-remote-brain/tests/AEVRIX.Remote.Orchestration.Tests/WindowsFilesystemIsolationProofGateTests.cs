@@ -102,7 +102,7 @@ public sealed class WindowsFilesystemIsolationProofGateTests
         Assert.AreEqual("AuthorityFingerprintMismatch", decision.DecisionCode);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("job", "RaceFreeJobAssignmentUnproven")]
     [DataRow("appcontainer", "AppContainerIdentityUnproven")]
     [DataRow("sid", "RestrictingSidUnproven")]
