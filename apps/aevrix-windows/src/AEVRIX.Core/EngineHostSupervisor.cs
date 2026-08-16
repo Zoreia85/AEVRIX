@@ -201,8 +201,15 @@ public sealed class EngineHostSupervisor : IAsyncDisposable
                 lastFailure = ex;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(75), linkedCts.Token)
-                .ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(75), linkedCts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
 
         cancellationToken.ThrowIfCancellationRequested();
