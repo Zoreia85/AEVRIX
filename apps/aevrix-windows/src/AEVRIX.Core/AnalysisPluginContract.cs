@@ -19,7 +19,7 @@ public enum AnalysisTechnique
     AuthorizedNetworkCapture
 }
 
-public enum EvidenceSensitivity
+public enum AnalysisEvidenceSensitivity
 {
     Public,
     Internal,
@@ -139,7 +139,7 @@ public sealed record AnalysisExecutionRequest(
     WorkspaceScope Scope,
     AnalysisTarget Target,
     AnalysisTechnique Technique,
-    EvidenceSensitivity Sensitivity,
+    AnalysisEvidenceSensitivity Sensitivity,
     OutputBoundary OutputBoundary,
     bool AuthenticationOrAccessControlBypassRequested,
     bool LicenseOrDrmBypassRequested,
@@ -176,14 +176,14 @@ public sealed record AnalysisExecutionRequest(
             throw new InvalidOperationException("Third-party clean-room targets are limited to static inspection and non-invasive authorized runtime observation.");
         }
 
-        if (Sensitivity is EvidenceSensitivity.PersonalData or EvidenceSensitivity.Restricted)
+        if (Sensitivity is AnalysisEvidenceSensitivity.PersonalData or AnalysisEvidenceSensitivity.Restricted)
         {
             if (OutputBoundary != OutputBoundary.LocalWorkspaceOnly)
             {
                 throw new InvalidOperationException("Sensitive evidence must remain inside its local workspace boundary.");
             }
 
-            if (!plugin.MayProcessPersonalData && Sensitivity == EvidenceSensitivity.PersonalData)
+            if (!plugin.MayProcessPersonalData && Sensitivity == AnalysisEvidenceSensitivity.PersonalData)
             {
                 throw new InvalidOperationException("The selected plugin is not declared for personal-data processing.");
             }
