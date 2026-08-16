@@ -422,6 +422,9 @@ public sealed class ExecutionProofLedger
 
     private static void EnsureInputAndAuthority(ExecutionProofEvent origin, ExecutionProofEvent item)
     {
+        if (item.ObservedAt < origin.ObservedAt)
+            throw new InvalidDataException("Execution proof stage timestamp cannot move backwards.");
+
         if (!HashEquals(origin.InputDigestSha256, item.InputDigestSha256)
             || !NullableHashEquals(origin.AuthorityDigestSha256, item.AuthorityDigestSha256))
             throw new InvalidDataException("Execution proof input or authority digest changed during the execution.");

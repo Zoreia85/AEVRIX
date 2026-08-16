@@ -89,6 +89,19 @@ public sealed class ExecutionProofLedgerTests
     }
 
     [TestMethod]
+    public void Append_RejectsBackdatedStageAndKeepsLedgerAuthoritative()
+    {
+        var ledger = new ExecutionProofLedger();
+        ledger.Append(Started());
+        var backdated = Completed() with { ObservedAt = At(-1) };
+
+        Assert.Throws<InvalidDataException>(() => ledger.Append(backdated));
+        Assert.AreEqual(1, ledger.Head.EntryCount);
+        Assert.AreEqual(ExecutionProofStage.Started, ledger.Snapshot().Single().Event.Stage);
+        ExecutionProofLedger.VerifySnapshot(ledger.Snapshot(), ledger.Head);
+    }
+
+    [TestMethod]
     public void Append_RejectsEventIdReuse()
     {
         var ledger = new ExecutionProofLedger();

@@ -70,13 +70,17 @@ public sealed class AuthorityBackedPromotionCommitGate
             ExecutionProofEvent.ValidateSafeId(promotionReference, nameof(promotionReference), 3, 160);
 
             var authorization = FindAuthorization(ledger, evidence);
+            var observedAt = _timeProvider.GetUtcNow();
+            if (observedAt < authorization.ObservedAt)
+                observedAt = authorization.ObservedAt;
+
             var committed = authorization with
             {
                 EventId = commitEventId,
                 Stage = ExecutionProofStage.PromotionCommitted,
                 Outcome = ExecutionProofOutcome.Committed,
                 PromotionReference = promotionReference,
-                ObservedAt = _timeProvider.GetUtcNow()
+                ObservedAt = observedAt
             };
             var record = ledger.Append(committed);
             return new AuthorityBackedPromotionCommitResult(evidence, attestation, record, promotionReference);
