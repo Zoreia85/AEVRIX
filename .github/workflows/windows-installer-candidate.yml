@@ -91,6 +91,7 @@ jobs:
           }
 
       - name: Install verified NSIS toolchain
+        id: makensis
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -106,12 +107,13 @@ jobs:
             throw 'Verified NSIS installed but makensis.exe was not found.'
           }
           $makensis = $candidates | Select-Object -First 1
-          $versionOutput = & $makensis /VERSION
-          if ($LASTEXITCODE -ne 0 -or ($versionOutput -join ' ') -notmatch '3\.12') {
-            throw "Unexpected makensis version: $($versionOutput -join ' ')"
+          $versionOutput = (& $makensis /VERSION) -join ' '
+          if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '3\.12') {
+            throw "Unexpected makensis version: $versionOutput"
           }
           "MAKENSIS_EXE=$makensis" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "makensis pinned at $makensis : $($versionOutput -join ' ')"
+          "version=$versionOutput" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "makensis pinned at $makensis : $versionOutput"
 
       - name: Build old installer candidate
         shell: pwsh
@@ -154,17 +156,27 @@ jobs:
             Write-Host "Candidate $version Authenticode status: $($signature.Status)"
           }
 
-      - name: Exercise install repair upgrade downgrade resistance and uninstall
+      - name: Exercise interruption recovery repair upgrade downgrade resistance and uninstall
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          ./apps/aevrix-windows/installer/test-installer-lifecycle.ps1 `
-            -OldInstaller "$env:RUNNER_TEMP\aevrix-installer-old\AEVRIX-$env:OLD_VERSION-win-x64-Setup.exe" `
-            -NewInstaller "$env:RUNNER_TEMP\aevrix-installer-new\AEVRIX-$env:NEW_VERSION-win-x64-Setup.exe" `
-            -OldVersion $env:OLD_VERSION `
-            -NewVersion $env:NEW_VERSION
+          $evidence = Join-Path $env:RUNNER_TEMP 'aevrix-installer-evidence'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $log = Join-Path $evidence 'lifecycle.log'
+          try {
+            & ./apps/aevrix-windows/installer/test-installer-lifecycle.ps1 `
+              -OldInstaller "$env:RUNNER_TEMP\aevrix-installer-old\AEVRIX-$env:OLD_VERSION-win-x64-Setup.exe" `
+              -NewInstaller "$env:RUNNER_TEMP\aevrix-installer-new\AEVRIX-$env:NEW_VERSION-win-x64-Setup.exe" `
+              -OldVersion $env:OLD_VERSION `
+              -NewVersion $env:NEW_VERSION `
+              -EvidencePath (Join-Path $evidence 'lifecycle-evidence.json') *>&1 | Tee-Object -FilePath $log
+          }
+          catch {
+            $_ | Out-String | Add-Content -LiteralPath $log -Encoding utf8
+            throw
+          }
 
-      - name: Collect lifecycle evidence
+      - name: Collect AVA lifecycle evidence
         if: always()
         shell: pwsh
         run: |
@@ -176,12 +188,30 @@ jobs:
               Get-ChildItem -LiteralPath $root -File | Copy-Item -Destination $evidence -Force
             }
           }
+
+          $oldManifestPath = Join-Path $evidence "AEVRIX-$env:OLD_VERSION-win-x64-payload.json"
+          $newManifestPath = Join-Path $evidence "AEVRIX-$env:NEW_VERSION-win-x64-payload.json"
+          $oldManifest = if (Test-Path -LiteralPath $oldManifestPath) { Get-Content -LiteralPath $oldManifestPath -Raw | ConvertFrom-Json } else { $null }
+          $newManifest = if (Test-Path -LiteralPath $newManifestPath) { Get-Content -LiteralPath $newManifestPath -Raw | ConvertFrom-Json } else { $null }
+          $lifecyclePath = Join-Path $evidence 'lifecycle-evidence.json'
+          $lifecycle = if (Test-Path -LiteralPath $lifecyclePath) { Get-Content -LiteralPath $lifecyclePath -Raw | ConvertFrom-Json } else { $null }
+          $os = Get-CimInstance Win32_OperatingSystem
+
+          $candidatePath = Join-Path $evidence 'candidate-evidence.json'
           [pscustomobject]@{
-            schemaVersion = 4
+            schemaVersion = 5
             candidateSha = '${{ github.sha }}'
+            workflowRunId = '${{ github.run_id }}'
             runnerOs = $env:RUNNER_OS
+            windows = [pscustomobject]@{
+              caption = [string]$os.Caption
+              version = [string]$os.Version
+              buildNumber = [string]$os.BuildNumber
+            }
+            dotnetSdk = (& dotnet --version).Trim()
             nsisVersion = $env:NSIS_VERSION
             nsisPackageVersion = $env:NSIS_PACKAGE_VERSION
+            makensisVersion = '${{ steps.makensis.outputs.version }}'
             nsisPackageSha256 = '${{ steps.nsis.outputs.package_sha256 }}'
             nsisSetupSha256 = '${{ steps.nsis.outputs.sha256 }}'
             nsisAuthenticodeStatus = '${{ steps.nsis.outputs.signature_status }}'
@@ -189,10 +219,27 @@ jobs:
             nsisSignerThumbprint = '${{ steps.nsis.outputs.signer_thumbprint }}'
             oldVersion = $env:OLD_VERSION
             newVersion = $env:NEW_VERSION
+            installerHashes = [pscustomobject]@{
+              oldSha256 = if ($oldManifest) { [string]$oldManifest.installer.sha256 } else { $null }
+              newSha256 = if ($newManifest) { [string]$newManifest.installer.sha256 } else { $null }
+            }
+            installedExecutableHashes = if ($lifecycle) { $lifecycle.installedExecutableHashes } else { $null }
+            phaseExitCodes = if ($lifecycle) { $lifecycle.phaseExitCodes } else { $null }
+            interruption = if ($lifecycle) { $lifecycle.interruption } else { $null }
+            residueVerdict = if ($lifecycle) { [string]$lifecycle.residueVerdict } else { 'NOT_PROVEN' }
+            userDataPreservation = if ($lifecycle) { [string]$lifecycle.userDataPreservation } else { 'NOT_PROVEN' }
+            lifecycleEvidenceFile = 'lifecycle-evidence.json'
+            lifecycleEvidenceSha256 = if (Test-Path -LiteralPath $lifecyclePath) { (Get-FileHash -LiteralPath $lifecyclePath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            lifecycleLogFile = 'lifecycle.log'
+            lifecycleLogSha256 = if (Test-Path -LiteralPath (Join-Path $evidence 'lifecycle.log')) { (Get-FileHash -LiteralPath (Join-Path $evidence 'lifecycle.log') -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
             aevrixAuthenticodeGate = 'BLOCKED_UNSIGNED_CANDIDATE'
             canonicalPromotion = 'NOT_PERFORMED_BY_CANDIDATE_WORKFLOW'
             generatedAt = [DateTimeOffset]::UtcNow.ToString('O')
-          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'candidate-evidence.json') -Encoding utf8NoBOM
+          } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $candidatePath -Encoding utf8NoBOM
+
+          $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$candidateHash  candidate-evidence.json" | Set-Content -LiteralPath (Join-Path $evidence 'candidate-evidence.json.sha256') -Encoding ascii -NoNewline
+          Write-Host "AVA candidate evidence SHA-256: $candidateHash"
 
       - name: Upload installer evidence
         if: always()
