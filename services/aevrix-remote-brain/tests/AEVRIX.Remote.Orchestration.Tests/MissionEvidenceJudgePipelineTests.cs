@@ -9,7 +9,7 @@ public sealed class MissionEvidenceJudgePipelineTests
     public async Task ExecuteAsync_PromotesOnlyConvergentValidatedEvidence()
     {
         var bus = new EvidenceBus();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new PublishingSpecialist(MissionSpecialistKind.StaticAnalysis, bus, "obs-static", "framework", "ASP.NET"),
             new PublishingSpecialist(MissionSpecialistKind.DynamicAnalysis, bus, "obs-dynamic", "framework", "ASP.NET")
         ]);
@@ -35,7 +35,7 @@ public sealed class MissionEvidenceJudgePipelineTests
     public async Task ExecuteAsync_LeavesContestedEvidenceAsCandidate()
     {
         var bus = new EvidenceBus();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new PublishingSpecialist(MissionSpecialistKind.StaticAnalysis, bus, "obs-a", "runtime", ".NET"),
             new PublishingSpecialist(MissionSpecialistKind.DynamicAnalysis, bus, "obs-b", "runtime", "JVM")
         ]);
@@ -60,7 +60,7 @@ public sealed class MissionEvidenceJudgePipelineTests
     public async Task ExecuteAsync_DoesNotCreateKnowledgeAfterRequiredMissionFailure()
     {
         var bus = new EvidenceBus();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new FailingSpecialist(MissionSpecialistKind.StaticAnalysis)
         ]);
         var repository = new MemoryRepository();

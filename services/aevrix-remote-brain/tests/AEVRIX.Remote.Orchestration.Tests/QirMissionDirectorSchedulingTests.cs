@@ -9,7 +9,7 @@ public sealed class QirMissionDirectorSchedulingTests
     public async Task ExecuteWithQirHintsAsync_ConsumesLimitedCapacityInPriorityOrder()
     {
         var starts = new List<string>();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new OrderedSpecialist(MissionSpecialistKind.StaticAnalysis, starts),
             new OrderedSpecialist(MissionSpecialistKind.VisionOcr, starts),
             new OrderedSpecialist(MissionSpecialistKind.NetworkBehavior, starts)
@@ -36,7 +36,7 @@ public sealed class QirMissionDirectorSchedulingTests
     public async Task ExecuteWithQirHintsAsync_NeverLetsHintBypassDependency()
     {
         var starts = new List<string>();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new OrderedSpecialist(MissionSpecialistKind.StaticAnalysis, starts),
             new OrderedSpecialist(MissionSpecialistKind.Reconstruction, starts)
         ]);
@@ -57,7 +57,7 @@ public sealed class QirMissionDirectorSchedulingTests
     public async Task ExecuteAsync_WithoutHintsPreservesOriginalSchedulingOrder()
     {
         var starts = new List<string>();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new OrderedSpecialist(MissionSpecialistKind.StaticAnalysis, starts),
             new OrderedSpecialist(MissionSpecialistKind.VisionOcr, starts)
         ]);
@@ -75,7 +75,7 @@ public sealed class QirMissionDirectorSchedulingTests
     public async Task ExecuteWithQirHintsAsync_RejectsInvalidHintBeforeSpecialistExecution()
     {
         var starts = new List<string>();
-        var director = new MissionDirector([
+        var director = TestProofBoundMissionDirector.Create([
             new OrderedSpecialist(MissionSpecialistKind.StaticAnalysis, starts)
         ]);
         var plan = Plan([Spec("static", MissionSpecialistKind.StaticAnalysis)], maximumConcurrency: 1);

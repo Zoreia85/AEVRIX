@@ -257,8 +257,11 @@ public sealed class ProofRecordingMissionSpecialistTests
     {
         var store = new MemoryProofStore();
         var registry = new ExecutionProofJournalRegistry(store);
-        var wrapped = Wrapper(SuccessSpecialist(), registry);
-        var director = new MissionDirector([wrapped], new FixedTimeProvider());
+        var director = MissionDirector.CreateProofBound(
+            [SuccessSpecialist()],
+            registry,
+            new FixedTimeProvider(),
+            new ProofRecordingMissionSpecialistOptions(TimeSpan.FromSeconds(2)));
         var task = TaskSpec();
         var plan = new MissionPlan("mission-proof-001", Project, "target-001", [task]);
 
