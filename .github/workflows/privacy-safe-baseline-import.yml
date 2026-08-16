@@ -1,0 +1,124 @@
+name: Privacy-safe baseline import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "import/b64/**"
+      - ".github/workflows/privacy-safe-baseline-import.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify transfer fragments
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "254a0317c70550604ffada305c28ddc92cde8090ee377af270214837948df3c9  import/b64/part00" | sha256sum -c -
+          echo "0c7ef052ce1652355c867c79727fac38f5a5bfbb3a15ba9786e6d1b8ad07653a  import/b64/part01" | sha256sum -c -
+          echo "64ac1103befa86ee335accbede32ed11833440e6fe2fb72018b121fcd78092a2  import/b64/part02" | sha256sum -c -
+          echo "57aa2503b336a6ac35a48325a0f43133f9ac99115748be70e3fca2610700c05f  import/b64/part03" | sha256sum -c -
+          echo "ac08f286cf57cc1c12af76d882cef0f09d7b3358144106e3680d65514d68eb56  import/b64/part04a" | sha256sum -c -
+          echo "4a3c2e949877084183fe34b5aa0cf074245fd600e4f89e8c1a2dfbbbbc9509af  import/b64/part04b" | sha256sum -c -
+          echo "19267c3cce14c71d1294d25f6df0ebba4b486713884b171b6de7499e2d226262  import/b64/part05" | sha256sum -c -
+          echo "b9d77492960a23cc3be952325c4c6cef42cf17888e0f99238ef5061d69a03d4e  import/b64/part06" | sha256sum -c -
+          echo "b967ad0c4f50fdec6f2d200060d703ac311739eb3b48c1b274688df896f397b2  import/b64/part07" | sha256sum -c -
+          echo "cb49a59efd1906c7c48fcbcc74a50f7eafc5177145a544e5e9809ac3be5bed89  import/b64/part08" | sha256sum -c -
+          echo "eb4ef8be99ee3f57a95d3345f6a29db474bc048ac2fbba087f5484b2f44462f8  import/b64/part09a" | sha256sum -c -
+          echo "4882c07a19d866de2dc93b29f8511491df34cc11ddace3f2f502e381cecd67ec  import/b64/part09b" | sha256sum -c -
+          echo "adc1ab32729fdd5e29e076797d1c0b98cede71733a19ac5abd3c3cd4d714ea06  import/b64/part10" | sha256sum -c -
+
+      - name: Reconstruct and verify source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            import/b64/part00 \
+            import/b64/part01 \
+            import/b64/part02 \
+            import/b64/part03 \
+            import/b64/part04a \
+            import/b64/part04b \
+            import/b64/part05 \
+            import/b64/part06 \
+            import/b64/part07 \
+            import/b64/part08 \
+            import/b64/part09a \
+            import/b64/part09b \
+            import/b64/part10 > "$RUNNER_TEMP/baseline.b64"
+          base64 -d "$RUNNER_TEMP/baseline.b64" > "$RUNNER_TEMP/baseline.tar.xz"
+          echo "8ca37d7459b9808982522e88ac723f1bbf9ffafec9a6423188bd40f478de6c0e  $RUNNER_TEMP/baseline.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/baseline"
+          tar -xJf "$RUNNER_TEMP/baseline.tar.xz" -C "$RUNNER_TEMP/baseline"
+          test -f "$RUNNER_TEMP/baseline/AEVRIX/README.md"
+          test -f "$RUNNER_TEMP/baseline/AEVRIX/tools/ci/public_repo_audit.py"
+
+      - name: Prepare privacy-safe canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/preserve/docs"
+          if [ -d docs/versions ]; then
+            cp -a docs/versions "$RUNNER_TEMP/preserve/docs/"
+          fi
+          if [ -f PUBLICATION_POLICY.md ]; then
+            cp PUBLICATION_POLICY.md "$RUNNER_TEMP/preserve/"
+          fi
+          cp .github/workflows/privacy-safe-baseline-import.yml "$RUNNER_TEMP/preserve/privacy-safe-baseline-import.yml"
+          cp .github/workflows/privacy-cleanup.yml "$RUNNER_TEMP/preserve/privacy-cleanup.yml"
+          cp .github/workflows/bot-patch.yml "$RUNNER_TEMP/preserve/bot-patch.yml"
+
+          git checkout --orphan sanitized-main
+          git rm -rf .
+          cp -a "$RUNNER_TEMP/baseline/AEVRIX/." .
+
+          if [ -d "$RUNNER_TEMP/preserve/docs/versions" ]; then
+            mkdir -p docs
+            cp -a "$RUNNER_TEMP/preserve/docs/versions" docs/
+          fi
+          if [ -f "$RUNNER_TEMP/preserve/PUBLICATION_POLICY.md" ]; then
+            cp "$RUNNER_TEMP/preserve/PUBLICATION_POLICY.md" .
+          fi
+          mkdir -p .github/workflows docs/handoff
+          cp "$RUNNER_TEMP/preserve/privacy-safe-baseline-import.yml" .github/workflows/privacy-safe-baseline-import.yml
+          cp "$RUNNER_TEMP/preserve/privacy-cleanup.yml" .github/workflows/privacy-cleanup.yml
+          cp "$RUNNER_TEMP/preserve/bot-patch.yml" .github/workflows/bot-patch.yml
+
+          cat > docs/handoff/2026-08-14.md <<'EOF'
+          # AEVRIX handoff — 2026-08-14
+
+          The public repository was reconciled from the integrity-verified AEVRIX source handoff.
+
+          - Handoff archive SHA-256: `88374435e56a96d9e42913cdf09e3c9aff327aa3972e3296404f1bd7a9107a88`
+          - Original public baseline ZIP SHA-256: `81bd796630583675a64cc6c3403dccc6da2ecc2e2471db926015bedb26203a6d`
+          - Transport TAR.XZ SHA-256: `8ca37d7459b9808982522e88ac723f1bbf9ffafec9a6423188bd40f478de6c0e`
+          - Original source snapshot: 54 files
+          - Product state: `NOT_HOMOLOGATED`
+
+          This is verified source material, not evidence of a production-ready build. Windows build/install/runtime, Android, signing, antivirus, accessibility and real-device gates remain evidence-based requirements.
+
+          No personal data, private key, credential, token, browser profile, session or production secret is intentionally included.
+          EOF
+
+          python3 tools/ci/public_repo_audit.py
+
+      - name: Replace visible history with privacy-safe baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: import AEVRIX public source baseline R1"
+          git push --force origin HEAD:main

@@ -1,0 +1,72 @@
+name: Desktop build evidence
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/aevrix-windows/src/AEVRIX.Desktop/**"
+      - "apps/aevrix-windows/src/AEVRIX.Core/**"
+      - "apps/aevrix-windows/src/AEVRIX.EngineHost/**"
+      - ".github/workflows/desktop-build-evidence.yml"
+      - "apps/aevrix-windows/Directory.Build.props"
+      - "global.json"
+  repository_dispatch:
+    types: [aevrix-candidate-promoted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-build-evidence-${{ github.event_name }}-${{ github.event.client_payload.sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: release-win-x64
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact evidence candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || 'main' }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup .NET 10.0.400
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.400"
+
+      - name: Build WinUI Desktop Release candidate
+        shell: pwsh
+        run: |
+          dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -p:Platform=x64 `
+            -p:RuntimeIdentifier=win-x64
+
+      - name: Record exact build evidence
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          $output = Get-ChildItem ./apps/aevrix-windows/src/AEVRIX.Desktop/bin/x64/Release -Recurse -File |
+            Where-Object { $_.Name -in @("AEVRIX.Desktop.exe", "AEVRIX.Desktop.dll") }
+          if (-not $output) {
+            throw "Desktop build reported success but no AEVRIX.Desktop binary was found."
+          }
+
+          "## AEVRIX Desktop build evidence" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Source commit: ``$commit``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Runner: ``$env:RUNNER_OS / $env:RUNNER_ARCH``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- SDK: ``$((dotnet --version).Trim())``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Configuration: ``Release / x64 / win-x64``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "| Binary | SHA-256 | Bytes |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "|---|---|---:|" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          foreach ($file in $output) {
+            $digest = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "| ``$($file.Name)`` | ``$digest`` | $($file.Length) |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
