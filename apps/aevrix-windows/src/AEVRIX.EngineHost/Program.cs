@@ -18,61 +18,76 @@ if (string.IsNullOrWhiteSpace(pipeName)
 
 var runtime = new EngineHostRuntime(AevrixDataPaths.ForCurrentUser());
 
+await using var pipe = new NamedPipeServerStream(
+    pipeName,
+    PipeDirection.InOut,
+    1,
+    PipeTransmissionMode.Byte,
+    PipeOptions.Asynchronous);
+
 while (true)
 {
-    await using var pipe = new NamedPipeServerStream(
-        pipeName,
-        PipeDirection.InOut,
-        1,
-        PipeTransmissionMode.Byte,
-        PipeOptions.Asynchronous);
-
     await pipe.WaitForConnectionAsync();
 
-    EngineResponse response;
     try
     {
-        var requestJson = await ReadBoundedLineAsync(pipe);
-        var request = EngineHostRuntime.DeserializeRequest(requestJson);
-
-        if (!EngineHostRuntime.TokenMatches(token, request.Token))
+        EngineResponse response;
+        try
         {
-            response = new EngineResponse(
-                request.Command?.RequestId ?? string.Empty,
-                false,
-                "unauthorized",
-                "EngineHost authentication failed.");
+            var requestJson = await ReadBoundedLineAsync(pipe);
+            var request = EngineHostRuntime.DeserializeRequest(requestJson);
+
+            if (!EngineHostRuntime.TokenMatches(token, request.Token))
+            {
+                response = new EngineResponse(
+                    request.Command?.RequestId ?? string.Empty,
+                    false,
+                    "unauthorized",
+                    "EngineHost authentication failed.");
+            }
+            else if (request.Command is null)
+            {
+                response = new EngineResponse(
+                    string.Empty,
+                    false,
+                    "invalid_command",
+                    "Engine command is required.");
+            }
+            else
+            {
+                response = await runtime.DispatchAsync(request.Command);
+            }
         }
-        else if (request.Command is null)
+        catch (InvalidDataException ex)
+        {
+            response = new EngineResponse(string.Empty, false, "invalid_request", ex.Message);
+        }
+        catch
         {
             response = new EngineResponse(
                 string.Empty,
                 false,
-                "invalid_command",
-                "Engine command is required.");
+                "engine_error",
+                "EngineHost rejected the request.");
         }
-        else
-        {
-            response = await runtime.DispatchAsync(request.Command);
-        }
-    }
-    catch (InvalidDataException ex)
-    {
-        response = new EngineResponse(string.Empty, false, "invalid_request", ex.Message);
-    }
-    catch
-    {
-        response = new EngineResponse(
-            string.Empty,
-            false,
-            "engine_error",
-            "EngineHost rejected the request.");
-    }
 
-    var payload = JsonSerializer.Serialize(response) + "\n";
-    var bytes = Encoding.UTF8.GetBytes(payload);
-    await pipe.WriteAsync(bytes);
-    await pipe.FlushAsync();
+        var payload = JsonSerializer.Serialize(response) + "\n";
+        var bytes = Encoding.UTF8.GetBytes(payload);
+        await pipe.WriteAsync(bytes);
+        await pipe.FlushAsync();
+    }
+    catch (IOException)
+    {
+        // A client may disconnect after sending a request or while receiving the response.
+        // The server keeps the same pipe instance and proceeds to the next bounded connection.
+    }
+    finally
+    {
+        if (pipe.IsConnected)
+        {
+            pipe.Disconnect();
+        }
+    }
 }
 
 static async Task<string> ReadBoundedLineAsync(Stream stream)
