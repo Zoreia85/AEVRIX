@@ -1,8 +1,9 @@
 name: Privacy-safe baseline import
 
-# Privacy root rewrite protocol v4: every non-bot push to main is audited and
-# replaced with a bot-authored orphan root. This keeps validated tree content
-# while preventing personal Git author metadata from remaining in canonical history.
+# Privacy root rewrite protocol v5: every non-bot push to main is audited and
+# replaced with a bot-authored orphan root only while that push still owns the
+# current main tip. The rewrite shares the authoritative patch concurrency group
+# so a stale privacy job can never race a validated patch promotion.
 on:
   push:
     branches: [main]
@@ -11,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: aevrix-privacy-root-rewrite
+  group: aevrix-bot-patch-authoritative
   cancel-in-progress: false
 
 jobs:
@@ -23,12 +24,29 @@ jobs:
       - name: Checkout complete tree
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
+      - name: Verify rewrite still owns main tip
+        id: ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          ORIGIN_MAIN="$(git rev-parse origin/main)"
+          if [ "$ORIGIN_MAIN" != "$GITHUB_SHA" ]; then
+            echo "Privacy rewrite is stale; main advanced from $GITHUB_SHA to $ORIGIN_MAIN."
+            echo "owns_tip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "owns_tip=true" >> "$GITHUB_OUTPUT"
+
       - name: Verify public source
+        if: steps.ownership.outputs.owns_tip == 'true'
         run: python3 tools/ci/public_repo_audit.py
 
       - name: Rewrite main as bot-authored root
+        if: steps.ownership.outputs.owns_tip == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -41,4 +59,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore: refresh privacy-safe AEVRIX root"
-          git push --force origin HEAD:main
+          git push --force-with-lease=main:${GITHUB_SHA} origin HEAD:main
