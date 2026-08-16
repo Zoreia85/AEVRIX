@@ -86,11 +86,21 @@ public sealed class RotatingKeyedPromotionReplayGuardTests
 
     private static string H(char value) => new(value, 64);
 
-    private sealed class MemoryLookupStore : IPromotionClaimLookupStore
+    private sealed class MemoryLookupStore : IAtomicPromotionClaimSetStore
     {
         private readonly HashSet<string> _claims = new(StringComparer.Ordinal);
         public bool TryCreate(string opaqueClaimId) => _claims.Add(opaqueClaimId);
         public bool Exists(string opaqueClaimId) => _claims.Contains(opaqueClaimId);
+
+        public bool TryCreateIfNoneExist(
+            string opaqueClaimId,
+            IReadOnlyCollection<string> forbiddenClaimIds)
+        {
+            if (_claims.Contains(opaqueClaimId) || forbiddenClaimIds.Any(_claims.Contains))
+                return false;
+
+            return _claims.Add(opaqueClaimId);
+        }
     }
 
     private sealed class TemporaryDirectory : IDisposable
