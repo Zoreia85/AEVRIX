@@ -387,7 +387,8 @@ public sealed class AevrixSecureTransport : IAevrixSecureTransport
         }
 
         Uri resolved;
-        if (Uri.TryCreate(relativeOrAbsoluteUri, UriKind.Absolute, out var absolute))
+        if (Uri.TryCreate(relativeOrAbsoluteUri, UriKind.Absolute, out var absolute)
+            && string.Equals(absolute.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
             resolved = absolute;
         }
