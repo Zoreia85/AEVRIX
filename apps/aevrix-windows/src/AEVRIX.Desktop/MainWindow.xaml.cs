@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Aevrix.Core;
 using Aevrix.EngineHost;
 using Microsoft.UI.Xaml;
