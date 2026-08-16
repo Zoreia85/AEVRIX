@@ -19,6 +19,26 @@ LIKELY_SECRET = re.compile(r"(?im)^\s*(?:(?:const|static|readonly|var|string)\s+
 JSON_SECRET = re.compile(r"(?im)^\s*[\"](?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password)[\"]\s*:\s*[\"][^\"]{12,}[\"]")
 DIRECT_HTTP = re.compile(r"\bnew\s+HttpClient\s*\(")
 PATCH_QUEUE_GROUP = "group: aevrix-bot-patch-authoritative"
+TOKEN_PATTERNS = {
+    "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
+    "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    "Google API key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    "Slack token": re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{20,}\b"),
+    "GitLab token": re.compile(r"\bglpat-[0-9A-Za-z_-]{20,}\b"),
+    "generic bearer token": re.compile(r"(?i)\bAuthorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]{20,}"),
+}
+URL_WITH_CREDENTIALS = re.compile(r"(?i)\bhttps?://([^/\s:@]+):([^/\s@]+)@([^/\s]+)")
+WINDOWS_USER_PATH = re.compile(r"(?i)\b[A-Z]:\\Users\\([^\\/\r\n]+)")
+POSIX_USER_PATH = re.compile(r"(?i)(?:^|[\s\"'])/(?:Users|home)/([^/\s\"']+)")
+EMAIL_ADDRESS = re.compile(r"(?i)\b[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})\b")
+ALLOWED_EMAIL_DOMAINS = {"example.com", "example.org", "example.net", "users.noreply.github.com"}
+ALLOWED_TECHNICAL_EMAILS = {"noreply@github.com"}
+GENERIC_PATH_USERS = {"user", "users", "username", "runner", "runneradmin", "developer", "dev", "test", "tester"}
+SENSITIVE_FILE_NAMES = {
+    ".env", ".env.local", ".env.production", "credentials.json", "credentials.yml",
+    "credentials.yaml", "cookies.txt", "session.json", "id_rsa", "id_ed25519",
+}
+SENSITIVE_SUFFIXES = {".pfx", ".p12", ".key"}
 
 
 def source_files():
@@ -31,6 +51,41 @@ def source_files():
 
 def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
+
+
+def audit_sensitive_filename(path: Path, failures: list[str]) -> None:
+    name = path.name.lower()
+    if name in SENSITIVE_FILE_NAMES or path.suffix.lower() in SENSITIVE_SUFFIXES:
+        failures.append(f"secret-bearing filename is forbidden: {rel(path)}")
+
+
+def is_reserved_test_host(host: str) -> bool:
+    normalized = host.lower().split(":", 1)[0].rstrip(".")
+    return normalized in {"example.com", "example.org", "example.net"} or normalized.endswith(".example")
+
+
+def audit_public_identity(text: str, path: Path, failures: list[str]) -> None:
+    for match in EMAIL_ADDRESS.finditer(text):
+        address = match.group(0).lower()
+        domain = match.group(1).lower()
+        if address not in ALLOWED_TECHNICAL_EMAILS and domain not in ALLOWED_EMAIL_DOMAINS and not domain.endswith(".example"):
+            failures.append(f"personal/non-synthetic e-mail address found: {rel(path)}")
+            break
+    for pattern in (WINDOWS_USER_PATH, POSIX_USER_PATH):
+        match = pattern.search(text)
+        if match and match.group(1).lower() not in GENERIC_PATH_USERS:
+            failures.append(f"local user/workstation path found: {rel(path)}")
+            break
+
+
+def audit_credential_material(text: str, path: Path, failures: list[str]) -> None:
+    for label, pattern in TOKEN_PATTERNS.items():
+        if pattern.search(text):
+            failures.append(f"{label} material found: {rel(path)}")
+    for match in URL_WITH_CREDENTIALS.finditer(text):
+        if not is_reserved_test_host(match.group(3)):
+            failures.append(f"URL containing embedded credentials found: {rel(path)}")
+            break
 
 
 def audit_patch_queue_policy(failures: list[str]) -> None:
@@ -78,6 +133,7 @@ def main() -> int:
     files = list(source_files())
 
     for path in files:
+        audit_sensitive_filename(path, failures)
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -90,6 +146,9 @@ def main() -> int:
             failures.append(f"private key material found: {rel(path)}")
         if LIKELY_SECRET.search(text) or JSON_SECRET.search(text):
             failures.append(f"likely hard-coded secret found: {rel(path)}")
+        audit_credential_material(text, path, failures)
+        if path.name not in {"LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"}:
+            audit_public_identity(text, path, failures)
 
         if path.suffix.lower() == ".cs" and path.name != "AevrixSecureTransport.cs" and DIRECT_HTTP.search(text):
             failures.append(f"direct HttpClient construction outside AevrixSecureTransport: {rel(path)}")
