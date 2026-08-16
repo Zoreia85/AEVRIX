@@ -62,6 +62,32 @@ public sealed record ResearchBrowserPolicy(
             throw new InvalidOperationException("Research Browser requires an explicit target host allowlist.");
         }
 
+        var normalizedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var configuredHost in AllowedHosts)
+        {
+            if (string.IsNullOrWhiteSpace(configuredHost))
+            {
+                throw new InvalidOperationException("Research Browser target hosts cannot be blank.");
+            }
+
+            var host = configuredHost.Trim();
+            if (!string.Equals(host, configuredHost, StringComparison.Ordinal)
+                || host.Contains("://", StringComparison.Ordinal)
+                || host.Contains('*')
+                || host.Contains('/')
+                || host.Contains('\\')
+                || host.Contains(':')
+                || Uri.CheckHostName(host) is not (UriHostNameType.Dns or UriHostNameType.IPv4))
+            {
+                throw new InvalidOperationException("Research Browser target hosts must be exact DNS names or IPv4 addresses without scheme, wildcard, port or path.");
+            }
+
+            if (!normalizedHosts.Add(host))
+            {
+                throw new InvalidOperationException("Research Browser target host allowlist contains duplicates.");
+            }
+        }
+
         if (!PauseImmediatelyOnLogout)
         {
             throw new InvalidOperationException("Authenticated research must fail closed when the session is lost.");
@@ -136,11 +162,15 @@ public sealed record BrowserSessionDecision(
 public sealed class BrowserSessionGuard
 {
     private readonly ResearchBrowserPolicy _policy;
+    private readonly HashSet<string> _allowedHosts;
     private readonly Queue<DateTimeOffset> _failures = new();
 
     public BrowserSessionGuard(ResearchBrowserPolicy policy)
     {
         _policy = policy.Validate();
+        _allowedHosts = new HashSet<string>(
+            _policy.AllowedHosts.Select(host => host.Trim()),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     public BrowserSessionDecision Evaluate(
@@ -148,8 +178,27 @@ public sealed class BrowserSessionGuard
         LoginRecipe recipe,
         DateTimeOffset now)
     {
+        ArgumentNullException.ThrowIfNull(observation);
+        ArgumentNullException.ThrowIfNull(recipe);
         recipe.Validate();
         Trim(now);
+
+        if (!string.Equals(recipe.TargetId, _policy.TargetId, StringComparison.Ordinal))
+        {
+            return BoundaryViolation("Login recipe target does not match the active research target.");
+        }
+
+        if (!_allowedHosts.Contains(recipe.LoginUri.Host))
+        {
+            return BoundaryViolation("Login recipe host is outside the active target allowlist.");
+        }
+
+        if (!observation.CurrentUri.IsAbsoluteUri
+            || !string.Equals(observation.CurrentUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !_allowedHosts.Contains(observation.CurrentUri.Host))
+        {
+            return BoundaryViolation("Browser navigation left the HTTPS target host allowlist.");
+        }
 
         var lostReason = DetectLoss(observation, recipe);
         if (lostReason is null)
@@ -170,6 +219,11 @@ public sealed class BrowserSessionGuard
 
         return new BrowserSessionDecision(BrowserSessionDecisionKind.PauseAndRelogin, lostReason);
     }
+
+    private static BrowserSessionDecision BoundaryViolation(string reason) => new(
+        BrowserSessionDecisionKind.OpenCircuitBreaker,
+        $"{reason} Navigation is blocked fail-closed; automatic cross-target recovery is forbidden.",
+        CooldownUntil: null);
 
     private string? DetectLoss(BrowserSessionObservation observation, LoginRecipe recipe)
     {
