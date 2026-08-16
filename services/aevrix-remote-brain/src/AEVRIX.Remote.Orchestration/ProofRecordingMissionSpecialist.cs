@@ -315,19 +315,18 @@ public sealed class ProofRecordingMissionSpecialist : IMissionSpecialist
             }
             var input = Digest(inputParts);
 
-            var identity = Digest([
-                "aevrix-mission-execution-v1",
-                context.ProjectId.ToString("D"),
+            var executionId = MissionExecutionProofIdentity.CreateExecutionId(
+                context.ProjectId,
                 context.MissionId,
                 context.TargetId,
                 context.Task.TaskId,
-                kind.ToString()
-            ]);
+                kind);
+            var identity = executionId["mission-task:".Length..];
 
             return new ExecutionIdentity(
                 context.ProjectId,
                 context.MissionId,
-                "mission-task:" + identity,
+                executionId,
                 kind.ToString(),
                 input,
                 authority,
