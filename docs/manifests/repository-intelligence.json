@@ -49,6 +49,7 @@
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "MIT",
+      "licenseScopeNote": "MIT applies outside enterprise/; enterprise/ is governed by PolyForm Free Trial 1.0.0 and must remain excluded from any AEVRIX adapter/runtime ingestion unless separately approved.",
       "integrationModes": [
         "Reference",
         "OptionalTool"
@@ -119,6 +120,7 @@
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "Apache-2.0",
+      "licenseScopeNote": "Repository is Apache-2.0, with bundled skill subtrees retaining upstream MIT licenses and attribution; preserve per-component provenance.",
       "integrationModes": [
         "Reference",
         "Adapter"
@@ -156,6 +158,7 @@
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "BSD-3-Clause",
+      "upstreamUsageNote": "Upstream explicitly requires compliance with applicable scraping/privacy law, site terms and robots.txt; AEVRIX additionally forbids CAPTCHA, Cloudflare, anti-bot or access-control bypass/evasion.",
       "integrationModes": [
         "Reference",
         "Adapter"
