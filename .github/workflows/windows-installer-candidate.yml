@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 45
     env:
       NSIS_VERSION: "3.12"
-      NSIS_SETUP_SHA256: "3BC2B06253A7E4957111BE152AC6A536E0C7478A706E19DA814038DB5D706495"
+      NSIS_SETUP_SHA256: "17F37A6371141670B29887E84D5192D0B87AF9BFBE9662DCB61236C298FA9082"
       NSIS_SETUP_URL: "https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12-setup.exe/download"
       OLD_VERSION: "0.0.1"
       NEW_VERSION: "0.0.2"
@@ -63,9 +63,20 @@ jobs:
           if ($size -lt 1MB) {
             throw "NSIS download is unexpectedly small ($size bytes)."
           }
+          $signature = Get-AuthenticodeSignature -LiteralPath $setup
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or -not $signature.SignerCertificate) {
+            throw "NSIS Authenticode validation failed: $($signature.Status)"
+          }
+          $subject = $signature.SignerCertificate.Subject
+          $thumbprint = $signature.SignerCertificate.Thumbprint
+          if ([string]::IsNullOrWhiteSpace($subject) -or [string]::IsNullOrWhiteSpace($thumbprint)) {
+            throw 'NSIS Authenticode signer identity is missing.'
+          }
           "setup=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "sha256=$actual" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "NSIS $env:NSIS_VERSION verified: $actual ($size bytes)"
+          "signer_subject=$subject" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signer_thumbprint=$thumbprint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "NSIS $env:NSIS_VERSION verified: SHA256=$actual; signer=$subject; thumbprint=$thumbprint; bytes=$size"
 
       - name: Install verified NSIS toolchain
         shell: pwsh
@@ -150,15 +161,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
           foreach ($root in @("$env:RUNNER_TEMP\aevrix-installer-old", "$env:RUNNER_TEMP\aevrix-installer-new")) {
             if (Test-Path -LiteralPath $root) {
-              Copy-Item -LiteralPath (Join-Path $root '*') -Destination $evidence -Recurse -Force -ErrorAction SilentlyContinue
+              Get-ChildItem -LiteralPath $root -File | Copy-Item -Destination $evidence -Force
             }
           }
           [pscustomobject]@{
-            schemaVersion = 1
+            schemaVersion = 2
             candidateSha = '${{ github.sha }}'
             runnerOs = $env:RUNNER_OS
             nsisVersion = $env:NSIS_VERSION
             nsisSetupSha256 = '${{ steps.nsis.outputs.sha256 }}'
+            nsisSignerSubject = '${{ steps.nsis.outputs.signer_subject }}'
+            nsisSignerThumbprint = '${{ steps.nsis.outputs.signer_thumbprint }}'
             oldVersion = $env:OLD_VERSION
             newVersion = $env:NEW_VERSION
             authenticodeGate = 'BLOCKED_UNSIGNED_CANDIDATE'
