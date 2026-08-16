@@ -87,7 +87,67 @@ public sealed class BlueprintExecutionProvenanceBinder
         }
 
         var digest = Digest(requirement, missionId, expectedHead, bindings);
-        return new(requirement, missionId, expectedHead, bindings, digest);
+        var bound = new ProofBoundBlueprintKnowledgeRequirement(requirement, missionId, expectedHead, bindings, digest);
+        Verify(bound);
+        return bound;
+    }
+
+    public static void Verify(ProofBoundBlueprintKnowledgeRequirement bound)
+    {
+        ArgumentNullException.ThrowIfNull(bound);
+        ArgumentNullException.ThrowIfNull(bound.Requirement);
+        ArgumentNullException.ThrowIfNull(bound.LedgerHead);
+        ArgumentNullException.ThrowIfNull(bound.EvidenceExecutionProofs);
+        bound.Requirement.Validate();
+
+        if (!MissionTaskSpec.IsSafeId(bound.MissionId, 3, 128))
+            throw new InvalidDataException("Blueprint provenance mission id is invalid.");
+        ExecutionProofEvent.ValidateSha256(bound.LedgerHead.HeadHashSha256, nameof(bound.LedgerHead.HeadHashSha256), required: true);
+        if (bound.LedgerHead.EntryCount <= 0)
+            throw new InvalidDataException("Blueprint provenance ledger head must contain at least one entry.");
+        ExecutionProofEvent.ValidateSha256(bound.ProvenanceDigestSha256, nameof(bound.ProvenanceDigestSha256), required: true);
+
+        var expectedEvidenceIds = bound.Requirement.EvidenceIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static x => x, StringComparer.Ordinal)
+            .ToArray();
+        var proofs = bound.EvidenceExecutionProofs.ToArray();
+        if (proofs.Length != expectedEvidenceIds.Length)
+            throw new InvalidDataException("Blueprint provenance proof set does not match the requirement evidence set.");
+
+        var actualEvidenceIds = proofs
+            .Select(static x => x.EvidenceId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static x => x, StringComparer.Ordinal)
+            .ToArray();
+        if (!expectedEvidenceIds.SequenceEqual(actualEvidenceIds, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("Blueprint provenance proof set does not exactly match the requirement evidence set.");
+
+        foreach (var proof in proofs)
+        {
+            if (!MissionTaskSpec.IsSafeId(proof.EvidenceId, 3, 160)
+                || !MissionTaskSpec.IsSafeId(proof.SourceTaskId, 3, 160)
+                || !MissionTaskSpec.IsSafeId(proof.ExecutionId, 3, 160)
+                || !Enum.IsDefined(proof.Specialist))
+                throw new InvalidDataException("Blueprint provenance proof identity is invalid.");
+            ExecutionProofEvent.ValidateSha256(proof.CompletedRecordHashSha256, nameof(proof.CompletedRecordHashSha256), required: true);
+            ExecutionProofEvent.ValidateSha256(proof.ResultDigestSha256, nameof(proof.ResultDigestSha256), required: true);
+
+            var expectedExecutionId = MissionExecutionProofIdentity.CreateExecutionId(
+                bound.Requirement.ProjectId,
+                bound.MissionId,
+                bound.Requirement.TargetId,
+                proof.SourceTaskId,
+                proof.Specialist);
+            if (!string.Equals(expectedExecutionId, proof.ExecutionId, StringComparison.Ordinal))
+                throw new InvalidDataException("Blueprint provenance execution identity is inconsistent.");
+        }
+
+        var expectedDigest = Digest(bound.Requirement, bound.MissionId, bound.LedgerHead, proofs);
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expectedDigest),
+                Convert.FromHexString(bound.ProvenanceDigestSha256)))
+            throw new CryptographicException("Blueprint provenance digest verification failed.");
     }
 
     private static string Digest(
