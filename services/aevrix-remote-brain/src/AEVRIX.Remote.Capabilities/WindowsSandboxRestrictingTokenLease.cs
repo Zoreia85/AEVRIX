@@ -71,6 +71,29 @@ public sealed class WindowsSandboxRestrictingTokenLease : IDisposable
         }
     }
 
+    /// <summary>
+    /// Compatibility entry point for the current strict runtime pipeline. The prerequisite token
+    /// is validated as a fail-closed precondition but is deliberately NOT used as the source token
+    /// for the sandbox restriction. The strict token is derived from the original process identity
+    /// so the AppContainer SID is installed in the first restricting-SID set rather than intersected
+    /// with a previously restricted token.
+    /// </summary>
+    public static WindowsSandboxRestrictingTokenLease Create(
+        WindowsRestrictedTokenLease prerequisiteToken,
+        string sandboxSid)
+    {
+        ArgumentNullException.ThrowIfNull(prerequisiteToken);
+        if (!prerequisiteToken.IsPrimaryToken
+            || !prerequisiteToken.MaximumPrivilegesDisabled
+            || !prerequisiteToken.LowIntegrityEnforced)
+        {
+            throw new InvalidOperationException(
+                "Strict sandbox launch requires the reduced-token prerequisite to be a primary Low-Integrity token with maximum privileges disabled.");
+        }
+
+        return Create(sandboxSid);
+    }
+
     public static WindowsSandboxRestrictingTokenLease Create(string sandboxSid)
     {
         if (string.IsNullOrWhiteSpace(sandboxSid) || sandboxSid.Length > 184)
