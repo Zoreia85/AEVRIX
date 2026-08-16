@@ -159,6 +159,7 @@
       "archived": false,
       "licenseSpdx": "BSD-3-Clause",
       "upstreamUsageNote": "Upstream explicitly requires compliance with applicable scraping/privacy law, site terms and robots.txt; AEVRIX additionally forbids CAPTCHA, Cloudflare, anti-bot or access-control bypass/evasion.",
+      "upstreamRiskNote": "Observed upstream revision 5d213a2d4764002bfc4fed33c32fe09fa8b0bf7f advertises stealth/anti-bot/Turnstile-oriented surfaces. AEVRIX excludes those surfaces and may consume only an independently reviewed authorized-fetch/parsing subset.",
       "integrationModes": [
         "Reference",
         "Adapter"
@@ -171,6 +172,10 @@
         "no-captcha-bypass",
         "no-cloudflare-bypass",
         "no-anti-bot-evasion",
+        "no-turnstile-bypass",
+        "no-stealth-browser-mode",
+        "no-agent-skill-import",
+        "no-broad-extras-auto-install",
         "bounded-network-scope"
       ]
     },
