@@ -93,9 +93,7 @@ public sealed class GovernedOutOfProcessRuntimeTests
     {
         var low = new StubIsolationBackend("restricted-low", 10, canEnforce: true, networkEnforced: true, filesystemEnforced: true);
         var high = new StubIsolationBackend("restricted-high", 20, canEnforce: true, networkEnforced: true, filesystemEnforced: true);
-        var runtime = new GovernedOutOfProcessRuntime(
-            [low, high],
-            RestrictedAuthority());
+        var runtime = new GovernedOutOfProcessRuntime([low, high], RestrictedAuthority());
 
         var decision = runtime.EvaluateAuthority();
 
@@ -139,6 +137,46 @@ public sealed class GovernedOutOfProcessRuntimeTests
         Assert.IsTrue(result.Attestation.NetworkIsolationEnforced);
         Assert.IsTrue(result.Attestation.FilesystemIsolationEnforced);
         Assert.AreEqual(1, backend.ExecutionCount);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_RejectsWriteBoundaryWithoutReadIsolation()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "write-only-proof",
+            100,
+            canEnforce: true,
+            networkEnforced: true,
+            filesystemEnforced: true,
+            filesystemWriteBoundaryEnforced: true,
+            filesystemReadIsolationEnforced: false);
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+
+        StringAssert.Contains(error.Message, "external-read");
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_RejectsReadIsolationWithoutWriteBoundary()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "read-only-proof",
+            100,
+            canEnforce: true,
+            networkEnforced: true,
+            filesystemEnforced: true,
+            filesystemWriteBoundaryEnforced: false,
+            filesystemReadIsolationEnforced: true);
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+
+        StringAssert.Contains(error.Message, "external-write");
     }
 
     [TestMethod]
@@ -267,7 +305,9 @@ public sealed class GovernedOutOfProcessRuntimeTests
         bool networkEnforced,
         bool filesystemEnforced,
         string? backendIdOverride = null,
-        string? authorityFingerprintOverride = null) : IOutOfProcessIsolationBackend
+        string? authorityFingerprintOverride = null,
+        bool filesystemWriteBoundaryEnforced = true,
+        bool filesystemReadIsolationEnforced = true) : IOutOfProcessIsolationBackend
     {
         public string BackendId => backendId;
         public int Priority => priority;
@@ -306,7 +346,9 @@ public sealed class GovernedOutOfProcessRuntimeTests
             OutOfProcessExecutionResult execution) =>
             new(
                 backendIdOverride ?? BackendId,
-                authorityFingerprintOverride ?? authority.ComputeFingerprint());
+                authorityFingerprintOverride ?? authority.ComputeFingerprint(),
+                filesystemWriteBoundaryEnforced,
+                filesystemReadIsolationEnforced);
     }
 
     private sealed class TempDirectory : IDisposable
