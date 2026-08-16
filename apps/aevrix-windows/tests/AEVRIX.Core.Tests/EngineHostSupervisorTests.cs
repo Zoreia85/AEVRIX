@@ -37,6 +37,31 @@ public sealed class EngineHostSupervisorTests
     }
 
     [TestMethod]
+    public async Task StartAsync_AllowsImmediateSequentialAuthenticatedRequests()
+    {
+        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
+        await using var supervisor = new EngineHostSupervisor(
+            "dotnet",
+            new[] { engineAssembly },
+            startupTimeout: TimeSpan.FromSeconds(20),
+            requestTimeout: TimeSpan.FromSeconds(5));
+
+        await supervisor.StartAsync();
+
+        for (var index = 0; index < 32; index++)
+        {
+            var requestId = Guid.NewGuid().ToString("N");
+            var response = await supervisor.SendAsync(new EnginePingCommand(requestId));
+
+            Assert.IsTrue(response.Success);
+            Assert.AreEqual("pong", response.Code);
+            Assert.AreEqual(requestId, response.RequestId);
+        }
+
+        Assert.IsTrue(supervisor.IsRunning);
+    }
+
+    [TestMethod]
     public async Task StartAsync_IsIdempotentWhileHealthy()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
