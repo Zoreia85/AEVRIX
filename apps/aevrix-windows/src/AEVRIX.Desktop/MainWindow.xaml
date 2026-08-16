@@ -15,6 +15,7 @@
 
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Name="HomeNavItem" Content="Command Center" Tag="home" IsSelected="True" />
+                <NavigationViewItem Content="Primeira execução" Tag="first-run" />
                 <NavigationViewItem Content="Projetos" Tag="projects" />
                 <NavigationViewItem x:Name="NewInvestigationNavItem" Content="Nova investigação" Tag="new" />
                 <NavigationViewItem Content="Mission Control" Tag="mission" />
@@ -160,7 +161,7 @@
                 </ScrollViewer>
 
                 <Grid x:Name="PlannedSectionView" Visibility="Collapsed" Padding="32">
-                    <Border Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="28" MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border x:Name="PlannedSectionPlaceholder" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="28" MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <StackPanel Spacing="12">
                             <TextBlock x:Name="PlannedSectionTitle" Text="Superfície em preparação" FontSize="30" FontWeight="SemiBold" />
                             <TextBlock Text="Esta área consta no sistema canônico de UX, mas ainda não possui implementação promovida. Nenhuma capacidade é simulada como disponível." Opacity="0.72" TextWrapping="Wrap" />
