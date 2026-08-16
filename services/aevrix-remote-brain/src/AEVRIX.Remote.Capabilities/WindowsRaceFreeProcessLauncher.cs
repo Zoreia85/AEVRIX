@@ -19,7 +19,8 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
         AnonymousPipeServerStream stderr,
         WindowsJobObjectLease jobLease,
         bool restrictedTokenEnforced,
-        bool appContainerEnforced)
+        bool appContainerEnforced,
+        bool sandboxRestrictingSidEnforced)
     {
         Process = process;
         _stdout = stdout;
@@ -27,6 +28,7 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
         JobLease = jobLease;
         RestrictedTokenEnforced = restrictedTokenEnforced;
         AppContainerEnforced = appContainerEnforced;
+        SandboxRestrictingSidEnforced = sandboxRestrictingSidEnforced;
     }
 
     internal Process Process { get; }
@@ -35,6 +37,7 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
     internal WindowsJobObjectLease JobLease { get; }
     internal bool RestrictedTokenEnforced { get; }
     internal bool AppContainerEnforced { get; }
+    internal bool SandboxRestrictingSidEnforced { get; }
 
     public void Dispose()
     {
@@ -49,10 +52,11 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
 
 /// <summary>
 /// Windows-only launcher that creates the child with CREATE_SUSPENDED, optionally under a
-/// DISABLE_MAX_PRIVILEGE primary token and/or an AppContainer SECURITY_CAPABILITIES attribute,
-/// assigns the native process handle to an already-configured Job Object, and resumes the primary
-/// thread only after assignment and token/AppContainer verification succeed. Handle inheritance is
-/// restricted with STARTUPINFOEX so the child receives only its three governed standard-I/O handles.
+/// DISABLE_MAX_PRIVILEGE/Low-Integrity primary token, an AppContainer SECURITY_CAPABILITIES
+/// attribute, and an exact sandbox restricting SID derived from that AppContainer identity.
+/// The child token, AppContainer state, restricting SID and Job Object assignment are verified
+/// before the primary thread is resumed. Handle inheritance is restricted with STARTUPINFOEX so
+/// the child receives only its three governed standard-I/O handles.
 /// </summary>
 internal static class WindowsRaceFreeProcessLauncher
 {
@@ -74,7 +78,8 @@ internal static class WindowsRaceFreeProcessLauncher
         IReadOnlyDictionary<string, string> environment,
         WindowsJobObjectPolicy jobPolicy,
         WindowsRestrictedTokenLease? restrictedToken = null,
-        WindowsAppContainerProfileLease? appContainerProfile = null)
+        WindowsAppContainerProfileLease? appContainerProfile = null,
+        WindowsSandboxRestrictingTokenLease? sandboxRestrictingToken = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -85,6 +90,30 @@ internal static class WindowsRaceFreeProcessLauncher
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(jobPolicy);
         jobPolicy.Validate();
+
+        if (sandboxRestrictingToken is not null)
+        {
+            if (restrictedToken is null || appContainerProfile is null)
+            {
+                throw new ArgumentException(
+                    "Sandbox restricting SID launch requires both the reduced base token and AppContainer profile.",
+                    nameof(sandboxRestrictingToken));
+            }
+
+            if (!sandboxRestrictingToken.IsPrimaryToken || !sandboxRestrictingToken.RestrictingSidPresent)
+            {
+                throw new InvalidOperationException("Sandbox restricting token is not a proven primary restricting token.");
+            }
+
+            if (!string.Equals(
+                    sandboxRestrictingToken.SandboxSid,
+                    appContainerProfile.AppContainerSid,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Sandbox restricting SID must exactly match the AppContainer SID bound to the child process.");
+            }
+        }
 
         var stdout = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
         var stderr = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
@@ -100,6 +129,7 @@ internal static class WindowsRaceFreeProcessLauncher
         var ownershipTransferred = false;
         var restrictedTokenEnforced = false;
         var appContainerEnforced = false;
+        var sandboxRestrictingSidEnforced = false;
 
         try
         {
@@ -128,8 +158,11 @@ internal static class WindowsRaceFreeProcessLauncher
             var effectiveEnvironment = BuildLaunchEnvironment(environment, appContainerProfile);
             environmentPointer = Marshal.StringToHGlobalUni(BuildEnvironmentBlock(effectiveEnvironment));
             var creationFlags = CreateSuspended | CreateNoWindow | CreateUnicodeEnvironment | ExtendedStartupInfoPresent;
+            var primaryTokenHandle = sandboxRestrictingToken?.DangerousTokenHandle
+                ?? restrictedToken?.DangerousTokenHandle
+                ?? IntPtr.Zero;
 
-            var created = restrictedToken is null
+            var created = primaryTokenHandle == IntPtr.Zero
                 ? NativeMethods.CreateProcessW(
                     executablePath,
                     commandLine,
@@ -142,7 +175,7 @@ internal static class WindowsRaceFreeProcessLauncher
                     ref startup,
                     out processInfo)
                 : NativeMethods.CreateProcessAsUserW(
-                    restrictedToken.DangerousTokenHandle,
+                    primaryTokenHandle,
                     executablePath,
                     commandLine,
                     IntPtr.Zero,
@@ -158,9 +191,9 @@ internal static class WindowsRaceFreeProcessLauncher
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
-                    restrictedToken is null
+                    primaryTokenHandle == IntPtr.Zero
                         ? "Could not create the governed adapter process in suspended state."
-                        : "Could not create the governed adapter process with the restricted token.");
+                        : "Could not create the governed adapter process with the strict primary token.");
             }
 
             stdout.DisposeLocalCopyOfClientHandle();
@@ -172,10 +205,13 @@ internal static class WindowsRaceFreeProcessLauncher
             {
                 if (restrictedToken is not null)
                 {
-                    restrictedTokenEnforced = WindowsRestrictedTokenLease.ProcessTokenHasMaximumPrivilegesDisabled(processInfo.hProcess);
+                    restrictedTokenEnforced =
+                        WindowsRestrictedTokenLease.ProcessTokenHasMaximumPrivilegesDisabled(processInfo.hProcess)
+                        && WindowsRestrictedTokenLease.ProcessTokenHasLowIntegrity(processInfo.hProcess);
                     if (!restrictedTokenEnforced)
                     {
-                        throw new InvalidOperationException("Child process token did not retain the required maximum-privilege reduction.");
+                        throw new InvalidOperationException(
+                            "Child process token did not retain the required maximum-privilege reduction and Low Integrity level.");
                     }
                 }
 
@@ -185,6 +221,19 @@ internal static class WindowsRaceFreeProcessLauncher
                     if (!appContainerEnforced)
                     {
                         throw new InvalidOperationException("Child process did not retain the required AppContainer identity.");
+                    }
+                }
+
+                if (sandboxRestrictingToken is not null)
+                {
+                    sandboxRestrictingSidEnforced =
+                        WindowsSandboxRestrictingTokenLease.ProcessTokenContainsRestrictingSid(
+                            processInfo.hProcess,
+                            sandboxRestrictingToken.SandboxSid);
+                    if (!sandboxRestrictingSidEnforced)
+                    {
+                        throw new InvalidOperationException(
+                            "Child process did not retain the exact AppContainer restricting SID before resume.");
                     }
                 }
 
@@ -204,7 +253,8 @@ internal static class WindowsRaceFreeProcessLauncher
                     stderr,
                     jobLease,
                     restrictedTokenEnforced,
-                    appContainerEnforced);
+                    appContainerEnforced,
+                    sandboxRestrictingSidEnforced);
             }
             catch
             {
