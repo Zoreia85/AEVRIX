@@ -19,6 +19,12 @@ internal sealed record DesktopEngineStatus(
         "Indisponível",
         detail,
         null);
+
+    public static DesktopEngineStatus Stopped() => new(
+        false,
+        "Parado",
+        "Sessão local encerrada. Nenhum estado saudável é considerado ativo.",
+        null);
 }
 
 /// <summary>
@@ -40,6 +46,8 @@ internal sealed class DesktopEngineSession : IAsyncDisposable
             : Path.GetFullPath(engineHostPath);
     }
 
+    public bool IsRunning => !_disposed && _supervisor?.IsRunning == true;
+
     public async Task<DesktopEngineStatus> RefreshAsync(
         CancellationToken cancellationToken = default)
     {
@@ -48,52 +56,43 @@ internal sealed class DesktopEngineSession : IAsyncDisposable
         try
         {
             ThrowIfDisposed();
+            return await RefreshLockedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
-            if (!File.Exists(_engineHostPath))
-            {
-                await StopFailClosedAsync().ConfigureAwait(false);
-                return DesktopEngineStatus.Blocked(
-                    "O EngineHost instalado lado a lado não foi encontrado. O runtime permanece bloqueado.");
-            }
+    public async Task<DesktopEngineStatus> RestartAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            await StopFailClosedAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return await RefreshLockedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
-            _supervisor ??= new EngineHostSupervisor(
-                _engineHostPath,
-                startupTimeout: TimeSpan.FromSeconds(15),
-                requestTimeout: TimeSpan.FromSeconds(5));
-
-            try
-            {
-                await _supervisor.StartAsync(cancellationToken).ConfigureAwait(false);
-                var response = await _supervisor.SendAsync(
-                    new GetEngineStatusCommand(Guid.NewGuid().ToString("N")),
-                    cancellationToken).ConfigureAwait(false);
-
-                if (!response.Success
-                    || !string.Equals(response.Code, "engine_ready", StringComparison.Ordinal)
-                    || !_supervisor.IsRunning
-                    || _supervisor.ProcessId is not int processId)
-                {
-                    await StopFailClosedAsync().ConfigureAwait(false);
-                    return DesktopEngineStatus.Blocked(
-                        $"O EngineHost respondeu com estado não confiável ('{response.Code}'). O runtime foi bloqueado.");
-                }
-
-                return DesktopEngineStatus.Ready(processId);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is IOException
-                or InvalidDataException
-                or InvalidOperationException
-                or TimeoutException
-                or UnauthorizedAccessException)
-            {
-                await StopFailClosedAsync().ConfigureAwait(false);
-                return DesktopEngineStatus.Blocked(
-                    $"A verificação autenticada do EngineHost falhou ({ex.GetType().Name}). O runtime permanece bloqueado.");
-            }
+    public async Task<DesktopEngineStatus> StopAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            await StopFailClosedAsync().ConfigureAwait(false);
+            return DesktopEngineStatus.Stopped();
         }
         finally
         {
@@ -127,6 +126,63 @@ internal sealed class DesktopEngineSession : IAsyncDisposable
         {
             _gate.Release();
             _gate.Dispose();
+        }
+    }
+
+    private async Task<DesktopEngineStatus> RefreshLockedAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_engineHostPath))
+        {
+            await StopFailClosedAsync().ConfigureAwait(false);
+            return DesktopEngineStatus.Blocked(
+                "O EngineHost instalado lado a lado não foi encontrado. O runtime permanece bloqueado.");
+        }
+
+        _supervisor ??= new EngineHostSupervisor(
+            _engineHostPath,
+            startupTimeout: TimeSpan.FromSeconds(15),
+            requestTimeout: TimeSpan.FromSeconds(5));
+
+        try
+        {
+            await _supervisor.StartAsync(cancellationToken).ConfigureAwait(false);
+            var requestId = Guid.NewGuid().ToString("N");
+            var response = await _supervisor.SendAsync(
+                new GetEngineStatusCommand(requestId),
+                cancellationToken).ConfigureAwait(false);
+
+            if (!response.Success
+                || !string.Equals(response.Code, "engine_ready", StringComparison.Ordinal)
+                || !string.Equals(response.RequestId, requestId, StringComparison.Ordinal)
+                || !_supervisor.IsRunning
+                || _supervisor.ProcessId is not int processId)
+            {
+                var responseCode = string.IsNullOrWhiteSpace(response.Code)
+                    ? "sem código"
+                    : response.Code;
+                await StopFailClosedAsync().ConfigureAwait(false);
+                return DesktopEngineStatus.Blocked(
+                    $"O EngineHost respondeu com estado não confiável ('{responseCode}'). O runtime foi bloqueado.");
+            }
+
+            return DesktopEngineStatus.Ready(processId);
+        }
+        catch (OperationCanceledException)
+        {
+            await StopFailClosedAsync().ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException
+            or InvalidDataException
+            or InvalidOperationException
+            or TimeoutException
+            or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception)
+        {
+            await StopFailClosedAsync().ConfigureAwait(false);
+            return DesktopEngineStatus.Blocked(
+                $"A verificação autenticada do EngineHost falhou ({ex.GetType().Name}). O runtime permanece bloqueado.");
         }
     }
 
