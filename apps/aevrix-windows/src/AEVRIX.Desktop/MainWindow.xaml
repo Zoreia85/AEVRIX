@@ -16,6 +16,7 @@
 
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Name="HomeNavItem" Content="Command Center" Tag="home" IsSelected="True" />
+                <NavigationViewItem x:Name="FirstRunNavItem" Content="Primeira execução" Tag="first-run" />
                 <NavigationViewItem Content="Projetos" Tag="projects" />
                 <NavigationViewItem x:Name="NewInvestigationNavItem" Content="Nova investigação" Tag="new" />
                 <NavigationViewItem Content="Mission Control" Tag="mission" />
@@ -116,6 +117,78 @@
                         </Grid>
 
                         <TextBlock Grid.Row="4" Text="AEVRIX Desktop • build de desenvolvimento • evidência antes de confiança" Opacity="0.5" HorizontalAlignment="Center" />
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="FirstRunView" Visibility="Collapsed">
+                    <Grid Padding="32" RowSpacing="24" MaxWidth="1120" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Spacing="8">
+                            <TextBlock Text="PRIMEIRA EXECUÇÃO" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Preparar esta estação com prova" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Cada etapa fica bloqueada até que a capacidade correspondente produza evidência verificável. Preparar a identidade local não equivale a enrollment remoto." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Warning" Title="Princípio fail-closed" Message="Não há fallback automático para chave de dispositivo em software. Se TPM/CNG não atender à política, o enrollment permanece bloqueado." />
+
+                        <Grid Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="1. Integridade da aplicação" FontWeight="SemiBold" />
+                                    <TextBlock Text="Não verificada" FontSize="22" />
+                                    <TextBlock Text="Assinatura, manifesto e hashes do candidato instalado ainda não estão ligados a esta tela." Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="2. EngineHost local" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="FirstRunEngineStateText" Text="Não verificado" FontSize="22" />
+                                    <TextBlock x:Name="FirstRunEngineDetailText" Text="Aguardando prova autenticada da sessão local." Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="3. Identidade local do dispositivo" FontWeight="SemiBold" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <TextBlock x:Name="FirstRunIdentityStateText" Text="Não preparada" FontSize="22" />
+                                        <ProgressRing x:Name="FirstRunIdentityProgress" Width="20" Height="20" IsActive="False" Visibility="Collapsed" AutomationProperties.Name="Preparando identidade TPM" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="FirstRunIdentityDetailText" Text="Nenhuma identidade TPM foi verificada nesta sessão." Opacity="0.65" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="FirstRunIdentityMetadataText" Text="Nenhum metadado local carregado." FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+                                    <Button x:Name="PrepareDeviceIdentityButton" Content="Preparar / verificar identidade TPM" HorizontalAlignment="Left" Click="PrepareDeviceIdentityButton_Click" AutomationProperties.Name="Preparar ou verificar identidade TPM" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="4. Enrollment, autenticação e workspace" FontWeight="SemiBold" />
+                                    <TextBlock Text="Pendente" FontSize="22" />
+                                    <TextBlock Text="O backend de enrollment e a sessão autenticada ainda não estão ligados ao first-run. Nenhuma conclusão remota é inferida da chave local." Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="12">
+                            <Button Content="Voltar ao Command Center" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
+                            <TextBlock Text="Meta deste estágio: provar pré-condições locais antes de qualquer enrollment remoto." VerticalAlignment="Center" Opacity="0.6" />
+                        </StackPanel>
                     </Grid>
                 </ScrollViewer>
 
