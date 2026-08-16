@@ -175,6 +175,28 @@
       ]
     },
     {
+      "repository": "microsoft/mxc",
+      "defaultBranch": "main",
+      "archived": false,
+      "licenseSpdx": "MIT",
+      "pinnedRevision": "692275b84eaa3f83cd8582dc774bc5f354f46ccf",
+      "verifiedAtUtc": "2026-08-16T14:28:00Z",
+      "integrationModes": [
+        "Reference"
+      ],
+      "runtimeApproval": "Denied",
+      "purpose": "Policy-driven layered isolation and containment architecture reference; candidate concepts only, never a security boundary or runtime dependency without a later independent approval.",
+      "securityConstraints": [
+        "reference-only",
+        "no-runtime-dependency",
+        "no-automatic-build",
+        "no-automatic-execution",
+        "upstream-preview-not-security-boundary",
+        "independent-backend-verification-required",
+        "pin-before-any-code-consumption"
+      ]
+    },
+    {
       "repository": "ripienaar/free-for-dev",
       "defaultBranch": "master",
       "archived": false,
