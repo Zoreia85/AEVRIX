@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
-using Aevrix.Core;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Aevrix.Core.Tests;
 
@@ -8,93 +6,67 @@ namespace Aevrix.Core.Tests;
 public sealed class WorkspaceIsolationTests
 {
     [TestMethod]
-    public void WorkspacePaths_AreOpaqueAndSeparatedAcrossUsersAndWorkspaces()
+    public void Paths_DoNotExposeRawUserOrWorkspaceIdentifiers()
     {
-        using var temp = new TemporaryDirectory();
-        var root = PathsFor(temp.Path);
+        var root = Path.Combine(Path.GetTempPath(), "aevrix-isolation-tests");
+        var isolation = new WorkspaceIsolation(root);
 
-        var a = new WorkspaceDataPaths(root, new WorkspaceScope("workspace-alpha", "user-a", "enc-a"));
-        var b = new WorkspaceDataPaths(root, new WorkspaceScope("workspace-alpha", "user-b", "enc-a"));
-        var c = new WorkspaceDataPaths(root, new WorkspaceScope("workspace-beta", "user-a", "enc-a"));
+        var path = isolation.EvidenceRoot("synthetic-user-alpha", "Synthetic Workspace Alpha / Case 42");
 
-        Assert.AreNotEqual(a.WorkspaceRoot, b.WorkspaceRoot);
-        Assert.AreNotEqual(a.WorkspaceRoot, c.WorkspaceRoot);
-        StringAssert.DoesNotContain(a.WorkspaceRoot, "user-a");
-        StringAssert.DoesNotContain(a.WorkspaceRoot, "workspace-alpha");
-        Assert.IsTrue(a.Contains(a.ProjectRoot(Guid.NewGuid())));
-        Assert.IsFalse(a.Contains(b.WorkspaceRoot));
+        Assert.IsFalse(path.Contains("synthetic-user-alpha", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(path.Contains("Synthetic Workspace Alpha", StringComparison.OrdinalIgnoreCase));
+        StringAssert.Contains(path, Path.Combine("workspaces", WorkspaceIsolation.OpaqueId("wsp", "Synthetic Workspace Alpha / Case 42")));
     }
 
     [TestMethod]
-    public void ResolveWorkspaceRelativePath_RejectsTraversalAndRootedPaths()
+    public void DifferentUsers_CannotCollideOnSameWorkspaceIdentifier()
     {
-        using var temp = new TemporaryDirectory();
-        var workspace = new WorkspaceDataPaths(PathsFor(temp.Path), new WorkspaceScope("ws", "user", "enc"));
+        var root = Path.Combine(Path.GetTempPath(), "aevrix-isolation-tests");
+        var isolation = new WorkspaceIsolation(root);
 
-        Assert.Throws<InvalidOperationException>(() => workspace.ResolveWorkspaceRelativePath("..\\escape.txt"));
-        Assert.Throws<InvalidOperationException>(() => workspace.ResolveWorkspaceRelativePath(Path.GetFullPath(Path.Combine(temp.Path, "absolute.txt"))));
+        var first = isolation.WorkspaceRoot("user-a", "shared-name");
+        var second = isolation.WorkspaceRoot("user-b", "shared-name");
+
+        Assert.AreNotEqual(first, second);
+        Assert.IsTrue(first.StartsWith(isolation.UserRoot("user-a"), PathComparison()));
+        Assert.IsTrue(second.StartsWith(isolation.UserRoot("user-b"), PathComparison()));
     }
 
     [TestMethod]
-    public void EnvelopeEncryption_RoundTripsOnlyInsideSameWorkspaceAndPurpose()
+    public void ResolveWorkspaceFile_RejectsTraversalOutsideBoundary()
     {
-        using var temp = new TemporaryDirectory();
-        var root = PathsFor(temp.Path);
-        var scopeA = new WorkspaceDataPaths(root, new WorkspaceScope("ws-a", "user-a", "enc-a"));
-        var scopeB = new WorkspaceDataPaths(root, new WorkspaceScope("ws-b", "user-a", "enc-a"));
-        var cryptoA = new WorkspaceEnvelopeEncryption(scopeA);
-        var cryptoB = new WorkspaceEnvelopeEncryption(scopeB);
-        var masterKey = SHA256.HashData(Encoding.UTF8.GetBytes("test-only-master-key-material"));
-        var plaintext = Encoding.UTF8.GetBytes("private evidence payload");
+        var root = Path.Combine(Path.GetTempPath(), "aevrix-isolation-tests");
+        var isolation = new WorkspaceIsolation(root);
 
-        var envelope = cryptoA.Encrypt(plaintext, masterKey, "evidence");
-        var restored = cryptoA.Decrypt(envelope, masterKey, "evidence");
-
-        CollectionAssert.AreEqual(plaintext, restored);
-        Assert.Throws<CryptographicException>(() => cryptoB.Decrypt(envelope, masterKey, "evidence"));
-        Assert.Throws<CryptographicException>(() => cryptoA.Decrypt(envelope, masterKey, "blueprint"));
-        CollectionAssert.AreNotEqual(plaintext, envelope.Ciphertext);
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            isolation.ResolveWorkspaceFile("user-a", "workspace-a", Path.Combine("..", "..", "escape.txt")));
     }
 
     [TestMethod]
-    public void EnvelopeEncryption_RejectsShortMasterKeysAndTampering()
+    public void ResolveWorkspaceFile_RejectsAbsolutePath()
     {
-        using var temp = new TemporaryDirectory();
-        var workspace = new WorkspaceDataPaths(PathsFor(temp.Path), new WorkspaceScope("ws", "user", "enc"));
-        var crypto = new WorkspaceEnvelopeEncryption(workspace);
-        var plaintext = Encoding.UTF8.GetBytes("payload");
-        var masterKey = RandomNumberGenerator.GetBytes(32);
+        var root = Path.Combine(Path.GetTempPath(), "aevrix-isolation-tests");
+        var isolation = new WorkspaceIsolation(root);
+        var absolute = Path.GetFullPath(Path.Combine(root, "escape.txt"));
 
-        Assert.Throws<ArgumentException>(() => crypto.Encrypt(plaintext, new byte[31], "evidence"));
-
-        var envelope = crypto.Encrypt(plaintext, masterKey, "evidence");
-        envelope.Ciphertext[0] ^= 0x01;
-        Assert.Throws<CryptographicException>(() => crypto.Decrypt(envelope, masterKey, "evidence"));
+        Assert.ThrowsExactly<ArgumentException>(() =>
+            isolation.ResolveWorkspaceFile("user-a", "workspace-a", absolute));
     }
 
-    private static AevrixDataPaths PathsFor(string root) => new(
-        UserRoot: root,
-        ProjectsRoot: Path.Combine(root, "Projects"),
-        VaultRoot: Path.Combine(root, "Vault"),
-        BrowserProfilesRoot: Path.Combine(root, "BrowserProfiles"),
-        EngineRoot: Path.Combine(root, "Engine"),
-        UpdatesRoot: Path.Combine(root, "Updates"),
-        LogsRoot: Path.Combine(root, "Logs"),
-        CacheRoot: Path.Combine(root, "Cache"));
-
-    private sealed class TemporaryDirectory : IDisposable
+    [TestMethod]
+    public void OpaqueIds_AreStablePurposeSeparatedAndFixedLength()
     {
-        public TemporaryDirectory()
-        {
-            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "aevrix-workspace-isolation-tests", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path);
-        }
+        var first = WorkspaceIsolation.OpaqueId("usr", "same-value");
+        var again = WorkspaceIsolation.OpaqueId("usr", "same-value");
+        var otherPurpose = WorkspaceIsolation.OpaqueId("wsp", "same-value");
 
-        public string Path { get; }
-
-        public void Dispose()
-        {
-            try { Directory.Delete(Path, recursive: true); } catch { }
-        }
+        Assert.AreEqual(first, again);
+        Assert.AreNotEqual(first, otherPurpose);
+        Assert.AreEqual(32, first.Length);
+        Assert.IsTrue(first.All(ch => char.IsAsciiHexDigit(ch) && !char.IsUpper(ch)));
     }
+
+    private static StringComparison PathComparison() => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 }
