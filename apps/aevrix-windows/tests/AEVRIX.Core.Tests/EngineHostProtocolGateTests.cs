@@ -10,7 +10,7 @@ public sealed class EngineHostProtocolGateTests
     public async Task DispatchAsync_RejectsProtocolVersionMismatch()
     {
         using var temp = new TemporaryDirectory();
-        var runtime = new EngineHostRuntime(new AevrixDataPaths(temp.Path));
+        var runtime = new EngineHostRuntime(PathsFor(temp.Path));
         EngineCommand command = new EnginePingCommand("req-version") with
         {
             ProtocolVersion = EngineProtocol.CurrentVersion + 1
@@ -21,6 +21,16 @@ public sealed class EngineHostProtocolGateTests
         Assert.IsFalse(response.Success);
         Assert.AreEqual("protocol_version_mismatch", response.Code);
     }
+
+    private static AevrixDataPaths PathsFor(string root) => new(
+        UserRoot: root,
+        ProjectsRoot: System.IO.Path.Combine(root, "Projects"),
+        VaultRoot: System.IO.Path.Combine(root, "Vault"),
+        BrowserProfilesRoot: System.IO.Path.Combine(root, "BrowserProfiles"),
+        EngineRoot: System.IO.Path.Combine(root, "Engine"),
+        UpdatesRoot: System.IO.Path.Combine(root, "Updates"),
+        LogsRoot: System.IO.Path.Combine(root, "Logs"),
+        CacheRoot: System.IO.Path.Combine(root, "Cache"));
 
     private sealed class TemporaryDirectory : IDisposable
     {
