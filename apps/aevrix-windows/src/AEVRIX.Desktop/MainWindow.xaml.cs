@@ -41,14 +41,55 @@ public sealed partial class MainWindow : Window
     }
 
     private async void VerifyEngineHostButton_Click(object sender, RoutedEventArgs e)
+        => await VerifyEngineHostAsync(restart: false);
+
+    private async void RestartEngineHostButton_Click(object sender, RoutedEventArgs e)
+        => await VerifyEngineHostAsync(restart: true);
+
+    private async void StopEngineHostButton_Click(object sender, RoutedEventArgs e)
     {
-        VerifyEngineHostButton.IsEnabled = false;
-        EngineHostStatusText.Text = "Verificando";
-        EngineHostDetailText.Text = "Iniciando sessão local autenticada e executando Ping real.";
+        SetEngineControlsBusy(true);
+        EngineHostStatusText.Text = "Parando";
+        EngineHostDetailText.Text = "Encerrando o processo local supervisionado.";
+
+        try
+        {
+            if (_engineSupervisor is not null)
+            {
+                await _engineSupervisor.StopAsync();
+            }
+
+            EngineHostStatusText.Text = "Parado";
+            EngineHostDetailText.Text = "Processo supervisionado encerrado. Nenhuma sessão local é considerada ativa.";
+        }
+        catch (Exception ex)
+        {
+            EngineHostStatusText.Text = "Bloqueado";
+            EngineHostDetailText.Text = $"A parada falhou de forma fechada ({ex.GetType().Name}). O supervisor será descartado.";
+            await DisposeEngineSupervisorAsync();
+        }
+        finally
+        {
+            SetEngineControlsBusy(false);
+        }
+    }
+
+    private async Task VerifyEngineHostAsync(bool restart)
+    {
+        SetEngineControlsBusy(true);
+        EngineHostStatusText.Text = restart ? "Reiniciando" : "Verificando";
+        EngineHostDetailText.Text = restart
+            ? "Encerrando qualquer sessão anterior antes de iniciar uma nova sessão autenticada."
+            : "Iniciando sessão local autenticada e executando Ping real.";
 
         try
         {
             _engineSupervisor ??= CreateEngineSupervisor();
+            if (restart && _engineSupervisor.IsRunning)
+            {
+                await _engineSupervisor.StopAsync();
+            }
+
             await _engineSupervisor.StartAsync();
 
             var requestId = Guid.NewGuid().ToString("N");
@@ -70,17 +111,30 @@ public sealed partial class MainWindow : Window
         {
             EngineHostStatusText.Text = "Bloqueado";
             EngineHostDetailText.Text = $"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.";
-
-            if (_engineSupervisor is not null)
-            {
-                await _engineSupervisor.DisposeAsync();
-                _engineSupervisor = null;
-            }
+            await DisposeEngineSupervisorAsync();
         }
         finally
         {
-            VerifyEngineHostButton.IsEnabled = true;
+            SetEngineControlsBusy(false);
         }
+    }
+
+    private void SetEngineControlsBusy(bool busy)
+    {
+        VerifyEngineHostButton.IsEnabled = !busy;
+        RestartEngineHostButton.IsEnabled = !busy;
+        StopEngineHostButton.IsEnabled = !busy && _engineSupervisor?.IsRunning == true;
+    }
+
+    private async Task DisposeEngineSupervisorAsync()
+    {
+        if (_engineSupervisor is null)
+        {
+            return;
+        }
+
+        await _engineSupervisor.DisposeAsync();
+        _engineSupervisor = null;
     }
 
     private void ValidateScopeButton_Click(object sender, RoutedEventArgs e)
@@ -105,15 +159,7 @@ public sealed partial class MainWindow : Window
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
-    {
-        if (_engineSupervisor is null)
-        {
-            return;
-        }
-
-        await _engineSupervisor.DisposeAsync();
-        _engineSupervisor = null;
-    }
+        => await DisposeEngineSupervisorAsync();
 
     private void ShowSection(string route, string title)
     {

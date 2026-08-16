@@ -62,6 +62,38 @@ public sealed class EngineHostSupervisorTests
     }
 
     [TestMethod]
+    public async Task StopAsync_AllowsAuthenticatedRestart()
+    {
+        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
+        await using var supervisor = new EngineHostSupervisor(
+            "dotnet",
+            new[] { engineAssembly },
+            startupTimeout: TimeSpan.FromSeconds(20),
+            requestTimeout: TimeSpan.FromSeconds(5));
+
+        await supervisor.StartAsync();
+        var firstRequestId = Guid.NewGuid().ToString("N");
+        var first = await supervisor.SendAsync(new EnginePingCommand(firstRequestId));
+        Assert.IsTrue(first.Success);
+        Assert.AreEqual("pong", first.Code);
+        Assert.AreEqual(firstRequestId, first.RequestId);
+
+        await supervisor.StopAsync();
+        Assert.IsFalse(supervisor.IsRunning);
+        Assert.IsNull(supervisor.ProcessId);
+
+        await supervisor.StartAsync();
+        var secondRequestId = Guid.NewGuid().ToString("N");
+        var second = await supervisor.SendAsync(new EnginePingCommand(secondRequestId));
+
+        Assert.IsTrue(second.Success);
+        Assert.AreEqual("pong", second.Code);
+        Assert.AreEqual(secondRequestId, second.RequestId);
+        Assert.IsTrue(supervisor.IsRunning);
+        Assert.IsNotNull(supervisor.ProcessId);
+    }
+
+    [TestMethod]
     public async Task StartAsync_IsIdempotentWhileHealthy()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
