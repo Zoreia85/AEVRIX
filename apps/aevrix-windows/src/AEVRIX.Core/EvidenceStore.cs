@@ -176,9 +176,20 @@ public sealed class EvidenceStore
         }
     }
 
-    public async Task<bool> VerifyAsync(StoredEvidenceArtifact artifact, CancellationToken cancellationToken = default)
+    public Task<bool> VerifyAsync(StoredEvidenceArtifact artifact, CancellationToken cancellationToken = default)
+        => VerifyAsync(artifact.ProjectId, artifact, cancellationToken);
+
+    public async Task<bool> VerifyAsync(
+        Guid expectedProjectId,
+        StoredEvidenceArtifact artifact,
+        CancellationToken cancellationToken = default)
     {
-        var projectRoot = _paths.ProjectRoot(artifact.ProjectId);
+        if (expectedProjectId == Guid.Empty || artifact.ProjectId != expectedProjectId)
+        {
+            return false;
+        }
+
+        var projectRoot = _paths.ProjectRoot(expectedProjectId);
         var fullPath = Path.GetFullPath(Path.Combine(projectRoot, artifact.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
         if (!IsContained(projectRoot, fullPath) || !File.Exists(fullPath))
         {
@@ -210,10 +221,12 @@ public sealed class EvidenceStore
             }
 
             var artifact = JsonSerializer.Deserialize<StoredEvidenceArtifact>(line, JsonOptions);
-            if (artifact is not null)
+            if (artifact is null || artifact.ProjectId != projectId)
             {
-                result.Add(artifact);
+                throw new InvalidDataException("Evidence index contains an invalid or cross-project artifact.");
             }
+
+            result.Add(artifact);
         }
 
         return result;
@@ -244,9 +257,12 @@ public sealed class EvidenceStore
             }
 
             var artifact = JsonSerializer.Deserialize<StoredEvidenceArtifact>(line, JsonOptions);
-            if (artifact is not null
-                && artifact.ProjectId == projectId
-                && string.Equals(artifact.CaptureId, captureId, StringComparison.Ordinal)
+            if (artifact is null || artifact.ProjectId != projectId)
+            {
+                throw new InvalidDataException("Evidence index contains an invalid or cross-project artifact.");
+            }
+
+            if (string.Equals(artifact.CaptureId, captureId, StringComparison.Ordinal)
                 && artifact.Classification == classification
                 && string.Equals(artifact.Kind, kind, StringComparison.Ordinal)
                 && string.Equals(artifact.Sha256, sha256, StringComparison.OrdinalIgnoreCase)

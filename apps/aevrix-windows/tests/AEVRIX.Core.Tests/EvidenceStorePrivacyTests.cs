@@ -78,6 +78,82 @@ public sealed class EvidenceStorePrivacyTests
         }
     }
 
+    [TestMethod]
+    public async Task VerifyRejectsCrossProjectArtifact()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aevrix-evidence-verify-scope-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var paths = Paths(root);
+            var source = Path.Combine(root, "scope.txt");
+            await File.WriteAllTextAsync(source, "scope fixture");
+            var store = new EvidenceStore(paths);
+            var expectedProject = Guid.NewGuid();
+
+            var foreign = await store.StoreFileAsync(
+                Guid.NewGuid(),
+                "capture-scope-001",
+                source,
+                EvidenceClassification.Sanitized,
+                "text",
+                "text/plain",
+                EvidenceBasis.Observed);
+
+            Assert.IsFalse(await store.VerifyAsync(expectedProject, foreign));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task ReadIndexRejectsCrossProjectArtifact()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aevrix-evidence-index-scope-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var paths = Paths(root);
+            var source = Path.Combine(root, "index-scope.txt");
+            await File.WriteAllTextAsync(source, "index scope fixture");
+            var store = new EvidenceStore(paths);
+            var projectA = Guid.NewGuid();
+            var projectB = Guid.NewGuid();
+
+            await store.StoreFileAsync(
+                projectB,
+                "capture-index-scope-001",
+                source,
+                EvidenceClassification.Sanitized,
+                "text",
+                "text/plain",
+                EvidenceBasis.Observed);
+
+            var foreignIndex = Path.Combine(paths.ProjectEvidenceRoot(projectB), "index.ndjson");
+            var poisonedIndex = Path.Combine(paths.ProjectEvidenceRoot(projectA), "index.ndjson");
+            Directory.CreateDirectory(Path.GetDirectoryName(poisonedIndex)!);
+            await File.WriteAllTextAsync(poisonedIndex, await File.ReadAllTextAsync(foreignIndex));
+
+            var rejected = false;
+            try
+            {
+                await store.ReadIndexAsync(projectA);
+            }
+            catch (InvalidDataException)
+            {
+                rejected = true;
+            }
+
+            Assert.IsTrue(rejected);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AevrixDataPaths Paths(string root) => new(
         UserRoot: root,
         ProjectsRoot: Path.Combine(root, "Projects"),
