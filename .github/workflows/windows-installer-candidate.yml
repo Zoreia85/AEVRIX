@@ -105,7 +105,7 @@ jobs:
           if (-not $candidates) {
             throw 'Verified NSIS installed but makensis.exe was not found.'
           }
-          $makensis = $candidates[0]
+          $makensis = $candidates | Select-Object -First 1
           $versionOutput = & $makensis /VERSION
           if ($LASTEXITCODE -ne 0 -or ($versionOutput -join ' ') -notmatch '3\.12') {
             throw "Unexpected makensis version: $($versionOutput -join ' ')"
