@@ -9,13 +9,21 @@ namespace AEVRIX.Desktop;
 
 public sealed partial class MainWindow : Window
 {
+    private readonly DispatcherTimer _engineHealthTimer = new();
     private EngineHostSupervisor? _engineSupervisor;
+    private bool _engineOperationInProgress;
+    private bool _engineHealthProbeInProgress;
+    private bool _engineStoppedByUser;
+    private bool _isClosing;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = "AEVRIX Desktop";
         Closed += MainWindow_Closed;
+        _engineHealthTimer.Interval = TimeSpan.FromSeconds(5);
+        _engineHealthTimer.Tick += EngineHealthTimer_Tick;
+        _engineHealthTimer.Start();
         ShowSection("home", "Command Center");
     }
 
@@ -48,6 +56,7 @@ public sealed partial class MainWindow : Window
 
     private async void StopEngineHostButton_Click(object sender, RoutedEventArgs e)
     {
+        _engineOperationInProgress = true;
         SetEngineControlsBusy(true);
         EngineHostStatusText.Text = "Parando";
         EngineHostDetailText.Text = "Encerrando o processo local supervisionado.";
@@ -59,6 +68,7 @@ public sealed partial class MainWindow : Window
                 await _engineSupervisor.StopAsync();
             }
 
+            _engineStoppedByUser = true;
             EngineHostStatusText.Text = "Parado";
             EngineHostDetailText.Text = "Processo supervisionado encerrado. Nenhuma sessão local é considerada ativa.";
         }
@@ -70,12 +80,15 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            _engineOperationInProgress = false;
             SetEngineControlsBusy(false);
         }
     }
 
     private async Task VerifyEngineHostAsync(bool restart)
     {
+        _engineOperationInProgress = true;
+        _engineStoppedByUser = false;
         SetEngineControlsBusy(true);
         EngineHostStatusText.Text = restart ? "Reiniciando" : "Verificando";
         EngineHostDetailText.Text = restart
@@ -91,21 +104,8 @@ public sealed partial class MainWindow : Window
             }
 
             await _engineSupervisor.StartAsync();
-
-            var requestId = Guid.NewGuid().ToString("N");
-            var response = await _engineSupervisor.SendAsync(new EnginePingCommand(requestId));
-
-            if (!response.Success ||
-                !string.Equals(response.Code, "pong", StringComparison.Ordinal) ||
-                !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
-            }
-
-            EngineHostStatusText.Text = "Autenticado";
-            EngineHostDetailText.Text = _engineSupervisor.ProcessId is int processId
-                ? $"Ping real confirmado. Processo local supervisionado: PID {processId}."
-                : "Ping real confirmado em sessão local supervisionada.";
+            await RequireAuthenticatedPingAsync(_engineSupervisor);
+            RenderAuthenticatedEngineState("Ping real confirmado. Supervisão contínua ativada.");
         }
         catch (Exception ex)
         {
@@ -115,8 +115,71 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            _engineOperationInProgress = false;
             SetEngineControlsBusy(false);
         }
+    }
+
+    private async void EngineHealthTimer_Tick(object sender, object e)
+    {
+        if (_isClosing ||
+            _engineOperationInProgress ||
+            _engineHealthProbeInProgress ||
+            _engineSupervisor is null ||
+            _engineStoppedByUser)
+        {
+            return;
+        }
+
+        _engineHealthProbeInProgress = true;
+        try
+        {
+            if (!_engineSupervisor.IsRunning)
+            {
+                EngineHostStatusText.Text = "Interrompido";
+                EngineHostDetailText.Text = "O processo supervisionado encerrou inesperadamente. A sessão foi invalidada e exige nova verificação ou reinício.";
+                await DisposeEngineSupervisorAsync();
+                return;
+            }
+
+            await RequireAuthenticatedPingAsync(_engineSupervisor);
+            RenderAuthenticatedEngineState("Health-check autenticado confirmado automaticamente.");
+        }
+        catch (Exception ex)
+        {
+            EngineHostStatusText.Text = "Bloqueado";
+            EngineHostDetailText.Text = $"A supervisão automática perdeu a prova autenticada ({ex.GetType().Name}). A sessão foi invalidada.";
+            await DisposeEngineSupervisorAsync();
+        }
+        finally
+        {
+            _engineHealthProbeInProgress = false;
+            if (!_isClosing)
+            {
+                SetEngineControlsBusy(false);
+            }
+        }
+    }
+
+    private static async Task RequireAuthenticatedPingAsync(EngineHostSupervisor supervisor)
+    {
+        var requestId = Guid.NewGuid().ToString("N");
+        var response = await supervisor.SendAsync(new EnginePingCommand(requestId));
+
+        if (!response.Success ||
+            !string.Equals(response.Code, "pong", StringComparison.Ordinal) ||
+            !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
+        }
+    }
+
+    private void RenderAuthenticatedEngineState(string message)
+    {
+        EngineHostStatusText.Text = "Autenticado";
+        EngineHostDetailText.Text = _engineSupervisor?.ProcessId is int processId
+            ? $"{message} Processo local supervisionado: PID {processId}."
+            : message;
     }
 
     private void SetEngineControlsBusy(bool busy)
@@ -159,7 +222,11 @@ public sealed partial class MainWindow : Window
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
-        => await DisposeEngineSupervisorAsync();
+    {
+        _isClosing = true;
+        _engineHealthTimer.Stop();
+        await DisposeEngineSupervisorAsync();
+    }
 
     private void ShowSection(string route, string title)
     {
