@@ -40,23 +40,42 @@ jobs:
             exit 1
           fi
 
-      - name: Build queue envelope
+      - name: Split validated patch into queue envelopes
         shell: bash
         run: |
           set -euo pipefail
-          {
-            printf '%s\n' 'AEVRIX-PATCH-V1'
-            base64 -w 0 /tmp/aevrix-desktop.patch
-            printf '\n'
-          } > /tmp/issue-body.txt
-          test "$(wc -c < /tmp/issue-body.txt)" -lt 2000000
-          sha256sum /tmp/aevrix-desktop.patch /tmp/issue-body.txt
+          mkdir -p /tmp/envelopes
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import pathlib
+          import re
 
-      - name: Upload queue envelope
+          raw = pathlib.Path('/tmp/aevrix-desktop.patch').read_bytes()
+          starts = [m.start() for m in re.finditer(br'(?m)^diff --git ', raw)]
+          starts.append(len(raw))
+          if len(starts) <= 1:
+              raise SystemExit('no file patches found')
+          for index, (start, end) in enumerate(zip(starts, starts[1:]), 1):
+              chunk = raw[start:end]
+              first_line = chunk.splitlines()[0].decode('utf-8', errors='strict')
+              match = re.match(r'diff --git a/(.+?) b/(.+)$', first_line)
+              if not match or match.group(1) != match.group(2):
+                  raise SystemExit(f'unexpected patch header: {first_line}')
+              path = match.group(2)
+              safe = re.sub(r'[^A-Za-z0-9._-]+', '-', pathlib.Path(path).name)
+              encoded = base64.b64encode(chunk).decode('ascii')
+              body = 'AEVRIX-PATCH-V1\n' + encoded + '\n'
+              target = pathlib.Path('/tmp/envelopes') / f'{index:02d}-{safe}.txt'
+              target.write_text(body, encoding='utf-8')
+              print(f'{target.name} path={path} raw={len(chunk)} envelope={len(body)} sha256={hashlib.sha256(chunk).hexdigest()}')
+          PY
+
+      - name: Upload split queue envelopes
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: aevrix-desktop-patch-envelope
-          path: /tmp/issue-body.txt
+          name: aevrix-desktop-patch-parts
+          path: /tmp/envelopes/*.txt
           if-no-files-found: error
           retention-days: 1
           compression-level: 9
