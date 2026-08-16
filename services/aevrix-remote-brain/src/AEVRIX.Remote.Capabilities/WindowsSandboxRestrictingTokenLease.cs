@@ -15,6 +15,7 @@ namespace Aevrix.Remote.Capabilities;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsSandboxRestrictingTokenLease : IDisposable
 {
+    private const uint TokenQuery = 0x0008;
     private const int TokenType = 8;
     private const int TokenRestrictedSids = 11;
     private const int TokenPrimary = 1;
@@ -138,6 +139,50 @@ public sealed class WindowsSandboxRestrictingTokenLease : IDisposable
         }
     }
 
+    /// <summary>
+    /// Verifies the exact sandbox restricting SID on a child token while the process can still be
+    /// suspended by the strict launcher. A false result must be treated as a launch failure.
+    /// </summary>
+    internal static bool ProcessTokenContainsRestrictingSid(IntPtr processHandle, string sandboxSid)
+    {
+        if (processHandle == IntPtr.Zero)
+        {
+            throw new ArgumentException("Process handle cannot be null.", nameof(processHandle));
+        }
+
+        if (string.IsNullOrWhiteSpace(sandboxSid) || sandboxSid.Length > 184)
+        {
+            throw new ArgumentException("Sandbox SID is missing or exceeds the supported SDDL length.", nameof(sandboxSid));
+        }
+
+        if (!OpenProcessToken(processHandle, TokenQuery, out var processToken))
+        {
+            throw Win32("OpenProcessToken(child sandbox SID) failed.");
+        }
+
+        using (processToken)
+        {
+            if (!ConvertStringSidToSidW(sandboxSid, out var sid))
+            {
+                throw Win32("ConvertStringSidToSidW(child sandbox) failed.");
+            }
+
+            try
+            {
+                if (!IsValidSid(sid))
+                {
+                    throw new InvalidDataException("Child sandbox SID conversion returned an invalid SID.");
+                }
+
+                return ContainsRestrictedSid(processToken, sid);
+            }
+            finally
+            {
+                _ = LocalFree(sid);
+            }
+        }
+    }
+
     public void Dispose() => _token.Dispose();
 
     private static int ReadTokenType(SafeAccessTokenHandle token)
@@ -218,6 +263,13 @@ public sealed class WindowsSandboxRestrictingTokenLease : IDisposable
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr memory);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(
+        IntPtr processHandle,
+        uint desiredAccess,
+        out SafeAccessTokenHandle tokenHandle);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
