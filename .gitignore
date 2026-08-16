@@ -1,0 +1,58 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pdb
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# AEVRIX build/runtime outputs
+artifacts/
+**/artifacts/
+*.msi
+*.msix
+*.exe
+*.apk
+*.aab
+*.zip
+
+# Credentials / signing / device identity
+*.pfx
+*.p12
+*.pem
+*.key
+*.jks
+*.keystore
+*.cer
+*.crt
+*.csr
+.env
+.env.*
+!.env.example
+secrets/
+runtime-secrets/
+
+# Local evidence and user data
+captures/
+evidence/
+quarantine/
+browser-profiles/
+ResearchRuntime/
+AEVRIX_DATA/
+
+public-source-audit.json
