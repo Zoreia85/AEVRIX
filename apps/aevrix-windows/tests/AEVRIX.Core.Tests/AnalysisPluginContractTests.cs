@@ -24,7 +24,7 @@ public sealed class AnalysisPluginContractTests
     private static AnalysisExecutionRequest Request(
         TargetAccessClass accessClass,
         AnalysisTechnique technique,
-        EvidenceSensitivity sensitivity = EvidenceSensitivity.Internal,
+        AnalysisEvidenceSensitivity sensitivity = AnalysisEvidenceSensitivity.Internal,
         OutputBoundary outputBoundary = OutputBoundary.LocalWorkspaceOnly,
         bool authBypass = false,
         bool drmBypass = false,
@@ -117,7 +117,7 @@ public sealed class AnalysisPluginContractTests
             Request(
                 TargetAccessClass.Owned,
                 AnalysisTechnique.StaticInspection,
-                EvidenceSensitivity.PersonalData,
+                AnalysisEvidenceSensitivity.PersonalData,
                 OutputBoundary.RedactedExternal)
                 .ValidateAgainst(GeneralPlugin));
     }
