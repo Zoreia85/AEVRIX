@@ -1,0 +1,172 @@
+<Window
+    x:Class="AEVRIX.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Background="{StaticResource AevrixSurfaceBrush}">
+        <NavigationView
+            x:Name="RootNavigation"
+            PaneDisplayMode="Left"
+            IsBackButtonVisible="Collapsed"
+            IsSettingsVisible="False"
+            PaneTitle="AEVRIX"
+            SelectionChanged="RootNavigation_SelectionChanged"
+            AutomationProperties.Name="Navegação principal do AEVRIX">
+
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="HomeNavItem" Content="Command Center" Tag="home" IsSelected="True" />
+                <NavigationViewItem Content="Projetos" Tag="projects" />
+                <NavigationViewItem x:Name="NewInvestigationNavItem" Content="Nova investigação" Tag="new" />
+                <NavigationViewItem Content="Mission Control" Tag="mission" />
+                <NavigationViewItem Content="Evidências" Tag="evidence" />
+                <NavigationViewItem Content="Blueprint" Tag="blueprint" />
+                <NavigationViewItem Content="Research Browser" Tag="browser" />
+                <NavigationViewItem Content="Especialistas / Adapters" Tag="specialists" />
+                <NavigationViewItem Content="Activity / Proof Ledger" Tag="activity" />
+                <NavigationViewItem Content="Integrações" Tag="integrations" />
+                <NavigationViewItem Content="Configurações / Segurança" Tag="settings" />
+            </NavigationView.MenuItems>
+
+            <Grid>
+                <ScrollViewer x:Name="CommandCenterView">
+                    <Grid Padding="32" RowSpacing="24" MaxWidth="1320" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Spacing="8">
+                            <TextBlock Text="COMMAND CENTER" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Centro operacional" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Visão governada da estação Windows, do cérebro remoto e das missões em execução." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Warning" Title="NOT_HOMOLOGATED" Message="Este shell é uma superfície em desenvolvimento. Estados não verificados permanecem restritos ou indisponíveis." />
+
+                        <Grid Grid.Row="2" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="EngineHost" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="EngineHostStatusText" Text="Não iniciado" FontSize="22" />
+                                    <TextBlock x:Name="EngineHostDetailText" Text="Sem prova de sessão autenticada nesta tela." Opacity="0.65" TextWrapping="Wrap" />
+                                    <Button x:Name="VerifyEngineHostButton" Content="Verificar EngineHost" HorizontalAlignment="Left" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost autenticado" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Cérebro remoto" FontWeight="SemiBold" />
+                                    <TextBlock Text="Não verificado" FontSize="22" />
+                                    <TextBlock Text="Conectividade e identidade ainda não foram consultadas." Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Postura de segurança" FontWeight="SemiBold" />
+                                    <TextBlock Text="Restrita" FontSize="22" />
+                                    <TextBlock Text="Nenhum gate de runtime é inferido pela interface." Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="3" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Missões" FontWeight="SemiBold" />
+                                    <TextBlock Text="0 ativas" FontSize="22" />
+                                    <TextBlock Text="Fila local ainda não vinculada ao orquestrador." Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Grid Grid.Row="3" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Text="Começar trabalho autorizado" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock Text="O fluxo de investigação somente pode avançar depois de escopo, autorização e sensibilidade serem validados." Opacity="0.72" TextWrapping="Wrap" />
+                                    <Button x:Name="StartAnalysisButton" Content="Preparar nova análise autorizada" HorizontalAlignment="Left" Click="StartAnalysisButton_Click" AutomationProperties.Name="Preparar nova análise autorizada" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="Próximos gates" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock Text="• Integridade no primeiro launch" TextWrapping="Wrap" />
+                                    <TextBlock Text="• Enrollment e autenticação" TextWrapping="Wrap" />
+                                    <TextBlock Text="• Estado real do EngineHost" TextWrapping="Wrap" />
+                                    <TextBlock Text="• Estado real do cérebro remoto" TextWrapping="Wrap" />
+                                    <TextBlock Text="• Política real de investigação" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Grid.Row="4" Text="AEVRIX Desktop • build de desenvolvimento • evidência antes de confiança" Opacity="0.5" HorizontalAlignment="Center" />
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="NewInvestigationView" Visibility="Collapsed">
+                    <Grid Padding="32" RowSpacing="24" MaxWidth="1080" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Spacing="8">
+                            <TextBlock Text="NOVA INVESTIGAÇÃO" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Preparar escopo autorizado" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Defina contexto e intenção antes de qualquer coleta, execução ou instrumentação." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Warning" Title="Execução bloqueada por padrão" Message="Esta tela ainda não está vinculada ao motor de políticas. Preencher campos não concede autorização e não inicia uma missão." />
+
+                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="24">
+                            <StackPanel Spacing="18">
+                                <TextBlock Text="1. Escopo e autorização" FontSize="22" FontWeight="SemiBold" />
+                                <ComboBox x:Name="AuthorizationClassInput" Header="Classe de autorização" PlaceholderText="Selecione a classe declarada" AutomationProperties.Name="Classe de autorização">
+                                    <ComboBoxItem Content="Sistema próprio" Tag="owned" />
+                                    <ComboBoxItem Content="Explicitamente autorizado" Tag="authorized" />
+                                    <ComboBoxItem Content="Terceiro — clean-room" Tag="clean-room" />
+                                </ComboBox>
+                                <TextBox x:Name="WorkspaceInput" Header="Projeto / workspace" PlaceholderText="Identificador do workspace" AutomationProperties.Name="Projeto ou workspace" />
+                                <TextBox x:Name="TargetInput" Header="Alvo ou fonte" PlaceholderText="Arquivo, aplicação, repositório, API ou outra fonte autorizada" TextWrapping="Wrap" AutomationProperties.Name="Alvo ou fonte" />
+                                <TextBox x:Name="GoalsInput" Header="Objetivos da análise" PlaceholderText="O que precisa ser observado, validado ou reconstruído?" AcceptsReturn="True" MinHeight="96" TextWrapping="Wrap" AutomationProperties.Name="Objetivos da análise" />
+                                <ComboBox x:Name="SensitivityInput" Header="Sensibilidade dos dados" PlaceholderText="Selecione a política de dados" AutomationProperties.Name="Sensibilidade dos dados">
+                                    <ComboBoxItem Content="Padrão" Tag="standard" />
+                                    <ComboBoxItem Content="Confidencial" Tag="confidential" />
+                                    <ComboBoxItem Content="Dados pessoais / restritos" Tag="restricted" />
+                                </ComboBox>
+                                <Border Height="1" Background="{StaticResource AevrixAccentBrush}" Opacity="0.2" />
+                                <TextBlock Text="Etapas seguintes quando a política estiver conectada: plano de especialistas/adapters → revisão → validação de autoridade → início governado." Opacity="0.7" TextWrapping="Wrap" />
+                                <Button Content="Validar escopo e autorização" HorizontalAlignment="Left" Click="ValidateScopeButton_Click" AutomationProperties.Name="Validar escopo e autorização" />
+                                <InfoBar x:Name="PolicyUnavailableNotice" IsOpen="False" IsClosable="True" Severity="Informational" Title="Validação ainda indisponível" Message="O motor real de políticas ainda não está conectado a esta superfície. Nenhuma autorização foi concedida e nenhuma missão foi criada." />
+                            </StackPanel>
+                        </Border>
+
+                        <Button Grid.Row="3" Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
+                    </Grid>
+                </ScrollViewer>
+
+                <Grid x:Name="PlannedSectionView" Visibility="Collapsed" Padding="32">
+                    <Border Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="28" MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel Spacing="12">
+                            <TextBlock x:Name="PlannedSectionTitle" Text="Superfície em preparação" FontSize="30" FontWeight="SemiBold" />
+                            <TextBlock Text="Esta área consta no sistema canônico de UX, mas ainda não possui implementação promovida. Nenhuma capacidade é simulada como disponível." Opacity="0.72" TextWrapping="Wrap" />
+                            <Button Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>
