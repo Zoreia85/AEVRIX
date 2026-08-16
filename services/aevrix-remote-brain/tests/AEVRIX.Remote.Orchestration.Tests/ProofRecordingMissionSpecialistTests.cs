@@ -29,6 +29,14 @@ public sealed class ProofRecordingMissionSpecialistTests
         Assert.AreEqual(ExecutionProofStage.Completed, records[1].Event.Stage);
         Assert.AreEqual(ExecutionProofOutcome.Succeeded, records[1].Event.Outcome);
         Assert.AreEqual(records[0].Event.ExecutionId, records[1].Event.ExecutionId);
+        Assert.AreEqual(
+            MissionExecutionProofIdentity.CreateExecutionId(
+                Project,
+                "mission-proof-001",
+                "target-001",
+                "inspect-001",
+                MissionSpecialistKind.StaticAnalysis),
+            records[0].Event.ExecutionId);
         Assert.AreEqual(records[0].Event.InputDigestSha256, records[1].Event.InputDigestSha256);
         Assert.AreEqual(records[0].Event.AuthorityDigestSha256, records[1].Event.AuthorityDigestSha256);
         Assert.IsNotNull(records[1].Event.ResultDigestSha256);
