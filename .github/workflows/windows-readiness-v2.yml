@@ -9,6 +9,7 @@ on:
       - "docs/qa/**"
       - "tools/release/ava-readiness.py"
       - "tools/release/tests/**"
+      - "tools/release/AEVRIX.ReadinessSoak/**"
       - ".github/workflows/windows-readiness-v2.yml"
       - "global.json"
   workflow_dispatch:
@@ -79,6 +80,23 @@ jobs:
             --self-contained false `
             -o (Join-Path $env:AVA_DIR "enginehost")
 
+      - name: EngineHost authenticated soak
+        id: soak
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $engineHost = Join-Path $env:AVA_DIR "enginehost\AEVRIX.EngineHost.exe"
+          $soakOutput = Join-Path $env:AVA_DIR "enginehost-soak.json"
+          dotnet run --project ./tools/release/AEVRIX.ReadinessSoak/AEVRIX.ReadinessSoak.csproj `
+            -c Release `
+            -- `
+            --enginehost $engineHost `
+            --output $soakOutput `
+            --iterations 250 `
+            --restart-every 50 `
+            --max-working-set-mib 512 `
+            --max-private-growth-mib 128
+
       - name: Test Windows Core
         continue-on-error: true
         shell: pwsh
@@ -115,39 +133,24 @@ jobs:
           RUNNER_IMAGE: ${{ steps.identity.outputs.image }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: |
-          $sourceCommit = $env:SOURCE_COMMIT
-          if ([string]::IsNullOrWhiteSpace($sourceCommit)) {
-            $sourceCommit = (git rev-parse HEAD).Trim()
-          }
-          $dotnetSdk = $env:DOTNET_SDK
-          if ([string]::IsNullOrWhiteSpace($dotnetSdk)) {
-            $dotnetSdk = (dotnet --version).Trim()
-          }
-          $runnerImage = $env:RUNNER_IMAGE
-          if ([string]::IsNullOrWhiteSpace($runnerImage)) {
-            $runnerImage = "$env:ImageOS/$env:ImageVersion"
-          }
-          $buildOutcome = $env:BUILD_OUTCOME
-          if ([string]::IsNullOrWhiteSpace($buildOutcome)) {
-            $buildOutcome = "skipped"
-          }
           $arguments = @(
             "tools/release/ava-readiness.py",
             "candidate",
             "--repo-root", ".",
             "--output-dir", $env:AVA_DIR,
-            "--source-commit", $sourceCommit,
+            "--source-commit", $env:SOURCE_COMMIT,
             "--repository", $env:GITHUB_REPOSITORY,
             "--workflow-run-id", $env:GITHUB_RUN_ID,
             "--runner-os", $env:RUNNER_OS,
-            "--runner-image", $runnerImage,
+            "--runner-image", $env:RUNNER_IMAGE,
             "--runner-arch", $env:RUNNER_ARCH,
-            "--dotnet-sdk", $dotnetSdk,
-            "--build-outcome", $buildOutcome,
+            "--dotnet-sdk", $env:DOTNET_SDK,
+            "--build-outcome", $env:BUILD_OUTCOME,
             "--enginehost-dir", (Join-Path $env:AVA_DIR "enginehost"),
             "--core-trx", (Join-Path $env:AVA_DIR "core.trx"),
             "--security-trx", (Join-Path $env:AVA_DIR "remote-security.trx"),
-            "--orchestration-trx", (Join-Path $env:AVA_DIR "orchestrator-judge.trx")
+            "--orchestration-trx", (Join-Path $env:AVA_DIR "orchestrator-judge.trx"),
+            "--soak-json", (Join-Path $env:AVA_DIR "enginehost-soak.json")
           )
           $external = "docs/qa/evidence/release-gates.json"
           if (Test-Path $external) {

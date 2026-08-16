@@ -77,12 +77,49 @@ class TrxTests(unittest.TestCase):
         self.assertEqual("FAIL", result["status"])
 
 
+class SoakTests(unittest.TestCase):
+    def _write(self, payload: dict) -> Path:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as temp:
+            json.dump(payload, temp)
+            path = Path(temp.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
+
+    def test_soak_requires_exact_engine_hash_binding(self):
+        payload = {
+            "pass": True,
+            "engineHostSha256": "a" * 64,
+            "requestedIterations": 10,
+            "completedIterations": 10,
+            "failures": [],
+        }
+        result = ava.parse_soak(self._write(payload), {"b" * 64})
+        self.assertEqual("FAIL", result["status"])
+        self.assertFalse(result["engineHashBoundToPublishedCandidate"])
+
+    def test_valid_soak_passes(self):
+        digest = "c" * 64
+        payload = {
+            "pass": True,
+            "engineHostSha256": digest,
+            "requestedIterations": 250,
+            "completedIterations": 250,
+            "restartCount": 5,
+            "durationMilliseconds": 1234,
+            "failures": [],
+            "resources": {"maxWorkingSetBytes": 100},
+        }
+        result = ava.parse_soak(self._write(payload), {digest})
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(250, result["completedIterations"])
+
+
 class ExternalEvidenceTests(unittest.TestCase):
     def _write(self, payload: dict) -> Path:
-        temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(temp_dir.cleanup)
-        path = Path(temp_dir.name) / "external-evidence.json"
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as temp:
+            json.dump(payload, temp)
+            path = Path(temp.name)
+        self.addCleanup(path.unlink, missing_ok=True)
         return path
 
     def test_commit_mismatch_rejected(self):

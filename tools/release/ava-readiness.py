@@ -135,6 +135,38 @@ def parse_trx(path: Path) -> dict:
     }
 
 
+def parse_soak(path: Path, expected_engine_hashes: set[str]) -> dict:
+    if not path.is_file():
+        return {"status": BLOCKED, "reason": "EngineHost soak report missing", "path": str(path)}
+    try:
+        payload = load_json(path)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"status": INCONCLUSIVE, "reason": f"soak report parse failed: {exc}", "path": str(path)}
+
+    report_hash = sha256_file(path)
+    engine_hash = str(payload.get("engineHostSha256") or "").lower()
+    requested = int(payload.get("requestedIterations") or 0)
+    completed = int(payload.get("completedIterations") or 0)
+    failures = payload.get("failures") or []
+    declared_pass = payload.get("pass") is True
+    hash_bound = bool(engine_hash) and engine_hash in {value.lower() for value in expected_engine_hashes}
+
+    status = PASS if declared_pass and requested > 0 and completed == requested and not failures and hash_bound else FAIL
+    return {
+        "status": status,
+        "reportSha256": report_hash,
+        "engineHostSha256": engine_hash,
+        "engineHashBoundToPublishedCandidate": hash_bound,
+        "requestedIterations": requested,
+        "completedIterations": completed,
+        "restartCount": payload.get("restartCount"),
+        "durationMilliseconds": payload.get("durationMilliseconds"),
+        "latencyMilliseconds": payload.get("latencyMilliseconds"),
+        "resources": payload.get("resources"),
+        "failures": failures,
+    }
+
+
 def discover_desktop_surface(repo_root: Path) -> dict:
     src = repo_root / "apps" / "aevrix-windows" / "src"
     if not src.is_dir():
@@ -242,6 +274,8 @@ def candidate_command(args: argparse.Namespace) -> int:
                     }
                 )
     build_status = PASS if args.build_outcome == "success" and enginehost_files else FAIL
+    engine_hashes = {entry["sha256"] for entry in enginehost_files}
+    soak = parse_soak(Path(args.soak_json), engine_hashes)
 
     external_path = Path(args.external_evidence) if args.external_evidence else None
     external_gates, external_errors = load_external_evidence(external_path, args.source_commit)
@@ -251,6 +285,7 @@ def candidate_command(args: argparse.Namespace) -> int:
         "core-tests": core,
         "remote-security-tests": security,
         "orchestrator-judge-tests": orchestration,
+        "enginehost-authenticated-soak": soak,
         "desktop-product-surface": desktop,
         "windows-e2e-runtime": {"status": NOT_RUN},
         "installer-lifecycle": {"status": NOT_RUN},
@@ -270,7 +305,7 @@ def candidate_command(args: argparse.Namespace) -> int:
     release_decision = "HOMOLOGATED" if model.get("readinessPercent") == 100 and all_pass else "NOT_HOMOLOGATED"
 
     payload = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "generatedAtUtc": datetime.now(timezone.utc).isoformat(),
         "target": "Windows",
         "sourceCommit": args.source_commit,
@@ -358,6 +393,7 @@ def main() -> int:
     candidate.add_argument("--core-trx", required=True)
     candidate.add_argument("--security-trx", required=True)
     candidate.add_argument("--orchestration-trx", required=True)
+    candidate.add_argument("--soak-json", required=True)
     candidate.add_argument("--external-evidence")
     candidate.add_argument("--strict", action="store_true")
     candidate.set_defaults(func=candidate_command)
