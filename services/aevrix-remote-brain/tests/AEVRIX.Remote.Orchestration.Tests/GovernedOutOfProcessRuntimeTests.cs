@@ -142,6 +142,46 @@ public sealed class GovernedOutOfProcessRuntimeTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_RejectsWriteBoundaryWithoutReadIsolation()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "write-only-proof",
+            100,
+            canEnforce: true,
+            networkEnforced: true,
+            filesystemEnforced: true,
+            filesystemWriteBoundaryEnforced: true,
+            filesystemReadIsolationEnforced: false);
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+
+        StringAssert.Contains(error.Message, "external-read");
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_RejectsReadIsolationWithoutWriteBoundary()
+    {
+        using var workspace = new TempDirectory();
+        var backend = new StubIsolationBackend(
+            "read-only-proof",
+            100,
+            canEnforce: true,
+            networkEnforced: true,
+            filesystemEnforced: true,
+            filesystemWriteBoundaryEnforced: false,
+            filesystemReadIsolationEnforced: true);
+        var runtime = new GovernedOutOfProcessRuntime([backend], RestrictedAuthority());
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => runtime.ExecuteAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path)));
+
+        StringAssert.Contains(error.Message, "external-write");
+    }
+
+    [TestMethod]
     public async Task ExecuteAsync_RejectsAuthorityBindingFromDifferentPolicy()
     {
         using var workspace = new TempDirectory();
@@ -267,7 +307,9 @@ public sealed class GovernedOutOfProcessRuntimeTests
         bool networkEnforced,
         bool filesystemEnforced,
         string? backendIdOverride = null,
-        string? authorityFingerprintOverride = null) : IOutOfProcessIsolationBackend
+        string? authorityFingerprintOverride = null,
+        bool filesystemWriteBoundaryEnforced = true,
+        bool filesystemReadIsolationEnforced = true) : IOutOfProcessIsolationBackend
     {
         public string BackendId => backendId;
         public int Priority => priority;
@@ -306,7 +348,9 @@ public sealed class GovernedOutOfProcessRuntimeTests
             OutOfProcessExecutionResult execution) =>
             new(
                 backendIdOverride ?? BackendId,
-                authorityFingerprintOverride ?? authority.ComputeFingerprint());
+                authorityFingerprintOverride ?? authority.ComputeFingerprint(),
+                filesystemWriteBoundaryEnforced,
+                filesystemReadIsolationEnforced);
     }
 
     private sealed class TempDirectory : IDisposable
