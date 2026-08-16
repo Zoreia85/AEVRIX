@@ -22,11 +22,21 @@ public interface IPromotionClaimLookupStore : IPromotionClaimStore
 }
 
 /// <summary>
+/// Transactional claim-set boundary for replay-key rotation. Implementations must make the
+/// alias-existence check and current-claim creation one atomic operation.
+/// </summary>
+public interface IAtomicPromotionClaimSetStore : IPromotionClaimLookupStore
+{
+    bool TryCreateIfNoneExist(string opaqueClaimId, IReadOnlyCollection<string> forbiddenClaimIds);
+}
+
+/// <summary>
 /// Local durable claim store. The filename is already an opaque keyed identifier; the store never
 /// receives project, run, execution or evidence identifiers in plaintext.
 /// </summary>
-public sealed class FilePromotionClaimStore : IPromotionClaimLookupStore
+public sealed class FilePromotionClaimStore : IAtomicPromotionClaimSetStore
 {
+    private const string ClaimSetLockFileName = ".aevrix-promotion-claim-set.lock";
     private static readonly byte[] ClaimMarker = Encoding.ASCII.GetBytes("AEVRIX_OPAQUE_PROMOTION_CLAIM_V1\n");
     private readonly string _claimDirectory;
 
@@ -68,6 +78,46 @@ public sealed class FilePromotionClaimStore : IPromotionClaimLookupStore
         ValidateOpaqueClaimId(opaqueClaimId);
         RejectReparsePoint(_claimDirectory);
         return File.Exists(Path.Combine(_claimDirectory, opaqueClaimId + ".claim"));
+    }
+
+    public bool TryCreateIfNoneExist(string opaqueClaimId, IReadOnlyCollection<string> forbiddenClaimIds)
+    {
+        ValidateOpaqueClaimId(opaqueClaimId);
+        ArgumentNullException.ThrowIfNull(forbiddenClaimIds);
+        foreach (var alias in forbiddenClaimIds)
+            ValidateOpaqueClaimId(alias);
+
+        RejectReparsePoint(_claimDirectory);
+        using var claimSetLock = AcquireClaimSetLock();
+
+        if (Exists(opaqueClaimId) || forbiddenClaimIds.Any(Exists))
+            return false;
+
+        return TryCreate(opaqueClaimId);
+    }
+
+    private FileStream AcquireClaimSetLock()
+    {
+        var lockPath = Path.Combine(_claimDirectory, ClaimSetLockFileName);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+
+        while (true)
+        {
+            try
+            {
+                return new FileStream(
+                    lockPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 1,
+                    FileOptions.WriteThrough);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(10);
+            }
+        }
     }
 
     private static void ValidateOpaqueClaimId(string opaqueClaimId)
