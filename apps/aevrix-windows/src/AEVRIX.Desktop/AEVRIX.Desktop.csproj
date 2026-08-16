@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>AEVRIX.Desktop</RootNamespace>
+    <AssemblyName>AEVRIX.Desktop</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Platforms>x64;ARM64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <ProjectReference Include="..\AEVRIX.Core\AEVRIX.Core.csproj" />
+    <ProjectReference Include="..\AEVRIX.EngineHost\AEVRIX.EngineHost.csproj" />
+  </ItemGroup>
+</Project>
