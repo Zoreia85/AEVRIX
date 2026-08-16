@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "target": "Windows",
+  "releaseDecision": "NOT_HOMOLOGATED",
+  "updatedDate": "2026-08-16",
+  "readinessPercent": 48,
+  "rules": {
+    "weightsMustTotal": 100,
+    "homologatedRequiresReadinessPercent": 100,
+    "homologatedRequiresAllMandatoryGatesPass": true,
+    "missingEvidenceIsPass": false,
+    "evidenceMustBindExactCandidate": true
+  },
+  "gates": [
+    {
+      "id": "canonical-build-ci",
+      "name": "Canonical build + CI baseline",
+      "weight": 15,
+      "points": 13,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197", "workflow:.github/workflows/dotnet-core.yml", "workflow-run:31955371631"]
+    },
+    {
+      "id": "windows-secure-runtime",
+      "name": "Windows secure runtime primitives",
+      "weight": 20,
+      "points": 17,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197", "issue:#284", "issue:#288", "workflow-run:31955371631"],
+      "blocker": "Filesystem read isolation for restrictive profiles is not yet proven by complete hostile native evidence."
+    },
+    {
+      "id": "windows-e2e-runtime",
+      "name": "End-to-end Windows product runtime",
+      "weight": 15,
+      "points": 7,
+      "status": "BLOQUEADO",
+      "evidence": ["issue:#197", "issue:#289", "workflow-run:31955371631", "candidate:2611920a3d289a25c079a25fdd52c33d97d6ed09"],
+      "blocker": "Desktop/WinUI now exists and the exact Release candidate builds, but mandatory first-run/terms and Desktop -> EngineHost -> worker -> embedded Python -> private Chromium have not been proven end to end."
+    },
+    {
+      "id": "installer-lifecycle",
+      "name": "Installer + lifecycle",
+      "weight": 10,
+      "points": 0,
+      "status": "NOT_RUN",
+      "evidence": ["issue:#197", "issue:#315"]
+    },
+    {
+      "id": "distribution-security",
+      "name": "Distribution security",
+      "weight": 10,
+      "points": 0,
+      "status": "NOT_RUN",
+      "evidence": ["issue:#197", "issue:#317"]
+    },
+    {
+      "id": "execution-authority-db",
+      "name": "Execution Authority + PostgreSQL integration",
+      "weight": 10,
+      "points": 4,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197", "issue:#316"],
+      "blocker": "Mandatory PostgreSQL-backed integration must execute without skip in a controlled environment."
+    },
+    {
+      "id": "performance-stability",
+      "name": "Regression + performance + stability",
+      "weight": 10,
+      "points": 4,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197", "issue:#318", "workflow-run:31955371631"],
+      "blocker": "EngineHost authenticated soak passes, but full-product endurance/recovery remains required."
+    },
+    {
+      "id": "ux-accessibility",
+      "name": "Minimum UX + accessibility",
+      "weight": 5,
+      "points": 1,
+      "status": "NOT_RUN",
+      "evidence": ["issue:#197", "issue:#319"]
+    },
+    {
+      "id": "exact-hash-evidence",
+      "name": "Exact-hash AVA evidence package",
+      "weight": 5,
+      "points": 2,
+      "status": "PARCIAL",
+      "evidence": [
+        "docs:VALIDATION.md",
+        "workflow-run:31955371631",
+        "candidate:2611920a3d289a25c079a25fdd52c33d97d6ed09",
+        "ava-artifact:9265832940",
+        "ava-artifact-digest:sha256:1a9ab6108da1fa63616fd8c84963304fee9a0cf592d9b8a979e76412635f9239"
+      ],
+      "blocker": "The candidate package is durable and digest-bound, but the final AVA package still lacks all mandatory manual/product gates."
+    }
+  ]
+}
