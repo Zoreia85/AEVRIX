@@ -1,4 +1,5 @@
 using System;
+using AEVRIX.Desktop.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -10,6 +11,10 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _engineHealthTimer;
     private bool _engineVerified;
     private bool _healthProbeInProgress;
+    private FirstRunView? _firstRunView;
+    private ProjectsView? _projectsView;
+    private EvidenceView? _evidenceView;
+    private BlueprintView? _blueprintView;
 
     public MainWindow()
     {
@@ -110,6 +115,7 @@ public sealed partial class MainWindow : Window
         EngineHostStatusText.Text = status.State;
         EngineHostDetailText.Text = status.Detail;
         StopEngineHostButton.IsEnabled = _engineSession.IsRunning;
+        _firstRunView?.SetEngineStatus(status.State, status.Detail);
     }
 
     private void RevokeEngineState(string detail)
@@ -118,6 +124,7 @@ public sealed partial class MainWindow : Window
         EngineHostStatusText.Text = "Bloqueado";
         EngineHostDetailText.Text = detail;
         StopEngineHostButton.IsEnabled = _engineSession.IsRunning;
+        _firstRunView?.SetEngineStatus("Bloqueado", detail);
     }
 
     private void SetEngineControlsBusy(bool busy)
@@ -190,9 +197,75 @@ public sealed partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        if (!showHome && !showNew)
+        HideProductSurfaces();
+        if (showHome || showNew)
         {
-            PlannedSectionTitle.Text = title;
+            return;
         }
+
+        var surface = GetOrCreateProductSurface(route);
+        if (surface is not null)
+        {
+            PlannedSectionPlaceholder.Visibility = Visibility.Collapsed;
+            surface.Visibility = Visibility.Visible;
+            return;
+        }
+
+        PlannedSectionPlaceholder.Visibility = Visibility.Visible;
+        PlannedSectionTitle.Text = title;
+    }
+
+    private FrameworkElement? GetOrCreateProductSurface(string route)
+    {
+        switch (route)
+        {
+            case "first-run":
+                if (_firstRunView is null)
+                {
+                    _firstRunView = new FirstRunView();
+                    _firstRunView.SetEngineStatus(
+                        _engineVerified ? EngineHostStatusText.Text : "Não verificado",
+                        _engineVerified
+                            ? EngineHostDetailText.Text
+                            : "O Command Center ainda não possui uma prova engine_ready ativa nesta sessão.");
+                    PlannedSectionView.Children.Add(_firstRunView);
+                }
+                return _firstRunView;
+
+            case "projects":
+                if (_projectsView is null)
+                {
+                    _projectsView = new ProjectsView();
+                    PlannedSectionView.Children.Add(_projectsView);
+                }
+                return _projectsView;
+
+            case "evidence":
+                if (_evidenceView is null)
+                {
+                    _evidenceView = new EvidenceView();
+                    PlannedSectionView.Children.Add(_evidenceView);
+                }
+                return _evidenceView;
+
+            case "blueprint":
+                if (_blueprintView is null)
+                {
+                    _blueprintView = new BlueprintView();
+                    PlannedSectionView.Children.Add(_blueprintView);
+                }
+                return _blueprintView;
+
+            default:
+                return null;
+        }
+    }
+
+    private void HideProductSurfaces()
+    {
+        if (_firstRunView is not null) _firstRunView.Visibility = Visibility.Collapsed;
+        if (_projectsView is not null) _projectsView.Visibility = Visibility.Collapsed;
+        if (_evidenceView is not null) _evidenceView.Visibility = Visibility.Collapsed;
+        if (_blueprintView is not null) _blueprintView.Visibility = Visibility.Collapsed;
     }
 }
