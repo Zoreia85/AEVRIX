@@ -48,6 +48,7 @@ Before an APK is called homologated:
 Every AVA run should record:
 
 - source commit;
+- canonical parent/lineage when privacy-safe canonicalization rewrites commit metadata;
 - artifact SHA-256;
 - OS/device image;
 - runner/tool versions;
