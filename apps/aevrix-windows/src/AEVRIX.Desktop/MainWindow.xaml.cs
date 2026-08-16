@@ -1,7 +1,4 @@
 using System;
-using System.IO;
-using Aevrix.Core;
-using Aevrix.EngineHost;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -9,9 +6,10 @@ namespace AEVRIX.Desktop;
 
 public sealed partial class MainWindow : Window
 {
-    private EngineHostSupervisor? _engineSupervisor;
+    private readonly DesktopEngineSession _engineSession = new();
     private readonly DispatcherTimer _engineHealthTimer;
-    private bool _engineAuthenticated;
+    private bool _engineVerified;
+    private bool _healthProbeInProgress;
 
     public MainWindow()
     {
@@ -20,7 +18,7 @@ public sealed partial class MainWindow : Window
         Closed += MainWindow_Closed;
         _engineHealthTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(1)
+            Interval = TimeSpan.FromSeconds(5)
         };
         _engineHealthTimer.Tick += EngineHealthTimer_Tick;
         _engineHealthTimer.Start();
@@ -57,25 +55,18 @@ public sealed partial class MainWindow : Window
     private async void StopEngineHostButton_Click(object sender, RoutedEventArgs e)
     {
         SetEngineControlsBusy(true);
-        _engineAuthenticated = false;
+        _engineVerified = false;
         EngineHostStatusText.Text = "Parando";
-        EngineHostDetailText.Text = "Encerrando o processo local supervisionado.";
+        EngineHostDetailText.Text = "Encerrando a sessão local supervisionada.";
 
         try
         {
-            if (_engineSupervisor is not null)
-            {
-                await _engineSupervisor.StopAsync();
-            }
-
-            EngineHostStatusText.Text = "Parado";
-            EngineHostDetailText.Text = "Processo supervisionado encerrado. Nenhuma sessão local é considerada ativa.";
+            var status = await _engineSession.StopAsync();
+            ApplyEngineStatus(status);
         }
         catch (Exception ex)
         {
-            EngineHostStatusText.Text = "Bloqueado";
-            EngineHostDetailText.Text = $"A parada falhou de forma fechada ({ex.GetType().Name}). O supervisor será descartado.";
-            await DisposeEngineSupervisorAsync();
+            RevokeEngineState($"A parada falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi mantido.");
         }
         finally
         {
@@ -86,44 +77,26 @@ public sealed partial class MainWindow : Window
     private async Task VerifyEngineHostAsync(bool restart)
     {
         SetEngineControlsBusy(true);
-        _engineAuthenticated = false;
+        _engineVerified = false;
         EngineHostStatusText.Text = restart ? "Reiniciando" : "Verificando";
         EngineHostDetailText.Text = restart
-            ? "Encerrando qualquer sessão anterior antes de iniciar uma nova sessão autenticada."
-            : "Iniciando sessão local autenticada e executando Ping real.";
+            ? "Encerrando a sessão anterior antes de exigir um novo estado engine_ready autenticado."
+            : "Iniciando sessão local autenticada e exigindo o estado canônico engine_ready.";
 
         try
         {
-            _engineSupervisor ??= CreateEngineSupervisor();
-            if (restart && _engineSupervisor.IsRunning)
-            {
-                await _engineSupervisor.StopAsync();
-            }
-
-            await _engineSupervisor.StartAsync();
-
-            var requestId = Guid.NewGuid().ToString("N");
-            var response = await _engineSupervisor.SendAsync(new EnginePingCommand(requestId));
-
-            if (!response.Success ||
-                !string.Equals(response.Code, "pong", StringComparison.Ordinal) ||
-                !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
-            }
-
-            _engineAuthenticated = true;
-            EngineHostStatusText.Text = "Autenticado";
-            EngineHostDetailText.Text = _engineSupervisor.ProcessId is int processId
-                ? $"Ping real confirmado. Processo local supervisionado: PID {processId}."
-                : "Ping real confirmado em sessão local supervisionada.";
+            var status = restart
+                ? await _engineSession.RestartAsync()
+                : await _engineSession.RefreshAsync();
+            ApplyEngineStatus(status);
+        }
+        catch (OperationCanceledException)
+        {
+            RevokeEngineState("A verificação foi cancelada. Nenhum estado saudável foi inferido.");
         }
         catch (Exception ex)
         {
-            _engineAuthenticated = false;
-            EngineHostStatusText.Text = "Bloqueado";
-            EngineHostDetailText.Text = $"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.";
-            await DisposeEngineSupervisorAsync();
+            RevokeEngineState($"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.");
         }
         finally
         {
@@ -131,24 +104,27 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ApplyEngineStatus(DesktopEngineStatus status)
+    {
+        _engineVerified = status.Verified;
+        EngineHostStatusText.Text = status.State;
+        EngineHostDetailText.Text = status.Detail;
+        StopEngineHostButton.IsEnabled = _engineSession.IsRunning;
+    }
+
+    private void RevokeEngineState(string detail)
+    {
+        _engineVerified = false;
+        EngineHostStatusText.Text = "Bloqueado";
+        EngineHostDetailText.Text = detail;
+        StopEngineHostButton.IsEnabled = _engineSession.IsRunning;
+    }
+
     private void SetEngineControlsBusy(bool busy)
     {
         VerifyEngineHostButton.IsEnabled = !busy;
         RestartEngineHostButton.IsEnabled = !busy;
-        StopEngineHostButton.IsEnabled = !busy && _engineSupervisor?.IsRunning == true;
-    }
-
-    private async Task DisposeEngineSupervisorAsync()
-    {
-        _engineAuthenticated = false;
-
-        if (_engineSupervisor is null)
-        {
-            return;
-        }
-
-        await _engineSupervisor.DisposeAsync();
-        _engineSupervisor = null;
+        StopEngineHostButton.IsEnabled = !busy && _engineSession.IsRunning;
     }
 
     private void ValidateScopeButton_Click(object sender, RoutedEventArgs e)
@@ -162,34 +138,45 @@ public sealed partial class MainWindow : Window
         ShowSection("home", "Command Center");
     }
 
-    private void EngineHealthTimer_Tick(object? sender, object e)
+    private async void EngineHealthTimer_Tick(object? sender, object e)
     {
-        if (!_engineAuthenticated || _engineSupervisor is { IsRunning: true })
+        if (!_engineVerified || _healthProbeInProgress)
         {
             return;
         }
 
-        _engineAuthenticated = false;
-        EngineHostStatusText.Text = "Bloqueado";
-        EngineHostDetailText.Text =
-            "A sessão autenticada do EngineHost deixou de estar ativa. O estado saudável foi revogado automaticamente.";
-        SetEngineControlsBusy(false);
-    }
+        if (!_engineSession.IsRunning)
+        {
+            RevokeEngineState(
+                "A sessão autenticada do EngineHost deixou de estar ativa. O estado saudável foi revogado automaticamente.");
+            return;
+        }
 
-    private static EngineHostSupervisor CreateEngineSupervisor()
-    {
-        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
-        return new EngineHostSupervisor(
-            "dotnet",
-            new[] { engineAssembly },
-            startupTimeout: TimeSpan.FromSeconds(20),
-            requestTimeout: TimeSpan.FromSeconds(5));
+        _healthProbeInProgress = true;
+        try
+        {
+            var status = await _engineSession.RefreshAsync();
+            if (!status.Verified)
+            {
+                ApplyEngineStatus(status);
+            }
+        }
+        catch (Exception ex)
+        {
+            RevokeEngineState(
+                $"A revalidação autenticada do EngineHost falhou ({ex.GetType().Name}). O estado saudável foi revogado.");
+        }
+        finally
+        {
+            _healthProbeInProgress = false;
+        }
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         _engineHealthTimer.Stop();
-        await DisposeEngineSupervisorAsync();
+        _engineVerified = false;
+        await _engineSession.DisposeAsync();
     }
 
     private void ShowSection(string route, string title)
