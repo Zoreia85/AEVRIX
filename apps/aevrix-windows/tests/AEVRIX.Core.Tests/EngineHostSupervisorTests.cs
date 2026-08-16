@@ -94,6 +94,26 @@ public sealed class EngineHostSupervisorTests
     }
 
     [TestMethod]
+    public async Task StopAsync_IsIdempotentAfterCleanStop()
+    {
+        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
+        await using var supervisor = new EngineHostSupervisor(
+            "dotnet",
+            new[] { engineAssembly },
+            startupTimeout: TimeSpan.FromSeconds(20),
+            requestTimeout: TimeSpan.FromSeconds(5));
+
+        await supervisor.StartAsync();
+        await supervisor.StopAsync();
+        await supervisor.StopAsync();
+
+        Assert.IsFalse(supervisor.IsRunning);
+        Assert.IsNull(supervisor.ProcessId);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await supervisor.SendAsync(new EnginePingCommand(Guid.NewGuid().ToString("N"))));
+    }
+
+    [TestMethod]
     public async Task StartAsync_IsIdempotentWhileHealthy()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
