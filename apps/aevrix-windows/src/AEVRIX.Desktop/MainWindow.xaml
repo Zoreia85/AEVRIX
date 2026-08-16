@@ -145,7 +145,7 @@
                                     <ComboBoxItem Content="Confidencial" Tag="confidential" />
                                     <ComboBoxItem Content="Dados pessoais / restritos" Tag="restricted" />
                                 </ComboBox>
-                                <Separator />
+                                <Border Height="1" Background="{StaticResource AevrixAccentBrush}" Opacity="0.2" />
                                 <TextBlock Text="Etapas seguintes quando a política estiver conectada: plano de especialistas/adapters → revisão → validação de autoridade → início governado." Opacity="0.7" TextWrapping="Wrap" />
                                 <Button Content="Validar escopo e autorização" HorizontalAlignment="Left" Click="ValidateScopeButton_Click" AutomationProperties.Name="Validar escopo e autorização" />
                                 <InfoBar x:Name="PolicyUnavailableNotice" IsOpen="False" IsClosable="True" Severity="Informational" Title="Validação ainda indisponível" Message="O motor real de políticas ainda não está conectado a esta superfície. Nenhuma autorização foi concedida e nenhuma missão foi criada." />
