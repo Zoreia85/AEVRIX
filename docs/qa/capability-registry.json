@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "policy": "docs/qa/CAPABILITY_CONTINUOUS_EVALUATION.md",
+  "score_scale": "0-10 per dimension; weighted total 0-100",
+  "weights": {
+    "efficacy": 18,
+    "precision_gain": 14,
+    "auditability": 13,
+    "security_controllability": 12,
+    "necessity": 10,
+    "reliability": 8,
+    "credibility_maturity": 7,
+    "cost_benefit": 7,
+    "performance": 5,
+    "maintainability": 3,
+    "interoperability": 2,
+    "uniqueness": 1
+  },
+  "capabilities": [
+    {
+      "id": "microsoft-agent-framework",
+      "name": "Microsoft Agent Framework",
+      "family": "multi-agent-runtime",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["multi-agent-workflow", "checkpointed-specialist-execution"],
+      "recommendation": "benchmark-first"
+    },
+    {
+      "id": "llamaindex",
+      "name": "LlamaIndex",
+      "family": "retrieval-document-indexing",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["document-retrieval", "repository-retrieval", "source-bound-rag"],
+      "recommendation": "benchmark-first"
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "family": "coding-harness",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["code-repair", "repository-change", "coding-agent-comparison"],
+      "recommendation": "sandbox-before-benchmark"
+    },
+    {
+      "id": "langgraph",
+      "name": "LangGraph",
+      "family": "stateful-workflow-runtime",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["resumable-research-subgraph", "long-running-specialist-workflow"],
+      "recommendation": "benchmark-only-where-native-gap-exists"
+    },
+    {
+      "id": "langchain-components",
+      "name": "LangChain components",
+      "family": "llm-tooling-components",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["narrow-adapter-utilities"],
+      "recommendation": "component-level-only"
+    },
+    {
+      "id": "metagpt",
+      "name": "MetaGPT",
+      "family": "role-sop-agent-system",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["role-decomposition-comparison"],
+      "recommendation": "reference-and-comparative-lab"
+    },
+    {
+      "id": "crewai",
+      "name": "CrewAI",
+      "family": "role-based-agent-system",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["role-based-crew-comparison"],
+      "recommendation": "comparative-lab"
+    },
+    {
+      "id": "autogen",
+      "name": "AutoGen",
+      "family": "multi-agent-runtime",
+      "state": "REJECTED",
+      "evaluation_status": "ARCHITECTURE_DECISION",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "NOT_EVALUATED",
+      "task_families": ["historical-pattern-reference"],
+      "recommendation": "do-not-add-as-new-core-dependency"
+    },
+    {
+      "id": "qiskit-optimization",
+      "name": "Qiskit Optimization",
+      "family": "quantum-optimization",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["bounded-combinatorial-optimization", "quantum-vs-classical-benchmark"],
+      "recommendation": "simulator-first"
+    },
+    {
+      "id": "dwave-hybrid",
+      "name": "D-Wave Hybrid",
+      "family": "quantum-hybrid-optimization",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["binary-integer-optimization", "hybrid-vs-classical-benchmark"],
+      "recommendation": "remote-cost-controlled-lab"
+    },
+    {
+      "id": "pennylane",
+      "name": "PennyLane",
+      "family": "hybrid-quantum-research",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["hybrid-quantum-classical-experiment"],
+      "recommendation": "research-only-until-measured"
+    }
+  ]
+}
