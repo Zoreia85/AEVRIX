@@ -165,7 +165,7 @@ public static class CapabilityPluginAdmissionPolicy
             return new(false, "Plugin contract does not permit secret material.");
         }
 
-        if (context.RequestedDataExposure > contract.MaximumDataExposure)
+        if ((int)context.RequestedDataExposure > (int)contract.MaximumDataExposure)
         {
             return new(false, "Requested data exposure exceeds the plugin contract.");
         }
