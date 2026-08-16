@@ -11,5 +11,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <ProjectReference Include="..\AEVRIX.Core\AEVRIX.Core.csproj" />
+    <ProjectReference Include="..\AEVRIX.EngineHost\AEVRIX.EngineHost.csproj" />
   </ItemGroup>
 </Project>
