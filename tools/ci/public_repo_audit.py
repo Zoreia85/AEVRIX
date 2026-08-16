@@ -114,17 +114,25 @@ def audit_privacy_root_policy(failures: list[str]) -> None:
     workflow = (ROOT / ".github" / "workflows" / "privacy-root-rewrite.yml").read_text(encoding="utf-8")
 
     if "branches: [main]" not in workflow:
-        failures.append("privacy root rewrite must monitor pushes to main")
+        failures.append("privacy canonicalization must monitor pushes to main")
     if "paths:" in workflow:
-        failures.append("privacy root rewrite must not be path-filtered")
+        failures.append("privacy canonicalization must not be path-filtered")
     if "github.actor != 'github-actions[bot]'" not in workflow:
-        failures.append("privacy root rewrite must skip bot-authored canonical roots")
+        failures.append("privacy canonicalization must skip bot-authored canonical commits")
     if 'git config user.name "github-actions[bot]"' not in workflow or 'git config user.email "41898282+github-actions[bot]@users.noreply.github.com"' not in workflow:
-        failures.append("privacy root rewrite must commit with bot/noreply identity")
+        failures.append("privacy canonicalization must commit with bot/noreply identity")
     if "python3 tools/ci/public_repo_audit.py" not in workflow:
-        failures.append("privacy root rewrite must audit the public tree before rewriting history")
-    if "git checkout --orphan privacy-safe-main" not in workflow:
-        failures.append("privacy root rewrite must replace user-authored ancestry with an orphan root")
+        failures.append("privacy canonicalization must audit the public tree before changing main")
+    if "git checkout --orphan" in workflow:
+        failures.append("privacy canonicalization must preserve canonical ancestry and must not create orphan roots")
+    if "git commit-tree" not in workflow or "canonical_parent" not in workflow:
+        failures.append("privacy canonicalization must replace non-canonical history using an explicit canonical parent")
+    if "git push --force-with-lease=main:${AEVRIX_PRIVACY_LEASE_SHA}" not in workflow:
+        failures.append("privacy canonicalization must use an exact main-tip force-with-lease")
+    if "no canonical bot/noreply ancestor exists" not in workflow:
+        failures.append("privacy canonicalization must fail closed when no canonical ancestor exists")
+    if PATCH_QUEUE_GROUP not in workflow:
+        failures.append("privacy canonicalization and patch queue must share the authoritative writer lock")
 
 
 def main() -> int:

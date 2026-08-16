@@ -1,10 +1,11 @@
-name: Privacy-safe baseline import
+name: Privacy-safe canonicalization
 
-# Privacy root rewrite protocol v7: every non-bot push to main, and every
-# successful patch-queue canonicalization request, is audited and replaced with
-# a bot-authored orphan root. Privacy rewrite and patch promotion share one
-# canonical-writer lock. Evidence is dispatched only after the final bot root is
-# pushed successfully, carrying that exact root SHA and tree SHA.
+# Canonicalization protocol v8.1.
+# Non-bot main commits are replaced by one bot-authored commit whose parent is
+# the most recent canonical bot/noreply ancestor. This removes the entire
+# non-canonical segment while preserving the canonical ancestry before it.
+# Bot Patch Queue promotions are already bot-authored; repository_dispatch only
+# validates and dispatches evidence for the exact tip and never re-roots main.
 on:
   push:
     branches: [main]
@@ -19,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  rewrite:
+  canonicalize:
     if: github.event_name == 'repository_dispatch' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -38,36 +39,89 @@ jobs:
           lease_sha="$(git rev-parse origin/main)"
           git reset --hard "$lease_sha"
           echo "AEVRIX_PRIVACY_LEASE_SHA=$lease_sha" >> "$GITHUB_ENV"
-          echo "Privacy rewrite bound to canonical main $lease_sha"
+          echo "Canonicalization bound to main $lease_sha"
 
       - name: Verify public source
         run: python3 tools/ci/public_repo_audit.py
 
-      - name: Rewrite main as bot-authored root
-        id: rewrite
+      - name: Canonicalize non-bot chain without re-rooting
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        id: canonicalize
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/tree"
-          rsync -a --exclude='.git' ./ "$RUNNER_TEMP/tree/"
-          git checkout --orphan privacy-safe-main
-          git rm -rf .
-          rsync -a "$RUNNER_TEMP/tree/" ./
+
+          offending_sha="$AEVRIX_PRIVACY_LEASE_SHA"
+          tree_sha="$(git rev-parse "$offending_sha^{tree}")"
+          cursor="$offending_sha"
+          canonical_parent=""
+
+          while true; do
+            parent_count="$(git rev-list --parents -n 1 "$cursor" | awk '{print NF-1}')"
+            if [ "$parent_count" -eq 0 ]; then
+              echo "Refusing privacy replacement: no canonical bot/noreply ancestor exists." >&2
+              exit 1
+            fi
+            if [ "$parent_count" -ne 1 ]; then
+              echo "Refusing privacy replacement: non-canonical chain contains a merge commit at $cursor." >&2
+              exit 1
+            fi
+
+            parent="$(git rev-parse "$cursor^")"
+            parent_author="$(git show -s --format='%an <%ae>' "$parent")"
+            case "$parent_author" in
+              *"github-actions[bot]"*"@users.noreply.github.com>"*)
+                canonical_parent="$parent"
+                break
+                ;;
+              *) cursor="$parent" ;;
+            esac
+          done
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore: refresh privacy-safe AEVRIX root"
-          candidate_sha="$(git rev-parse HEAD)"
-          candidate_tree="$(git rev-parse HEAD^{tree})"
-          git push --force-with-lease=main:${AEVRIX_PRIVACY_LEASE_SHA} origin HEAD:main
+          replacement_sha="$(printf '%s\n' 'chore: canonicalize privacy-safe AEVRIX commit' | git commit-tree "$tree_sha" -p "$canonical_parent")"
+
+          replacement_author="$(git show -s --format='%an <%ae>' "$replacement_sha")"
+          case "$replacement_author" in
+            *"github-actions[bot]"*"@users.noreply.github.com>"*) ;;
+            *)
+              echo "Replacement commit metadata is not canonical bot/noreply." >&2
+              exit 1
+              ;;
+          esac
+
+          git push --force-with-lease=main:${AEVRIX_PRIVACY_LEASE_SHA} origin "$replacement_sha":main
+          echo "sha=$replacement_sha" >> "$GITHUB_OUTPUT"
+          echo "tree=$tree_sha" >> "$GITHUB_OUTPUT"
+          echo "parent=$canonical_parent" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve exact bot-authored canonical candidate
+        if: github.event_name == 'repository_dispatch'
+        id: existing
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_sha="$AEVRIX_PRIVACY_LEASE_SHA"
+          candidate_tree="$(git rev-parse "$candidate_sha^{tree}")"
+          candidate_author="$(git show -s --format='%an <%ae>' "$candidate_sha")"
+          case "$candidate_author" in
+            *"github-actions[bot]"*"@users.noreply.github.com>"*) ;;
+            *)
+              echo "Repository-dispatch candidate is not bot/noreply canonical; refusing evidence dispatch." >&2
+              exit 1
+              ;;
+          esac
           echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
           echo "tree=$candidate_tree" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch exact canonical candidate evidence
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ steps.rewrite.outputs.sha }}
-          CANDIDATE_TREE: ${{ steps.rewrite.outputs.tree }}
+          PUSH_SHA: ${{ steps.canonicalize.outputs.sha }}
+          PUSH_TREE: ${{ steps.canonicalize.outputs.tree }}
+          EXISTING_SHA: ${{ steps.existing.outputs.sha }}
+          EXISTING_TREE: ${{ steps.existing.outputs.tree }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -75,15 +129,17 @@ jobs:
           import os
           import urllib.request
 
+          candidate_sha = os.environ.get("PUSH_SHA") or os.environ.get("EXISTING_SHA")
+          candidate_tree = os.environ.get("PUSH_TREE") or os.environ.get("EXISTING_TREE")
+          if not candidate_sha or not candidate_tree:
+              raise SystemExit("missing exact canonical candidate identity")
+
           token = os.environ["GH_TOKEN"]
           repo = os.environ["GITHUB_REPOSITORY"]
           api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
           payload = {
               "event_type": "aevrix-candidate-promoted",
-              "client_payload": {
-                  "sha": os.environ["CANDIDATE_SHA"],
-                  "tree": os.environ["CANDIDATE_TREE"],
-              },
+              "client_payload": {"sha": candidate_sha, "tree": candidate_tree},
           }
           request = urllib.request.Request(
               f"{api}/repos/{repo}/dispatches",
