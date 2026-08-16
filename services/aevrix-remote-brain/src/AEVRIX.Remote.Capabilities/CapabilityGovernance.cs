@@ -34,14 +34,14 @@ public sealed record CapabilitySource(
             throw new ArgumentException("Capability source SPDX license is missing or invalid.", nameof(SpdxLicense));
         }
 
-        if (!IsHex(PinnedRevision, 7, 64))
+        if (!(PinnedRevision.Length is 40 or 64) || !IsNonZeroHex(PinnedRevision))
         {
-            throw new ArgumentException("Capability source revision must be a pinned hexadecimal Git revision.", nameof(PinnedRevision));
+            throw new ArgumentException("Capability source revision must be a full non-zero Git object id (40 or 64 hexadecimal characters).", nameof(PinnedRevision));
         }
 
-        if (!IsHex(ContentSha256, 64, 64))
+        if (ContentSha256.Length != 64 || !IsNonZeroHex(ContentSha256))
         {
-            throw new ArgumentException("Capability source content hash must be SHA-256 hexadecimal.", nameof(ContentSha256));
+            throw new ArgumentException("Capability source content hash must be a non-zero SHA-256 hexadecimal digest.", nameof(ContentSha256));
         }
 
         return this;
@@ -60,11 +60,10 @@ public sealed record CapabilitySource(
                 && piece.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'));
     }
 
-    private static bool IsHex(string value, int minimumLength, int maximumLength) =>
+    private static bool IsNonZeroHex(string value) =>
         !string.IsNullOrWhiteSpace(value)
-        && value.Length >= minimumLength
-        && value.Length <= maximumLength
-        && value.All(Uri.IsHexDigit);
+        && value.All(Uri.IsHexDigit)
+        && value.Any(ch => ch != '0');
 }
 
 public static class AevrixCapabilityPolicy
