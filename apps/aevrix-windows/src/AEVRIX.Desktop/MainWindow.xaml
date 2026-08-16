@@ -59,6 +59,7 @@
                                     <TextBlock Text="EngineHost" FontWeight="SemiBold" />
                                     <TextBlock x:Name="EngineHostStatusText" Text="Não iniciado" FontSize="22" />
                                     <TextBlock x:Name="EngineHostDetailText" Text="Sem prova de sessão autenticada nesta tela." Opacity="0.65" TextWrapping="Wrap" />
+                                    <TextBlock Text="Supervisão autenticada automática: 5 s" Opacity="0.5" TextWrapping="Wrap" />
                                     <Button x:Name="VerifyEngineHostButton" Content="Verificar EngineHost" HorizontalAlignment="Left" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost autenticado" />
                                     <Button x:Name="RestartEngineHostButton" Content="Reiniciar EngineHost" HorizontalAlignment="Left" Click="RestartEngineHostButton_Click" AutomationProperties.Name="Reiniciar EngineHost supervisionado" />
                                     <Button x:Name="StopEngineHostButton" Content="Parar EngineHost" HorizontalAlignment="Left" IsEnabled="False" Click="StopEngineHostButton_Click" AutomationProperties.Name="Parar EngineHost supervisionado" />
