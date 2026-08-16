@@ -1,0 +1,73 @@
+<UserControl
+    x:Class="AEVRIX.Desktop.Views.FirstRunView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <Grid Padding="32" RowSpacing="20" MaxWidth="1120" HorizontalAlignment="Stretch">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Spacing="8">
+                <TextBlock Text="PRIMEIRA EXECUÇÃO" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                <TextBlock Text="Preparar esta estação com prova" FontSize="34" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="Cada etapa permanece bloqueada até existir evidência verificável. Preparar a identidade local não equivale a enrollment remoto." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Warning" Title="Fail-closed" Message="Não existe fallback automático para chave de dispositivo em software. Se TPM/CNG não atender à política, o enrollment permanece bloqueado." />
+
+            <Grid Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="1. Integridade instalada" FontWeight="SemiBold" />
+                        <TextBlock Text="Não verificada" FontSize="22" />
+                        <TextBlock Text="Assinatura, manifesto e hashes do candidato instalado ainda não estão conectados a esta superfície." Opacity="0.65" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="2. EngineHost local" FontWeight="SemiBold" />
+                        <TextBlock x:Name="EngineStateText" Text="Não verificado" FontSize="22" />
+                        <TextBlock x:Name="EngineDetailText" Text="Aguardando prova autenticada fornecida pelo Command Center." Opacity="0.65" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="3. Identidade local TPM" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <TextBlock x:Name="IdentityStateText" Text="Não preparada" FontSize="22" />
+                            <ProgressRing x:Name="IdentityProgress" Width="20" Height="20" IsActive="False" Visibility="Collapsed" AutomationProperties.Name="Preparando identidade TPM" />
+                        </StackPanel>
+                        <TextBlock x:Name="IdentityDetailText" Text="Nenhuma identidade TPM foi verificada nesta sessão." Opacity="0.65" TextWrapping="Wrap" />
+                        <TextBlock x:Name="IdentityMetadataText" Text="Nenhum metadado criptográfico local verificado." FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+                        <Button x:Name="PrepareIdentityButton" Content="Preparar / verificar identidade TPM" HorizontalAlignment="Left" Click="PrepareIdentityButton_Click" AutomationProperties.Name="Preparar ou verificar identidade TPM" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="4. Enrollment, autenticação e workspace" FontWeight="SemiBold" />
+                        <TextBlock Text="Pendente" FontSize="22" />
+                        <TextBlock Text="Nenhum endpoint, sessão ou workspace remoto é inferido da chave local. Este gate só avançará quando o transporte seguro real estiver configurado." Opacity="0.65" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <TextBlock Grid.Row="3" Text="Meta: provar pré-condições locais antes de qualquer enrollment remoto." Opacity="0.55" TextWrapping="Wrap" />
+        </Grid>
+    </ScrollViewer>
+</UserControl>
