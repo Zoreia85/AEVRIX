@@ -1,38 +1,61 @@
 # AEVRIX
 
-**Open-source technical intelligence for Windows, mobile and governed research.**
+**Governed technical intelligence for complex software research.**
 
-AEVRIX is an open-source platform for authorized, clean-room technical research. It combines a native Windows desktop client, an isolated research engine, evidence provenance, Project Blueprint synthesis, an optional Android node, and a remote intelligence plane.
+AEVRIX is an open-source platform for authorized, clean-room technical research. One governed intelligence core is exposed through three coordinated product surfaces: a native Windows workstation, a Developer API/SDK platform and a secure mobile companion.
 
-> **Status:** active development — **NOT_HOMOLOGATED**. The repository may compile at different points in development, but no release is considered homologated until the documented AVA gates have real evidence.
+> **Release status:** active development — **NOT_HOMOLOGATED**. Screens, flows and product surfaces may be shown as design concepts before their production implementation is complete. No build is called homologated until the documented AVA release gates have real evidence for the exact delivered artifact.
 
-## Principles
+## Three ways to use AEVRIX
 
-- Open source by default: source code, architecture, CI and release manifests are public.
-- Secrets are never public: signing keys, private keys, device credentials, API credentials, target credentials and production certificates stay outside Git.
-- The installed client is treated as untrusted. Sensitive authority remains server-side and every protected operation is explicitly authenticated and authorized.
-- Normal product operation requires Internet. Offline mode is fail-closed for protected capabilities and may expose only diagnostics/cache explicitly allowed by policy.
-- Research is limited to public or legitimately authorized targets. AEVRIX does not implement authentication bypass, credential/session theft, CAPTCHA bypass, DRM/license bypass, exploit deployment, malicious persistence or anti-bot evasion.
-- Evidence classes remain distinct: `Observed`, `ExperimentallyValidated`, `Inferred`, `VendorClaim`.
+### AEVRIX Desktop — Windows
+
+The primary workstation for deep authorized research. It coordinates isolated local runtime components, research browser sessions, specialists/adapters, evidence capture, proof-ledger provenance and Project Blueprint synthesis from one command surface.
+
+### AEVRIX Developer Platform — API / SDK
+
+A governed automation surface for CI/CD, internal engineering systems and enterprise workflows. Projects, jobs, evidence and Blueprints use the same authorization and provenance model as the Desktop client; the API is not a bypass around local or remote security boundaries.
+
+### AEVRIX Mobile Console — Android / iOS companion
+
+A secure control surface for project monitoring, approval workflows, notifications, controlled uploads and review of evidence/Blueprint summaries. Heavy sandboxed analysis remains on appropriate desktop/remote execution environments rather than being silently moved into the phone.
+
+## Product promise
+
+AEVRIX is designed to turn fragmented technical observations into **traceable, governed and reproducible technical knowledge**. The platform separates observation from inference, binds evidence to the execution that produced it, isolates workspaces and keeps authority-changing operations explicit.
+
+## Core capabilities
+
+- Multi-specialist orchestration with fail-closed policy boundaries.
+- Static, dynamic, visual/OCR, structural and network-oriented research adapters.
+- Evidence provenance linked to governed executions and proof-ledger state.
+- Project Blueprint synthesis with proof-bound knowledge exchange.
+- Isolated Windows Engine Host and governed Research Browser.
+- Workspace/user separation, privacy minimization and authenticated local/remote transport.
+- Plugin/adapter architecture for multiple software domains, formats and languages.
+- Remote intelligence plane with explicit capability admission and source pinning.
+
+Capabilities are admitted only when the relevant implementation and policy gates exist. AEVRIX does not implement authentication bypass, credential/session theft, CAPTCHA bypass, DRM/license bypass, exploit deployment, malicious persistence or anti-bot evasion.
 
 ## Architecture
 
 ```text
-AEVRIX Windows / Android
-        |
-        v
-AevrixSecureTransport
-TLS + SPKI pinning + mTLS + short token + DPoP
-        |
-        v
-Remote API / Device Auth
-        |
-        v
-Orchestrator / Judge
-        +--> providers / models
-        +--> candidate knowledge
-        +--> evidence validation
-        +--> trusted memory (only after promotion)
+Desktop Windows        Developer API / SDK        Mobile Console
+      \                       |                       /
+       \                      |                      /
+        +---------- AevrixSecureTransport ----------+
+                         |
+                         v
+                 Remote API / Device Auth
+                         |
+                         v
+                  Orchestrator / Judge
+                    /      |       \
+                   /       |        \
+          specialists   evidence   Blueprint
+                         |
+                         v
+               verified knowledge / proof
 ```
 
 Windows process boundary:
@@ -45,23 +68,38 @@ AEVRIX.exe (WinUI 3)
 AEVRIX.EngineHost
     |
     v
-Embedded Python worker
-    +--> Playwright
-    +--> private Chromium
-    +--> Crawl4AI
-    +--> Research Lab
+Embedded private runtime
+    +--> governed browser/research adapters
+    +--> deterministic fixtures
+    +--> isolated analysis workers
 ```
+
+## Security and privacy principles
+
+- Source, architecture, CI and release manifests are public by default.
+- Secrets are never public: signing keys, private keys, device credentials, API credentials, target credentials and production certificates stay outside Git.
+- The installed client is treated as untrusted relative to sensitive server-side authority.
+- Protected operations require explicit authentication/authorization and fail closed when required online authority is unavailable.
+- Workspace, user and execution provenance are kept distinct.
+- Personal or restricted data is minimized and kept inside the narrowest admissible boundary.
+- Evidence classes remain distinct: `Observed`, `ExperimentallyValidated`, `Inferred`, `VendorClaim`.
+
+## Product experience
+
+The visual and interaction system is being developed as a dark-first, high-trust technical interface with explicit system health, mission state, evidence confidence and security posture. The canonical screen order and UX constraints are documented in [`docs/product/AEVRIX_PRODUCT_SURFACES_AND_UX.md`](docs/product/AEVRIX_PRODUCT_SURFACES_AND_UX.md).
+
+Concept visuals are not evidence of release readiness. Production screenshots will be linked only to builds that can be reproduced and tested.
 
 ## Repository layout
 
-- `apps/aevrix-windows` — Windows client, core, Engine Host and installer work.
-- `apps/aevrix-mobile` — Android node (added as the migration is completed).
+- `apps/aevrix-windows` — Windows client core, Engine Host and installer/runtime work.
+- `apps/aevrix-mobile` — mobile companion work as migration is completed.
 - `services/aevrix-remote-brain` — remote security/orchestration services.
 - `tools/research-lab` — governed browser capture and deterministic fixtures.
-- `docs` — architecture, security and validation rules.
+- `docs` — architecture, security, product UX and validation rules.
 - `.github/workflows` — public CI using standard GitHub-hosted runners.
 
-## AEVRIX 0.001 release gate
+## AEVRIX release gate
 
 The word **HOMOLOGATED** is prohibited unless the exact delivered build passes at least:
 
@@ -84,7 +122,7 @@ The artifact that is tested is the artifact that must be released. No rebuild af
 
 ## Development
 
-The baseline SDK is pinned in `global.json`. Development targets .NET 10. Windows UI uses WinUI 3 / Windows App SDK. Research Lab uses Python 3.13.x.
+The baseline SDK is pinned in `global.json`. Development targets .NET 10. Windows UI targets WinUI 3 / Windows App SDK. Research tooling uses the repository-pinned Python runtime.
 
 Public CI intentionally uses standard GitHub-hosted runners. Larger runners are not part of the default pipeline.
 
