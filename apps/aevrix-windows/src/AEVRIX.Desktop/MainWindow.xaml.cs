@@ -120,7 +120,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void EngineHealthTimer_Tick(object sender, object e)
+    private async void EngineHealthTimer_Tick(object? sender, object e)
     {
         if (_isClosing ||
             _engineOperationInProgress ||
