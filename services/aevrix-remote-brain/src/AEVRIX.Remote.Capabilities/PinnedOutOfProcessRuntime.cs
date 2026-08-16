@@ -35,7 +35,8 @@ public sealed record OutOfProcessExecutionPolicy(
     WindowsJobObjectPolicy? WindowsJobObject = null,
     bool RequireRaceFreeJobAssignment = false,
     bool RequireRestrictedToken = false,
-    bool RequireAppContainer = false)
+    bool RequireAppContainer = false,
+    bool RequireAppContainerRestrictingSid = false)
 {
     public OutOfProcessExecutionPolicy Validate()
     {
@@ -72,6 +73,14 @@ public sealed record OutOfProcessExecutionPolicy(
             throw new ArgumentException(
                 "AppContainer process launch is available only through the strict race-free Windows launcher.",
                 nameof(RequireAppContainer));
+        }
+
+        if (RequireAppContainerRestrictingSid
+            && (!RequireRaceFreeJobAssignment || !RequireRestrictedToken || !RequireAppContainer))
+        {
+            throw new ArgumentException(
+                "AppContainer restricting-SID launch requires race-free Job assignment, the reduced Low-Integrity token and AppContainer identity together.",
+                nameof(RequireAppContainerRestrictingSid));
         }
 
         return this;
@@ -142,7 +151,8 @@ public sealed record OutOfProcessExecutionAttestation(
     bool CpuMemoryLimitsEnforced,
     bool FilesystemIsolationEnforced,
     bool RestrictedTokenEnforced = false,
-    bool AppContainerEnforced = false);
+    bool AppContainerEnforced = false,
+    bool SandboxRestrictingSidEnforced = false);
 
 public sealed record OutOfProcessExecutionResult(
     int ExitCode,
@@ -155,9 +165,11 @@ public sealed record OutOfProcessExecutionResult(
 /// Executes one explicitly pinned binary outside the AEVRIX process. This runtime enforces
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
-/// On Windows, strict workloads are created suspended, optionally under a reduced primary token
-/// and/or an ephemeral AppContainer profile, assigned to the configured Job Object before any
-/// adapter instruction executes, verified, and resumed only after those controls succeed.
+/// On Windows, strict workloads are created suspended, optionally under a reduced primary token,
+/// an ephemeral AppContainer profile and the same AppContainer SID as a restricting SID, assigned
+/// to the configured Job Object before any adapter instruction executes, verified, and resumed
+/// only after those controls succeed. Restricting-SID enforcement is an opt-in experiment and does
+/// not by itself set FilesystemIsolationEnforced; hostile proof remains mandatory.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -272,6 +284,11 @@ public sealed class PinnedOutOfProcessRuntime
         using var appContainer = _policy.RequireAppContainer
             ? WindowsAppContainerProfileLease.Create()
             : null;
+        using var sandboxRestrictingToken = _policy.RequireAppContainerRestrictingSid
+            ? WindowsSandboxRestrictingTokenLease.Create(
+                restrictedToken ?? throw new InvalidOperationException("Restricting SID requires the reduced base token."),
+                appContainer?.AppContainerSid ?? throw new InvalidOperationException("Restricting SID requires AppContainer identity."))
+            : null;
         using var appContainerWorkspaceAcl = appContainer is not null
             ? WindowsSandboxWorkspaceAclLease.Create(
                 workingDirectory,
@@ -285,7 +302,8 @@ public sealed class PinnedOutOfProcessRuntime
             environment,
             jobPolicy,
             restrictedToken,
-            appContainer);
+            appContainer,
+            sandboxRestrictingToken);
         var process = launch.Process;
 
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -308,7 +326,8 @@ public sealed class PinnedOutOfProcessRuntime
                     launch.JobLease.CpuRateLimitEnforced,
                     false,
                     launch.RestrictedTokenEnforced,
-                    launch.AppContainerEnforced));
+                    launch.AppContainerEnforced,
+                    launch.SandboxRestrictingSidEnforced));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
