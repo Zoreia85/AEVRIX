@@ -18,6 +18,14 @@ public enum BlueprintKnowledgeExchangePromotion
     Reconstructable
 }
 
+public sealed record ImportedBlueprintEvidenceProof(
+    string EvidenceId,
+    string SourceTaskId,
+    string Specialist,
+    string ExecutionId,
+    string CompletedRecordHashSha256,
+    string ResultDigestSha256);
+
 public sealed record ImportedBlueprintKnowledgeRequirement(
     string RequirementId,
     Guid ProjectId,
@@ -30,6 +38,11 @@ public sealed record ImportedBlueprintKnowledgeRequirement(
     IReadOnlyList<string> EvidenceIds,
     string SourceKnowledgeId,
     string ValidationRecordId,
+    string MissionId,
+    long LedgerEntryCount,
+    string LedgerHeadHashSha256,
+    string ProvenanceDigestSha256,
+    IReadOnlyList<ImportedBlueprintEvidenceProof> EvidenceExecutionProofs,
     string PayloadSha256)
 {
     public bool CanDriveReconstruction => Promotion == BlueprintKnowledgeExchangePromotion.Reconstructable;
@@ -37,7 +50,7 @@ public sealed record ImportedBlueprintKnowledgeRequirement(
 
 public sealed class BlueprintKnowledgeExchangeImporter
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     private const int MaxDocumentBytes = 1024 * 1024;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -51,14 +64,10 @@ public sealed class BlueprintKnowledgeExchangeImporter
         string expectedTargetId)
     {
         if (expectedProjectId == Guid.Empty)
-        {
             throw new ArgumentException("Expected project id cannot be empty.", nameof(expectedProjectId));
-        }
         ValidateId(expectedTargetId, 2, 128, nameof(expectedTargetId));
         if (utf8Json.Length is < 2 or > MaxDocumentBytes)
-        {
             throw new InvalidDataException("Blueprint knowledge exchange document size is invalid.");
-        }
 
         ExchangeEnvelope envelope;
         try
@@ -72,36 +81,42 @@ public sealed class BlueprintKnowledgeExchangeImporter
         }
 
         if (envelope.SchemaVersion != CurrentSchemaVersion)
-        {
             throw new InvalidDataException($"Unsupported blueprint knowledge exchange schema version {envelope.SchemaVersion}.");
-        }
         var requirement = envelope.Requirement
             ?? throw new InvalidDataException("Blueprint knowledge exchange requirement is missing.");
+        var provenance = envelope.Provenance
+            ?? throw new InvalidDataException("Blueprint knowledge exchange provenance is missing.");
         ValidateRequirement(requirement);
+        ValidateProvenance(requirement, provenance);
 
         if (requirement.ProjectId != expectedProjectId
             || !string.Equals(requirement.TargetId, expectedTargetId, StringComparison.Ordinal))
-        {
             throw new InvalidDataException("Blueprint knowledge exchange scope does not match the local project and target.");
-        }
         if (!string.Equals(requirement.Sensitivity, "Public", StringComparison.Ordinal)
             && !string.Equals(requirement.Sensitivity, "ProjectConfidential", StringComparison.Ordinal))
-        {
             throw new InvalidDataException("Personal or unknown sensitivity cannot enter the local Blueprint exchange boundary.");
-        }
 
-        var canonical = Canonicalize(requirement);
+        var expectedProvenanceDigest = CanonicalizeProvenance(requirement, provenance);
+        expectedProvenanceDigest = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(expectedProvenanceDigest))).ToLowerInvariant();
+        if (!FixedTimeEqualsHex(expectedProvenanceDigest, provenance.ProvenanceDigestSha256))
+            throw new InvalidDataException("Blueprint execution provenance digest verification failed.");
+
+        var canonical = Canonicalize(requirement, provenance);
         var expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
         if (!FixedTimeEqualsHex(expectedHash, envelope.PayloadSha256))
-        {
             throw new InvalidDataException("Blueprint knowledge exchange payload hash verification failed.");
-        }
 
         if (!Enum.TryParse<BlueprintKnowledgeExchangeBasis>(requirement.Basis, ignoreCase: false, out var basis)
             || !Enum.TryParse<BlueprintKnowledgeExchangePromotion>(requirement.PromotionLevel, ignoreCase: false, out var promotion))
-        {
             throw new InvalidDataException("Blueprint knowledge exchange basis or promotion level is unknown.");
-        }
+
+        var importedProofs = provenance.EvidenceExecutionProofs
+            .OrderBy(static x => x.EvidenceId, StringComparer.Ordinal)
+            .Select(static x => new ImportedBlueprintEvidenceProof(
+                x.EvidenceId, x.SourceTaskId, x.Specialist, x.ExecutionId,
+                x.CompletedRecordHashSha256.ToLowerInvariant(), x.ResultDigestSha256.ToLowerInvariant()))
+            .ToArray();
 
         return new ImportedBlueprintKnowledgeRequirement(
             requirement.RequirementId,
@@ -115,6 +130,11 @@ public sealed class BlueprintKnowledgeExchangeImporter
             requirement.EvidenceIds.Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
             requirement.SourceKnowledgeId,
             requirement.ValidationRecordId,
+            provenance.MissionId,
+            provenance.LedgerEntryCount,
+            provenance.LedgerHeadHashSha256.ToLowerInvariant(),
+            provenance.ProvenanceDigestSha256.ToLowerInvariant(),
+            importedProofs,
             expectedHash);
     }
 
@@ -131,9 +151,7 @@ public sealed class BlueprintKnowledgeExchangeImporter
             if (byId.TryGetValue(imported.RequirementId, out var existing))
             {
                 if (!string.Equals(existing.PayloadSha256, imported.PayloadSha256, StringComparison.Ordinal))
-                {
                     throw new InvalidDataException("Blueprint knowledge requirement id was rebound to different content.");
-                }
                 continue;
             }
             byId.Add(imported.RequirementId, imported);
@@ -145,39 +163,57 @@ public sealed class BlueprintKnowledgeExchangeImporter
     {
         ValidateId(requirement.RequirementId, 3, 160, nameof(requirement.RequirementId));
         if (requirement.ProjectId == Guid.Empty)
-        {
             throw new InvalidDataException("Blueprint knowledge requirement project id is empty.");
-        }
         ValidateId(requirement.TargetId, 2, 128, nameof(requirement.TargetId));
         ValidateId(requirement.ClaimKey, 3, 160, nameof(requirement.ClaimKey));
         ValidateId(requirement.SourceKnowledgeId, 3, 160, nameof(requirement.SourceKnowledgeId));
         ValidateId(requirement.ValidationRecordId, 3, 160, nameof(requirement.ValidationRecordId));
         if (string.IsNullOrWhiteSpace(requirement.Statement) || requirement.Statement.Length > 64_000)
-        {
             throw new InvalidDataException("Blueprint knowledge requirement statement is invalid.");
-        }
         if (!double.IsFinite(requirement.Confidence) || requirement.Confidence is < 0 or > 1)
-        {
             throw new InvalidDataException("Blueprint knowledge requirement confidence is outside [0,1].");
-        }
         if (requirement.EvidenceIds is null || requirement.EvidenceIds.Count is < 1 or > 2_000)
-        {
             throw new InvalidDataException("Blueprint knowledge requirement evidence is invalid.");
-        }
-        foreach (var id in requirement.EvidenceIds)
-        {
-            ValidateId(id, 3, 160, "evidenceId");
-        }
+        foreach (var id in requirement.EvidenceIds) ValidateId(id, 3, 160, "evidenceId");
         if (requirement.EvidenceIds.Distinct(StringComparer.Ordinal).Count() != requirement.EvidenceIds.Count)
-        {
             throw new InvalidDataException("Blueprint knowledge requirement contains duplicate evidence ids.");
-        }
     }
 
-    internal static string Canonicalize(ExchangeRequirement requirement)
+    private static void ValidateProvenance(ExchangeRequirement requirement, ExchangeProvenance provenance)
     {
-        var fields = new[]
+        ValidateId(provenance.MissionId, 3, 128, nameof(provenance.MissionId));
+        if (provenance.LedgerEntryCount <= 0)
+            throw new InvalidDataException("Blueprint provenance ledger must contain at least one entry.");
+        ValidateSha256(provenance.LedgerHeadHashSha256, nameof(provenance.LedgerHeadHashSha256));
+        ValidateSha256(provenance.ProvenanceDigestSha256, nameof(provenance.ProvenanceDigestSha256));
+        if (provenance.EvidenceExecutionProofs is null
+            || provenance.EvidenceExecutionProofs.Count != requirement.EvidenceIds.Count)
+            throw new InvalidDataException("Blueprint provenance proof set does not match requirement evidence.");
+
+        var proofEvidenceIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var proof in provenance.EvidenceExecutionProofs)
         {
+            ValidateId(proof.EvidenceId, 3, 160, nameof(proof.EvidenceId));
+            ValidateId(proof.SourceTaskId, 3, 160, nameof(proof.SourceTaskId));
+            ValidateId(proof.Specialist, 3, 80, nameof(proof.Specialist));
+            ValidateId(proof.ExecutionId, 3, 160, nameof(proof.ExecutionId));
+            ValidateSha256(proof.CompletedRecordHashSha256, nameof(proof.CompletedRecordHashSha256));
+            ValidateSha256(proof.ResultDigestSha256, nameof(proof.ResultDigestSha256));
+            if (!proofEvidenceIds.Add(proof.EvidenceId))
+                throw new InvalidDataException("Blueprint provenance contains duplicate evidence proof ids.");
+        }
+
+        var required = requirement.EvidenceIds.OrderBy(static x => x, StringComparer.Ordinal).ToArray();
+        var actual = proofEvidenceIds.OrderBy(static x => x, StringComparer.Ordinal).ToArray();
+        if (!required.SequenceEqual(actual, StringComparer.Ordinal))
+            throw new InvalidDataException("Blueprint provenance does not cover the exact requirement evidence set.");
+    }
+
+    internal static string Canonicalize(ExchangeRequirement requirement, ExchangeProvenance provenance)
+    {
+        var fields = new List<string>
+        {
+            "aevrix-blueprint-knowledge-exchange-v2",
             requirement.RequirementId,
             requirement.ProjectId.ToString("D"),
             requirement.TargetId,
@@ -189,29 +225,67 @@ public sealed class BlueprintKnowledgeExchangeImporter
             requirement.Confidence.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
             string.Join("|", requirement.EvidenceIds.OrderBy(x => x, StringComparer.Ordinal)),
             requirement.SourceKnowledgeId,
-            requirement.ValidationRecordId
+            requirement.ValidationRecordId,
+            provenance.MissionId,
+            provenance.LedgerEntryCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            provenance.LedgerHeadHashSha256.ToLowerInvariant(),
+            provenance.ProvenanceDigestSha256.ToLowerInvariant()
         };
+        foreach (var proof in provenance.EvidenceExecutionProofs.OrderBy(static x => x.EvidenceId, StringComparer.Ordinal))
+        {
+            fields.Add(proof.EvidenceId);
+            fields.Add(proof.SourceTaskId);
+            fields.Add(proof.Specialist);
+            fields.Add(proof.ExecutionId);
+            fields.Add(proof.CompletedRecordHashSha256.ToLowerInvariant());
+            fields.Add(proof.ResultDigestSha256.ToLowerInvariant());
+        }
+        return string.Concat(fields.Select(value => $"{Encoding.UTF8.GetByteCount(value)}:{value}"));
+    }
+
+    private static string CanonicalizeProvenance(ExchangeRequirement requirement, ExchangeProvenance provenance)
+    {
+        var fields = new List<string>
+        {
+            "aevrix-blueprint-execution-provenance-v1",
+            requirement.RequirementId,
+            requirement.ProjectId.ToString("D"),
+            requirement.TargetId,
+            requirement.ClaimKey,
+            provenance.MissionId,
+            provenance.LedgerEntryCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            provenance.LedgerHeadHashSha256.ToLowerInvariant()
+        };
+        foreach (var proof in provenance.EvidenceExecutionProofs.OrderBy(static x => x.EvidenceId, StringComparer.Ordinal))
+        {
+            fields.Add(proof.EvidenceId);
+            fields.Add(proof.SourceTaskId);
+            fields.Add(proof.Specialist);
+            fields.Add(proof.ExecutionId);
+            fields.Add(proof.CompletedRecordHashSha256.ToLowerInvariant());
+            fields.Add(proof.ResultDigestSha256.ToLowerInvariant());
+        }
         return string.Concat(fields.Select(value => $"{Encoding.UTF8.GetByteCount(value)}:{value}"));
     }
 
     private static bool FixedTimeEqualsHex(string expected, string supplied)
     {
         if (string.IsNullOrWhiteSpace(supplied) || supplied.Length != 64 || supplied.Any(ch => !Uri.IsHexDigit(ch)))
-        {
             return false;
-        }
-
         var a = Convert.FromHexString(expected);
         var b = Convert.FromHexString(supplied);
-        try
-        {
-            return CryptographicOperations.FixedTimeEquals(a, b);
-        }
+        try { return CryptographicOperations.FixedTimeEquals(a, b); }
         finally
         {
             CryptographicOperations.ZeroMemory(a);
             CryptographicOperations.ZeroMemory(b);
         }
+    }
+
+    private static void ValidateSha256(string value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 64 || value.Any(ch => !Uri.IsHexDigit(ch)))
+            throw new InvalidDataException($"Blueprint knowledge exchange {name} must be SHA-256 hexadecimal.");
     }
 
     private static void ValidateId(string value, int min, int max, string name)
@@ -220,12 +294,14 @@ public sealed class BlueprintKnowledgeExchangeImporter
             || value.Length < min
             || value.Length > max
             || value.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':')))
-        {
             throw new InvalidDataException($"Blueprint knowledge exchange {name} is invalid.");
-        }
     }
 
-    internal sealed record ExchangeEnvelope(int SchemaVersion, ExchangeRequirement? Requirement, string PayloadSha256);
+    internal sealed record ExchangeEnvelope(
+        int SchemaVersion,
+        ExchangeRequirement? Requirement,
+        ExchangeProvenance? Provenance,
+        string PayloadSha256);
 
     internal sealed record ExchangeRequirement(
         string RequirementId,
@@ -240,4 +316,19 @@ public sealed class BlueprintKnowledgeExchangeImporter
         IReadOnlyList<string> EvidenceIds,
         string SourceKnowledgeId,
         string ValidationRecordId);
+
+    internal sealed record ExchangeProvenance(
+        string MissionId,
+        long LedgerEntryCount,
+        string LedgerHeadHashSha256,
+        string ProvenanceDigestSha256,
+        IReadOnlyList<ExchangeEvidenceProof> EvidenceExecutionProofs);
+
+    internal sealed record ExchangeEvidenceProof(
+        string EvidenceId,
+        string SourceTaskId,
+        string Specialist,
+        string ExecutionId,
+        string CompletedRecordHashSha256,
+        string ResultDigestSha256);
 }
