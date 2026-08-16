@@ -105,6 +105,7 @@ public sealed class FilePromotionClaimStore : IAtomicPromotionClaimSetStore
         {
             try
             {
+                RejectReparsePointIfExists(lockPath);
                 return new FileStream(
                     lockPath,
                     FileMode.OpenOrCreate,
@@ -117,6 +118,20 @@ public sealed class FilePromotionClaimStore : IAtomicPromotionClaimSetStore
             {
                 Thread.Sleep(10);
             }
+        }
+    }
+
+    private static void RejectReparsePointIfExists(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new IOException("Promotion claim-set lock must not be a symbolic link or reparse point.");
         }
     }
 
