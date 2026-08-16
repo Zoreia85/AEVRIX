@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "target": "Windows",
+  "releaseDecision": "NOT_HOMOLOGATED",
+  "updatedDate": "2026-08-16",
+  "readinessPercent": 45,
+  "rules": {
+    "weightsMustTotal": 100,
+    "homologatedRequiresReadinessPercent": 100,
+    "homologatedRequiresAllMandatoryGatesPass": true,
+    "missingEvidenceIsPass": false,
+    "evidenceMustBindExactCandidate": true
+  },
+  "gates": [
+    {
+      "id": "canonical-build-ci",
+      "name": "Canonical build + CI baseline",
+      "weight": 15,
+      "points": 13,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197", "workflow:.github/workflows/dotnet-core.yml"]
+    },
+    {
+      "id": "windows-secure-runtime",
+      "name": "Windows secure runtime primitives",
+      "weight": 20,
+      "points": 17,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197", "pr:#284", "pr:#288"],
+      "blocker": "Filesystem read isolation for restrictive profiles is not yet proven by complete hostile native evidence."
+    },
+    {
+      "id": "windows-e2e-runtime",
+      "name": "End-to-end Windows product runtime",
+      "weight": 15,
+      "points": 5,
+      "status": "BLOQUEADO",
+      "evidence": ["issue:#197", "issue:#289"],
+      "blocker": "Desktop/WinUI -> EngineHost -> worker -> embedded Python -> private Chromium has not been proven end to end."
+    },
+    {
+      "id": "installer-lifecycle",
+      "name": "Installer + lifecycle",
+      "weight": 10,
+      "points": 0,
+      "status": "NOT_RUN",
+      "evidence": ["issue:#197"]
+    },
+    {
+      "id": "distribution-security",
+      "name": "Distribution security",
+      "weight": 10,
+      "points": 0,
+      "status": "NOT_RUN",
+      "evidence": ["issue:#197"]
+    },
+    {
+      "id": "execution-authority-db",
+      "name": "Execution Authority + PostgreSQL integration",
+      "weight": 10,
+      "points": 4,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197"],
+      "blocker": "Mandatory PostgreSQL-backed integration must execute without skip in a controlled environment."
+    },
+    {
+      "id": "performance-stability",
+      "name": "Regression + performance + stability",
+      "weight": 10,
+      "points": 4,
+      "status": "PARCIAL",
+      "evidence": ["issue:#197"]
+    },
+    {
+      "id": "ux-accessibility",
+      "name": "Minimum UX + accessibility",
+      "weight": 5,
+      "points": 1,
+      "status": "NOT_RUN",
+      "evidence": ["issue:#197"]
+    },
+    {
+      "id": "exact-hash-evidence",
+      "name": "Exact-hash AVA evidence package",
+      "weight": 5,
+      "points": 1,
+      "status": "PARCIAL",
+      "evidence": ["docs:VALIDATION.md"]
+    }
+  ]
+}
