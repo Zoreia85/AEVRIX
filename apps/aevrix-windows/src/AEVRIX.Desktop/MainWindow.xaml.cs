@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using Aevrix.Core;
-using Aevrix.EngineHost;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -9,14 +5,36 @@ namespace AEVRIX.Desktop;
 
 public sealed partial class MainWindow : Window
 {
-    private EngineHostSupervisor? _engineSupervisor;
+    private readonly DesktopEngineSession _engineSession = new();
+    private readonly DesktopFirstRunService _firstRunService = new();
+    private readonly CancellationTokenSource _lifetimeCts = new();
+    private bool _engineRefreshInProgress;
+    private bool _firstRunIdentityInProgress;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = "AEVRIX Desktop";
-        Closed += MainWindow_Closed;
         ShowSection("home", "Command Center");
+    }
+
+    private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
+    {
+        await LoadFirstRunStateAsync();
+        await RefreshEngineStatusAsync();
+    }
+
+    private async void MainWindow_Closed(object sender, WindowEventArgs args)
+    {
+        _lifetimeCts.Cancel();
+        try
+        {
+            await _engineSession.DisposeAsync();
+        }
+        finally
+        {
+            _lifetimeCts.Dispose();
+        }
     }
 
     private void RootNavigation_SelectionChanged(
@@ -40,47 +58,14 @@ public sealed partial class MainWindow : Window
         ShowSection("new", "Nova investigação");
     }
 
-    private async void VerifyEngineHostButton_Click(object sender, RoutedEventArgs e)
+    private async void RefreshEngineStatusButton_Click(object sender, RoutedEventArgs e)
     {
-        VerifyEngineHostButton.IsEnabled = false;
-        EngineHostStatusText.Text = "Verificando";
-        EngineHostDetailText.Text = "Iniciando sessão local autenticada e executando Ping real.";
+        await RefreshEngineStatusAsync();
+    }
 
-        try
-        {
-            _engineSupervisor ??= CreateEngineSupervisor();
-            await _engineSupervisor.StartAsync();
-
-            var requestId = Guid.NewGuid().ToString("N");
-            var response = await _engineSupervisor.SendAsync(new EnginePingCommand(requestId));
-
-            if (!response.Success ||
-                !string.Equals(response.Code, "pong", StringComparison.Ordinal) ||
-                !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
-            }
-
-            EngineHostStatusText.Text = "Autenticado";
-            EngineHostDetailText.Text = _engineSupervisor.ProcessId is int processId
-                ? $"Ping real confirmado. Processo local supervisionado: PID {processId}."
-                : "Ping real confirmado em sessão local supervisionada.";
-        }
-        catch (Exception ex)
-        {
-            EngineHostStatusText.Text = "Bloqueado";
-            EngineHostDetailText.Text = $"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.";
-
-            if (_engineSupervisor is not null)
-            {
-                await _engineSupervisor.DisposeAsync();
-                _engineSupervisor = null;
-            }
-        }
-        finally
-        {
-            VerifyEngineHostButton.IsEnabled = true;
-        }
+    private async void PrepareDeviceIdentityButton_Click(object sender, RoutedEventArgs e)
+    {
+        await PrepareOrVerifyDeviceIdentityAsync();
     }
 
     private void ValidateScopeButton_Click(object sender, RoutedEventArgs e)
@@ -94,39 +79,137 @@ public sealed partial class MainWindow : Window
         ShowSection("home", "Command Center");
     }
 
-    private static EngineHostSupervisor CreateEngineSupervisor()
+    private async Task LoadFirstRunStateAsync()
     {
-        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
-        return new EngineHostSupervisor(
-            "dotnet",
-            new[] { engineAssembly },
-            startupTimeout: TimeSpan.FromSeconds(20),
-            requestTimeout: TimeSpan.FromSeconds(5));
-    }
-
-    private async void MainWindow_Closed(object sender, WindowEventArgs args)
-    {
-        if (_engineSupervisor is null)
+        if (_lifetimeCts.IsCancellationRequested)
         {
             return;
         }
 
-        await _engineSupervisor.DisposeAsync();
-        _engineSupervisor = null;
+        var state = await _firstRunService.ReadLocalStateAsync(_lifetimeCts.Token);
+        if (!_lifetimeCts.IsCancellationRequested)
+        {
+            ApplyFirstRunIdentityState(state);
+        }
+    }
+
+    private async Task PrepareOrVerifyDeviceIdentityAsync()
+    {
+        if (_firstRunIdentityInProgress || _lifetimeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _firstRunIdentityInProgress = true;
+        PrepareDeviceIdentityButton.IsEnabled = false;
+        FirstRunIdentityProgress.IsActive = true;
+        FirstRunIdentityProgress.Visibility = Visibility.Visible;
+        FirstRunIdentityStateText.Text = "Verificando…";
+        FirstRunIdentityDetailText.Text = "Validando suporte TPM/CNG e a chave ECDSA P-256 não exportável.";
+
+        try
+        {
+            var state = await _firstRunService.PrepareOrVerifyTpmIdentityAsync(_lifetimeCts.Token);
+            if (!_lifetimeCts.IsCancellationRequested)
+            {
+                ApplyFirstRunIdentityState(state);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+            // Window shutdown intentionally cancels first-run work.
+        }
+        finally
+        {
+            if (!_lifetimeCts.IsCancellationRequested)
+            {
+                PrepareDeviceIdentityButton.IsEnabled = true;
+                FirstRunIdentityProgress.IsActive = false;
+                FirstRunIdentityProgress.Visibility = Visibility.Collapsed;
+            }
+            _firstRunIdentityInProgress = false;
+        }
+    }
+
+    private void ApplyFirstRunIdentityState(DesktopFirstRunIdentityState state)
+    {
+        FirstRunIdentityStateText.Text = state.State;
+        FirstRunIdentityDetailText.Text = state.Detail;
+
+        if (string.IsNullOrWhiteSpace(state.KeyId))
+        {
+            FirstRunIdentityMetadataText.Text = "Nenhum metadado criptográfico local verificado.";
+            return;
+        }
+
+        var keySuffix = state.KeyId.Length > 12
+            ? state.KeyId[^12..]
+            : state.KeyId;
+        var prepared = state.PreparedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss zzz") ?? "desconhecido";
+        FirstRunIdentityMetadataText.Text =
+            $"Tier: {state.SecurityTier ?? "desconhecido"} • Key ID …{keySuffix} • preparado em {prepared}.";
+    }
+
+    private async Task RefreshEngineStatusAsync()
+    {
+        if (_engineRefreshInProgress || _lifetimeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _engineRefreshInProgress = true;
+        RefreshEngineStatusButton.IsEnabled = false;
+        EngineStatusProgress.IsActive = true;
+        EngineStatusProgress.Visibility = Visibility.Visible;
+        EngineStatusText.Text = "Verificando…";
+        EngineStatusDetail.Text = "Iniciando sessão local autenticada e consultando o estado canônico do EngineHost.";
+        FirstRunEngineStateText.Text = "Verificando…";
+        FirstRunEngineDetailText.Text = "Aguardando resposta autenticada do EngineHost.";
+
+        try
+        {
+            var status = await _engineSession.RefreshAsync(_lifetimeCts.Token);
+            if (_lifetimeCts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            EngineStatusText.Text = status.State;
+            EngineStatusDetail.Text = status.Detail;
+            EngineStatusLastCheckedText.Text = $"Última prova local: {DateTimeOffset.Now:dd/MM/yyyy HH:mm:ss zzz}";
+            FirstRunEngineStateText.Text = status.State;
+            FirstRunEngineDetailText.Text = status.Detail;
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+            // Window shutdown intentionally cancels any in-flight readiness probe.
+        }
+        finally
+        {
+            if (!_lifetimeCts.IsCancellationRequested)
+            {
+                RefreshEngineStatusButton.IsEnabled = true;
+                EngineStatusProgress.IsActive = false;
+                EngineStatusProgress.Visibility = Visibility.Collapsed;
+            }
+            _engineRefreshInProgress = false;
+        }
     }
 
     private void ShowSection(string route, string title)
     {
         var showHome = string.Equals(route, "home", StringComparison.Ordinal);
+        var showFirstRun = string.Equals(route, "first-run", StringComparison.Ordinal);
         var showNew = string.Equals(route, "new", StringComparison.Ordinal);
 
         CommandCenterView.Visibility = showHome ? Visibility.Visible : Visibility.Collapsed;
+        FirstRunView.Visibility = showFirstRun ? Visibility.Visible : Visibility.Collapsed;
         NewInvestigationView.Visibility = showNew ? Visibility.Visible : Visibility.Collapsed;
-        PlannedSectionView.Visibility = !showHome && !showNew
+        PlannedSectionView.Visibility = !showHome && !showFirstRun && !showNew
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        if (!showHome && !showNew)
+        if (!showHome && !showFirstRun && !showNew)
         {
             PlannedSectionTitle.Text = title;
         }

@@ -37,6 +37,29 @@ public sealed class EngineHostSupervisorTests
     }
 
     [TestMethod]
+    public async Task StartAsync_ReturnsCanonicalEngineReadyStatus()
+    {
+        var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
+        await using var supervisor = new EngineHostSupervisor(
+            "dotnet",
+            new[] { engineAssembly },
+            startupTimeout: TimeSpan.FromSeconds(20),
+            requestTimeout: TimeSpan.FromSeconds(5));
+
+        await supervisor.StartAsync();
+
+        var requestId = Guid.NewGuid().ToString("N");
+        var response = await supervisor.SendAsync(new GetEngineStatusCommand(requestId));
+
+        Assert.IsTrue(response.Success);
+        Assert.AreEqual("engine_ready", response.Code);
+        Assert.AreEqual(requestId, response.RequestId);
+        Assert.AreEqual(EngineProtocol.CurrentVersion, response.ProtocolVersion);
+        Assert.IsTrue(supervisor.IsRunning);
+        Assert.IsNotNull(supervisor.ProcessId);
+    }
+
+    [TestMethod]
     public async Task StartAsync_AllowsImmediateSequentialAuthenticatedRequests()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
