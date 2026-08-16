@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   envelope:
@@ -41,44 +40,23 @@ jobs:
             exit 1
           fi
 
-      - name: Open authoritative patch issue
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Build queue envelope
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import base64
-          import json
-          import os
-          import urllib.request
+          {
+            printf '%s\n' 'AEVRIX-PATCH-V1'
+            base64 -w 0 /tmp/aevrix-desktop.patch
+            printf '\n'
+          } > /tmp/issue-body.txt
+          test "$(wc -c < /tmp/issue-body.txt)" -lt 2000000
+          sha256sum /tmp/aevrix-desktop.patch /tmp/issue-body.txt
 
-          with open('/tmp/aevrix-desktop.patch', 'rb') as fh:
-              raw = fh.read()
-          encoded = base64.b64encode(raw).decode('ascii')
-          if len(encoded) > 2_000_000:
-              raise SystemExit('encoded patch exceeds queue limit')
-
-          repo = os.environ['GITHUB_REPOSITORY']
-          token = os.environ['GH_TOKEN']
-          api = os.environ.get('GITHUB_API_URL', 'https://api.github.com')
-          payload = {
-              'title': '[AEVRIX-PATCH] Desktop runtime, first-run, projects and evidence',
-              'body': 'AEVRIX-PATCH-V1\n' + encoded,
-          }
-          req = urllib.request.Request(
-              f'{api}/repos/{repo}/issues',
-              data=json.dumps(payload).encode('utf-8'),
-              headers={
-                  'Authorization': f'Bearer {token}',
-                  'Accept': 'application/vnd.github+json',
-                  'Content-Type': 'application/json',
-                  'X-GitHub-Api-Version': '2022-11-28',
-                  'User-Agent': 'aevrix-desktop-patch-envelope',
-              },
-              method='POST',
-          )
-          with urllib.request.urlopen(req) as response:
-              issue = json.loads(response.read())
-          print(f"opened patch issue #{issue['number']}")
-          PY
+      - name: Upload queue envelope
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aevrix-desktop-patch-envelope
+          path: /tmp/issue-body.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
