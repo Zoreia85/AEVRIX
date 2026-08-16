@@ -1,0 +1,141 @@
+<Window
+    x:Class="AEVRIX.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Background="{StaticResource AevrixSurfaceBrush}">
+        <NavigationView
+            x:Name="RootNavigation"
+            PaneDisplayMode="Left"
+            IsBackButtonVisible="Collapsed"
+            IsSettingsVisible="False"
+            PaneTitle="AEVRIX"
+            AutomationProperties.Name="Navegação principal do AEVRIX">
+
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Command Center" Tag="home" />
+                <NavigationViewItem Content="Projetos" Tag="projects" />
+                <NavigationViewItem Content="Nova investigação" Tag="new" />
+                <NavigationViewItem Content="Mission Control" Tag="mission" />
+                <NavigationViewItem Content="Evidências" Tag="evidence" />
+                <NavigationViewItem Content="Blueprint" Tag="blueprint" />
+                <NavigationViewItem Content="Research Browser" Tag="browser" />
+                <NavigationViewItem Content="Especialistas / Adapters" Tag="specialists" />
+                <NavigationViewItem Content="Activity / Proof Ledger" Tag="activity" />
+                <NavigationViewItem Content="Integrações" Tag="integrations" />
+                <NavigationViewItem Content="Configurações / Segurança" Tag="settings" />
+            </NavigationView.MenuItems>
+
+            <ScrollViewer>
+                <Grid Padding="32" RowSpacing="24" MaxWidth="1320" HorizontalAlignment="Stretch">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Spacing="8">
+                        <TextBlock Text="COMMAND CENTER" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                        <TextBlock Text="Centro operacional" FontSize="34" FontWeight="SemiBold" />
+                        <TextBlock Text="Visão governada da estação Windows, do cérebro remoto e das missões em execução." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <InfoBar
+                        Grid.Row="1"
+                        IsOpen="True"
+                        IsClosable="False"
+                        Severity="Warning"
+                        Title="NOT_HOMOLOGATED"
+                        Message="Este shell é uma superfície em desenvolvimento. Estados não verificados permanecem restritos ou indisponíveis." />
+
+                    <Grid Grid.Row="2" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="EngineHost" FontWeight="SemiBold" />
+                                <TextBlock Text="Não iniciado" FontSize="22" />
+                                <TextBlock Text="Sem prova de sessão autenticada nesta tela." Opacity="0.65" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Cérebro remoto" FontWeight="SemiBold" />
+                                <TextBlock Text="Não verificado" FontSize="22" />
+                                <TextBlock Text="Conectividade e identidade ainda não foram consultadas." Opacity="0.65" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Postura de segurança" FontWeight="SemiBold" />
+                                <TextBlock Text="Restrita" FontSize="22" />
+                                <TextBlock Text="Nenhum gate de runtime é inferido pela interface." Opacity="0.65" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="3" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Missões" FontWeight="SemiBold" />
+                                <TextBlock Text="0 ativas" FontSize="22" />
+                                <TextBlock Text="Fila local ainda não vinculada ao orquestrador." Opacity="0.65" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <Grid Grid.Row="3" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                            <StackPanel Spacing="14">
+                                <TextBlock Text="Começar trabalho autorizado" FontSize="22" FontWeight="SemiBold" />
+                                <TextBlock Text="O fluxo de investigação será liberado somente quando o wizard estiver conectado às políticas reais de autorização e sensibilidade." Opacity="0.72" TextWrapping="Wrap" />
+                                <Button
+                                    x:Name="StartAnalysisButton"
+                                    Content="Iniciar nova análise autorizada"
+                                    HorizontalAlignment="Left"
+                                    Click="StartAnalysisButton_Click"
+                                    AutomationProperties.Name="Iniciar nova análise autorizada" />
+                                <InfoBar
+                                    x:Name="IncrementNotice"
+                                    IsOpen="False"
+                                    IsClosable="True"
+                                    Severity="Informational"
+                                    Title="Fluxo ainda não promovido"
+                                    Message="O próximo incremento ligará esta ação ao wizard de escopo e autorização. Nenhuma missão foi iniciada." />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Próximos gates" FontSize="22" FontWeight="SemiBold" />
+                                <TextBlock Text="• Integridade no primeiro launch" TextWrapping="Wrap" />
+                                <TextBlock Text="• Enrollment e autenticação" TextWrapping="Wrap" />
+                                <TextBlock Text="• Estado real do EngineHost" TextWrapping="Wrap" />
+                                <TextBlock Text="• Estado real do cérebro remoto" TextWrapping="Wrap" />
+                                <TextBlock Text="• Wizard de nova investigação" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <TextBlock
+                        Grid.Row="4"
+                        Text="AEVRIX Desktop • build de desenvolvimento • evidência antes de confiança"
+                        Opacity="0.5"
+                        HorizontalAlignment="Center" />
+                </Grid>
+            </ScrollViewer>
+        </NavigationView>
+    </Grid>
+</Window>
