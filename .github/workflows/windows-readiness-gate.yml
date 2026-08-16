@@ -1,0 +1,123 @@
+name: Windows readiness gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/aevrix-windows/**"
+      - "services/aevrix-remote-brain/**"
+      - "docs/HOMOLOGATION_READINESS.md"
+      - "docs/VALIDATION.md"
+      - "global.json"
+      - ".github/workflows/windows-readiness-gate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10.0.400
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.400"
+
+      - name: Record candidate identity
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          "source_commit=${{ github.sha }}" | Set-Content evidence/candidate.txt
+          "runner_os=${{ runner.os }}" | Add-Content evidence/candidate.txt
+          "runner_arch=${{ runner.arch }}" | Add-Content evidence/candidate.txt
+          "image=${env:ImageOS}" | Add-Content evidence/candidate.txt
+          dotnet --version | ForEach-Object { "dotnet_sdk=$_" } | Add-Content evidence/candidate.txt
+          dotnet --info | Set-Content evidence/dotnet-info.txt
+          Get-Content evidence/candidate.txt | ForEach-Object { "- $_" } | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Build EngineHost Release candidate
+        shell: pwsh
+        run: |
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.EngineHost/AEVRIX.EngineHost.csproj -c Release -r win-x64 --self-contained false -o ./evidence/enginehost
+          $files = Get-ChildItem ./evidence/enginehost -File -Recurse | Sort-Object FullName
+          if ($files.Count -eq 0) { throw "EngineHost publish produced no files." }
+          $hashes = foreach ($file in $files) {
+            $h = Get-FileHash -Algorithm SHA256 -Path $file.FullName
+            [PSCustomObject]@{ Path = $file.FullName.Substring((Resolve-Path .).Path.Length + 1); SHA256 = $h.Hash.ToLowerInvariant(); Bytes = $file.Length }
+          }
+          $hashes | ConvertTo-Json -Depth 3 | Set-Content ./evidence/enginehost-sha256.json
+          "### EngineHost candidate hashes" | Add-Content $env:GITHUB_STEP_SUMMARY
+          $hashes | ForEach-Object { "- ``$($_.SHA256)`` $($_.Path) ($($_.Bytes) bytes)" } | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Test Windows Core
+        shell: pwsh
+        run: |
+          dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release --logger "trx;LogFileName=core.trx" --results-directory ./evidence/core
+
+      - name: Test Remote Security
+        shell: pwsh
+        run: |
+          dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Security.Tests/AEVRIX.Remote.Security.Tests.csproj -c Release --logger "trx;LogFileName=remote-security.trx" --results-directory ./evidence/remote-security
+
+      - name: Test Orchestrator Judge
+        shell: pwsh
+        run: |
+          dotnet test ./services/aevrix-remote-brain/tests/AEVRIX.Remote.Orchestration.Tests/AEVRIX.Remote.Orchestration.Tests.csproj -c Release --logger "trx;LogFileName=orchestrator.trx" --results-directory ./evidence/orchestrator
+
+      - name: Enforce zero failed or skipped mandatory tests
+        shell: pwsh
+        run: |
+          $trxFiles = Get-ChildItem ./evidence -Filter *.trx -File -Recurse
+          if ($trxFiles.Count -ne 3) { throw "Expected 3 TRX files, found $($trxFiles.Count)." }
+          $rows = @()
+          foreach ($file in $trxFiles) {
+            [xml]$xml = Get-Content $file.FullName
+            $counters = $xml.SelectSingleNode("//*[local-name()='Counters']")
+            if ($null -eq $counters) { throw "Missing Counters in $($file.FullName)." }
+            $total = [int]$counters.total
+            $passed = [int]$counters.passed
+            $failed = [int]$counters.failed + [int]$counters.error
+            $skipped = [int]$counters.skipped + [int]$counters.notExecuted
+            $rows += [PSCustomObject]@{ Suite=$file.BaseName; Total=$total; Passed=$passed; Failed=$failed; Skipped=$skipped }
+          }
+          $rows | ConvertTo-Json -Depth 3 | Set-Content ./evidence/test-counters.json
+          "### Mandatory test counters" | Add-Content $env:GITHUB_STEP_SUMMARY
+          $rows | ForEach-Object { "- $($_.Suite): $($_.Passed)/$($_.Total) passed; failed=$($_.Failed); skipped=$($_.Skipped)" } | Add-Content $env:GITHUB_STEP_SUMMARY
+          if (($rows | Measure-Object Failed -Sum).Sum -gt 0) { throw "Mandatory suite contains failures." }
+          if (($rows | Measure-Object Skipped -Sum).Sum -gt 0) { throw "Mandatory suite contains skipped/not-executed tests; AVA remains fail-closed." }
+
+      - name: Verify homologatable Desktop product surface exists
+        shell: pwsh
+        run: |
+          $projects = Get-ChildItem ./apps/aevrix-windows/src -Filter *.csproj -File -Recurse | Where-Object {
+            $_.FullName -notmatch '[\\/]AEVRIX\.Core[\\/]' -and
+            $_.FullName -notmatch '[\\/]AEVRIX\.EngineHost[\\/]'
+          }
+          "### Product-surface gate" | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ($projects.Count -eq 0) {
+            "- BLOQUEADO: no Desktop/WinUI product project exists under apps/aevrix-windows/src beyond Core and EngineHost." | Add-Content $env:GITHUB_STEP_SUMMARY
+            "- The AVA Desktop -> EngineHost -> worker -> embedded Python -> private Chromium smoke cannot be executed." | Add-Content $env:GITHUB_STEP_SUMMARY
+            Write-Error "Windows product surface missing. End-to-end release gate remains BLOQUEADO."
+            exit 2
+          }
+          $projects | ForEach-Object { "- Candidate product project: $($_.FullName)" } | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Final readiness note
+        if: always()
+        shell: pwsh
+        run: |
+          "### AVA interpretation" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- This workflow is evidence for automated Windows build/regression and candidate identity only." | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- It does not replace clean MSI, real application launch/visual inspection, full runtime-chain, Defender, Authenticode, accessibility, recovery, upgrade/uninstall, PostgreSQL-backed authority, soak, or exact-release-package gates." | Add-Content $env:GITHUB_STEP_SUMMARY
+          "- Any missing mandatory gate keeps AEVRIX NOT_HOMOLOGATED." | Add-Content $env:GITHUB_STEP_SUMMARY
