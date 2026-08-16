@@ -296,7 +296,8 @@ public sealed partial class MainWindow : Window
         };
         _refreshProjectsButton = new Button
         {
-            Content = "Atualizar catálogo"
+            Content = "Atualizar catálogo",
+            AccessKey = "R"
         };
         _refreshProjectsButton.Click += RefreshProjectsButton_Click;
         actionRow.Children.Add(_refreshProjectsButton);
@@ -361,11 +362,22 @@ public sealed partial class MainWindow : Window
         });
         panel.Children.Add(new TextBlock
         {
-            Text = $"Atualizado: {project.UpdatedAt.ToLocalTime():dd/MM/yyyy HH:mm:ss zzz} • sanitizado: {FormatBytes(project.SanitizedBytes)} • quarentena: {FormatBytes(project.QuarantineBytes)}",
+            Text = $"Atividade: {project.EffectiveActivityAt.ToLocalTime():dd/MM/yyyy HH:mm:ss zzz} • sanitizado: {FormatBytes(project.SanitizedBytes)} • quarentena: {FormatBytes(project.QuarantineBytes)}",
             FontSize = 12,
             Opacity = 0.55,
             TextWrapping = TextWrapping.Wrap
         });
+
+        if (project.RequiresAttention)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Atenção local: este projeto possui quarentena, bloqueio ou falha registrada. Nenhum estado saudável é inferido.",
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
+        }
 
         return new ListViewItem
         {
