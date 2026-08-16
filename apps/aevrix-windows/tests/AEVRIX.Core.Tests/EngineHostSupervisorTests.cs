@@ -63,11 +63,13 @@ public sealed class EngineHostSupervisorTests
             startupTimeout: TimeSpan.FromSeconds(5),
             requestTimeout: TimeSpan.FromMilliseconds(500));
 
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+        await Assert.ThrowsExactlyAsync<TimeoutException>(async () =>
             await supervisor.StartAsync());
 
         Assert.IsFalse(supervisor.IsRunning);
         Assert.IsNull(supervisor.ProcessId);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await supervisor.SendAsync(new EnginePingCommand(Guid.NewGuid().ToString("N"))));
     }
 
     [TestMethod]
