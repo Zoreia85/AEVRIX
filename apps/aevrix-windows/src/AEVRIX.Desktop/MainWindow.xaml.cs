@@ -10,12 +10,20 @@ namespace AEVRIX.Desktop;
 public sealed partial class MainWindow : Window
 {
     private EngineHostSupervisor? _engineSupervisor;
+    private readonly DispatcherTimer _engineHealthTimer;
+    private bool _engineAuthenticated;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = "AEVRIX Desktop";
         Closed += MainWindow_Closed;
+        _engineHealthTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _engineHealthTimer.Tick += EngineHealthTimer_Tick;
+        _engineHealthTimer.Start();
         ShowSection("home", "Command Center");
     }
 
@@ -49,6 +57,7 @@ public sealed partial class MainWindow : Window
     private async void StopEngineHostButton_Click(object sender, RoutedEventArgs e)
     {
         SetEngineControlsBusy(true);
+        _engineAuthenticated = false;
         EngineHostStatusText.Text = "Parando";
         EngineHostDetailText.Text = "Encerrando o processo local supervisionado.";
 
@@ -77,6 +86,7 @@ public sealed partial class MainWindow : Window
     private async Task VerifyEngineHostAsync(bool restart)
     {
         SetEngineControlsBusy(true);
+        _engineAuthenticated = false;
         EngineHostStatusText.Text = restart ? "Reiniciando" : "Verificando";
         EngineHostDetailText.Text = restart
             ? "Encerrando qualquer sessão anterior antes de iniciar uma nova sessão autenticada."
@@ -102,6 +112,7 @@ public sealed partial class MainWindow : Window
                 throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
             }
 
+            _engineAuthenticated = true;
             EngineHostStatusText.Text = "Autenticado";
             EngineHostDetailText.Text = _engineSupervisor.ProcessId is int processId
                 ? $"Ping real confirmado. Processo local supervisionado: PID {processId}."
@@ -109,6 +120,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            _engineAuthenticated = false;
             EngineHostStatusText.Text = "Bloqueado";
             EngineHostDetailText.Text = $"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.";
             await DisposeEngineSupervisorAsync();
@@ -128,6 +140,8 @@ public sealed partial class MainWindow : Window
 
     private async Task DisposeEngineSupervisorAsync()
     {
+        _engineAuthenticated = false;
+
         if (_engineSupervisor is null)
         {
             return;
@@ -148,6 +162,20 @@ public sealed partial class MainWindow : Window
         ShowSection("home", "Command Center");
     }
 
+    private void EngineHealthTimer_Tick(object? sender, object e)
+    {
+        if (!_engineAuthenticated || _engineSupervisor is { IsRunning: true })
+        {
+            return;
+        }
+
+        _engineAuthenticated = false;
+        EngineHostStatusText.Text = "Bloqueado";
+        EngineHostDetailText.Text =
+            "A sessão autenticada do EngineHost deixou de estar ativa. O estado saudável foi revogado automaticamente.";
+        SetEngineControlsBusy(false);
+    }
+
     private static EngineHostSupervisor CreateEngineSupervisor()
     {
         var engineAssembly = typeof(EngineHostRuntime).Assembly.Location;
@@ -159,7 +187,10 @@ public sealed partial class MainWindow : Window
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
-        => await DisposeEngineSupervisorAsync();
+    {
+        _engineHealthTimer.Stop();
+        await DisposeEngineSupervisorAsync();
+    }
 
     private void ShowSection(string route, string title)
     {
