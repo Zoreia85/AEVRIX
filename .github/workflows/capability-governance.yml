@@ -1,0 +1,51 @@
+name: capability-governance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'docs/qa/CAPABILITY_CONTINUOUS_EVALUATION.md'
+      - 'docs/qa/capability-registry.json'
+      - 'tools/capability_governance/**'
+      - '.github/workflows/capability-governance.yml'
+  pull_request:
+    paths:
+      - 'docs/qa/CAPABILITY_CONTINUOUS_EVALUATION.md'
+      - 'docs/qa/capability-registry.json'
+      - 'tools/capability_governance/**'
+      - '.github/workflows/capability-governance.yml'
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  capability-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Validate capability registry and lifecycle gates
+        run: >-
+          python tools/capability_governance/evaluate.py
+          --registry docs/qa/capability-registry.json
+          --out capability-governance-report.md
+          --strict
+
+      - name: Upload governance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capability-governance-report
+          path: capability-governance-report.md
+          if-no-files-found: error
+          retention-days: 30
