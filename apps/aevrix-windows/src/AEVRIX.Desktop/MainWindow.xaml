@@ -57,8 +57,9 @@
                             <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
                                 <StackPanel Spacing="8">
                                     <TextBlock Text="EngineHost" FontWeight="SemiBold" />
-                                    <TextBlock Text="Não iniciado" FontSize="22" />
-                                    <TextBlock Text="Sem prova de sessão autenticada nesta tela." Opacity="0.65" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="EngineHostStatusText" Text="Não iniciado" FontSize="22" />
+                                    <TextBlock x:Name="EngineHostDetailText" Text="Sem prova de sessão autenticada nesta tela." Opacity="0.65" TextWrapping="Wrap" />
+                                    <Button x:Name="VerifyEngineHostButton" Content="Verificar EngineHost" HorizontalAlignment="Left" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost autenticado" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
