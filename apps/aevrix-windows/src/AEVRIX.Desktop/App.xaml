@@ -1,0 +1,16 @@
+<Application
+    x:Class="AEVRIX.Desktop.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedTheme="Dark">
+    <Application.Resources>
+        <ResourceDictionary>
+            <Color x:Key="AevrixSurfaceColor">#111821</Color>
+            <Color x:Key="AevrixPanelColor">#18222D</Color>
+            <Color x:Key="AevrixAccentColor">#45C8FF</Color>
+            <SolidColorBrush x:Key="AevrixSurfaceBrush" Color="{StaticResource AevrixSurfaceColor}" />
+            <SolidColorBrush x:Key="AevrixPanelBrush" Color="{StaticResource AevrixPanelColor}" />
+            <SolidColorBrush x:Key="AevrixAccentBrush" Color="{StaticResource AevrixAccentColor}" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
