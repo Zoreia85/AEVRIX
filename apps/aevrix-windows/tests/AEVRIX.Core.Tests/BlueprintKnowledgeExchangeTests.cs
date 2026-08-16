@@ -149,7 +149,7 @@ public sealed class BlueprintKnowledgeExchangeTests
             new string('a', 64),
             DateTimeOffset.Parse("2026-08-16T03:00:00Z"),
             ["artifact-ref"],
-            [],
+            [$"parent-{evidenceId}"],
             ContainsPersonalData: false);
 
     private static void AppendSuccessfulExecution(ExecutionProofLedger ledger, EvidenceObservation observation)
