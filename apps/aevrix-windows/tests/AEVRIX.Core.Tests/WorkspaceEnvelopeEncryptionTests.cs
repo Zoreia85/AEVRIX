@@ -47,7 +47,7 @@ public sealed class WorkspaceEnvelopeEncryptionTests
         Assert.ThrowsExactly<CryptographicException>(() => crypto.Decrypt(envelope, masterKey, "blueprint"));
 
         envelope.Ciphertext[0] ^= 0x01;
-        Assert.ThrowsExactly<CryptographicException>(() => crypto.Decrypt(envelope, masterKey, "evidence"));
+        Assert.ThrowsExactly<AuthenticationTagMismatchException>(() => crypto.Decrypt(envelope, masterKey, "evidence"));
     }
 
     [TestMethod]
