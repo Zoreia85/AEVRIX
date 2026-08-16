@@ -11,11 +11,11 @@ public sealed class WorkspaceIsolationTests
         var root = Path.Combine(Path.GetTempPath(), "aevrix-isolation-tests");
         var isolation = new WorkspaceIsolation(root);
 
-        var path = isolation.EvidenceRoot("person@example.test", "Customer Alpha / Incident 42");
+        var path = isolation.EvidenceRoot("synthetic-user-alpha", "Synthetic Workspace Alpha / Case 42");
 
-        Assert.IsFalse(path.Contains("person@example.test", StringComparison.OrdinalIgnoreCase));
-        Assert.IsFalse(path.Contains("Customer Alpha", StringComparison.OrdinalIgnoreCase));
-        StringAssert.Contains(path, Path.Combine("workspaces", WorkspaceIsolation.OpaqueId("wsp", "Customer Alpha / Incident 42")));
+        Assert.IsFalse(path.Contains("synthetic-user-alpha", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(path.Contains("Synthetic Workspace Alpha", StringComparison.OrdinalIgnoreCase));
+        StringAssert.Contains(path, Path.Combine("workspaces", WorkspaceIsolation.OpaqueId("wsp", "Synthetic Workspace Alpha / Case 42")));
     }
 
     [TestMethod]
