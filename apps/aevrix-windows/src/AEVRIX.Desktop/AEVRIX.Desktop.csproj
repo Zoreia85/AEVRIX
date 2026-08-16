@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>AEVRIX.Desktop</RootNamespace>
+    <AssemblyName>AEVRIX.Desktop</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Platforms>x64;ARM64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <ProjectReference Include="..\AEVRIX.Core\AEVRIX.Core.csproj" />
+    <ProjectReference Include="..\AEVRIX.EngineHost\AEVRIX.EngineHost.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="CopyEngineHostToDesktopOutput" AfterTargets="Build">
+    <ItemGroup>
+      <_EngineHostArtifacts Include="$(MSBuildProjectDirectory)\..\AEVRIX.EngineHost\bin\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\AEVRIX.EngineHost.*" />
+    </ItemGroup>
+    <Error Condition="'@(_EngineHostArtifacts)' == ''" Text="AEVRIX.EngineHost artifacts were not produced for the Desktop runtime." />
+    <Copy SourceFiles="@(_EngineHostArtifacts)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>
