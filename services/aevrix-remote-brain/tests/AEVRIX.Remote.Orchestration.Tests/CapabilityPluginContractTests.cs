@@ -2,6 +2,7 @@ using Aevrix.Remote.Capabilities;
 
 namespace Aevrix.Remote.Orchestration.Tests;
 
+[TestClass]
 public sealed class CapabilityPluginContractTests
 {
     private static readonly CapabilitySource Source = new(
@@ -10,8 +11,8 @@ public sealed class CapabilityPluginContractTests
         "1111111111111111111111111111111111111111",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
-    [Fact]
-    public void Approved_domain_neutral_plugin_accepts_minimized_static_analysis()
+    [TestMethod]
+    public void ApprovedDomainNeutralPlugin_AcceptsMinimizedStaticAnalysis()
     {
         var contract = CreateContract();
         var context = new CapabilityExecutionContext(
@@ -25,15 +26,15 @@ public sealed class CapabilityPluginContractTests
 
         var decision = CapabilityPluginAdmissionPolicy.Evaluate(contract, context);
 
-        Assert.True(decision.Allowed, decision.Reason);
-        Assert.Contains("source-code", contract.Domains);
-        Assert.Contains("CSharp", contract.Languages);
-        Assert.Contains("json", contract.Formats);
-        Assert.Contains("windows", contract.OperatingSystems);
+        Assert.IsTrue(decision.Allowed, decision.Reason);
+        CollectionAssert.Contains(contract.Domains.ToArray(), "source-code");
+        CollectionAssert.Contains(contract.Languages.ToArray(), "CSharp");
+        CollectionAssert.Contains(contract.Formats.ToArray(), "json");
+        CollectionAssert.Contains(contract.OperatingSystems.ToArray(), "windows");
     }
 
-    [Fact]
-    public void Third_party_clean_room_rejects_runtime_instrumentation()
+    [TestMethod]
+    public void ThirdPartyCleanRoom_RejectsRuntimeInstrumentation()
     {
         var contract = CreateContract() with
         {
@@ -50,14 +51,14 @@ public sealed class CapabilityPluginContractTests
 
         var decision = CapabilityPluginAdmissionPolicy.Evaluate(contract, context);
 
-        Assert.False(decision.Allowed);
-        Assert.Contains("owned or explicitly authorized", decision.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.IsFalse(decision.Allowed);
+        StringAssert.Contains(decision.Reason, "owned or explicitly authorized");
     }
 
-    [Theory]
-    [InlineData(TargetAuthorizationScope.OwnedSystem)]
-    [InlineData(TargetAuthorizationScope.ExplicitlyAuthorizedSystem)]
-    public void Authorized_targets_may_use_declared_runtime_instrumentation(TargetAuthorizationScope scope)
+    [TestMethod]
+    [DataRow(TargetAuthorizationScope.OwnedSystem)]
+    [DataRow(TargetAuthorizationScope.ExplicitlyAuthorizedSystem)]
+    public void AuthorizedTargets_MayUseDeclaredRuntimeInstrumentation(TargetAuthorizationScope scope)
     {
         var contract = CreateContract() with
         {
@@ -74,20 +75,20 @@ public sealed class CapabilityPluginContractTests
 
         var decision = CapabilityPluginAdmissionPolicy.Evaluate(contract, context);
 
-        Assert.True(decision.Allowed, decision.Reason);
+        Assert.IsTrue(decision.Allowed, decision.Reason);
     }
 
-    [Fact]
-    public void Plugin_must_be_workspace_and_subject_bound()
+    [TestMethod]
+    public void Plugin_MustBeWorkspaceAndSubjectBound()
     {
         var contract = CreateContract() with { RequiresSubjectBinding = false };
 
-        Assert.False(contract.CanRegister());
-        Assert.Throws<InvalidOperationException>(() => contract.Validate());
+        Assert.IsFalse(contract.CanRegister());
+        Assert.ThrowsExactly<InvalidOperationException>(() => contract.Validate());
     }
 
-    [Fact]
-    public void Admission_rejects_undeclared_network_secret_and_excess_data_exposure()
+    [TestMethod]
+    public void Admission_RejectsUndeclaredNetworkSecretAndExcessDataExposure()
     {
         var contract = CreateContract();
 
@@ -97,17 +98,17 @@ public sealed class CapabilityPluginContractTests
             contract,
             Context(exposure: DataExposureClass.MinimizedContent));
 
-        Assert.False(network.Allowed);
-        Assert.False(secret.Allowed);
-        Assert.False(exposure.Allowed);
+        Assert.IsFalse(network.Allowed);
+        Assert.IsFalse(secret.Allowed);
+        Assert.IsFalse(exposure.Allowed);
     }
 
-    [Fact]
-    public void Denied_capability_cannot_register_as_plugin()
+    [TestMethod]
+    public void DeniedCapability_CannotRegisterAsPlugin()
     {
         var contract = CreateContract() with { Capability = "captcha-bypass" };
 
-        Assert.False(contract.CanRegister());
+        Assert.IsFalse(contract.CanRegister());
     }
 
     private static CapabilityPluginContract CreateContract() => new(
