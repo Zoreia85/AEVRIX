@@ -25,6 +25,24 @@ from .integration_tools import (
     ToolSource,
     integration_inventory,
 )
+from .tool_invocation import (
+    AdbObservationPlans,
+    AndroguardPlans,
+    ApkAnalyzerPlans,
+    ApktoolPlans,
+    AuthorizedArtifact,
+    CapabilityInvocationPlan,
+    InvocationPolicyError,
+    JadxPlans,
+)
+from .integration_benchmark import (
+    BenchmarkCase,
+    BenchmarkEvaluator,
+    BenchmarkReport,
+    FindingKey,
+    ToolBenchmarkSummary,
+    ToolCaseResult,
+)
 
 __all__ = [
     "BoundedHttpsTransport",
@@ -48,4 +66,18 @@ __all__ = [
     "ToolProbeSpec",
     "ToolSource",
     "integration_inventory",
+    "AdbObservationPlans",
+    "AndroguardPlans",
+    "ApkAnalyzerPlans",
+    "ApktoolPlans",
+    "AuthorizedArtifact",
+    "CapabilityInvocationPlan",
+    "InvocationPolicyError",
+    "JadxPlans",
+    "BenchmarkCase",
+    "BenchmarkEvaluator",
+    "BenchmarkReport",
+    "FindingKey",
+    "ToolBenchmarkSummary",
+    "ToolCaseResult",
 ]
