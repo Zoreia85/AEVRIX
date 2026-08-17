@@ -1,0 +1,262 @@
+name: Windows first-run terms AVA
+
+on:
+  workflow_run:
+    workflows: ["Windows installer candidate"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      installer_run_id:
+        description: "Completed Windows installer candidate run ID"
+        required: true
+        type: string
+      candidate_sha:
+        description: "Exact bot-authored candidate SHA from that run"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-first-run-terms-${{ github.event.workflow_run.head_sha || inputs.candidate_sha }}
+  cancel-in-progress: true
+
+jobs:
+  exact-installed-first-run:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha || inputs.candidate_sha }}
+      INSTALLER_RUN_ID: ${{ github.event.workflow_run.id || inputs.installer_run_id }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout exact installer candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact bot-authored candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw "Invalid exact candidate SHA: $env:CANDIDATE_SHA" }
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -ne $env:CANDIDATE_SHA) { throw "Checkout mismatch: expected $env:CANDIDATE_SHA got $actual" }
+          $author = (& git show -s --format='%an <%ae>' HEAD).Trim()
+          if ($author -notmatch '^github-actions\[bot\] <41898282\+github-actions\[bot\]@users\.noreply\.github\.com>$') {
+            throw "First-run AVA refuses non-canonical author identity: $author"
+          }
+          if (-not (Test-Path -LiteralPath './apps/aevrix-windows/installer/test-first-run-terms.ps1' -PathType Leaf)) {
+            throw 'Exact candidate does not contain the installed first-run terms AVA probe.'
+          }
+          Write-Host "Exact candidate verified: $actual / $author"
+
+      - name: Download exact installer AVA artifact from triggering run
+        id: installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:INSTALLER_RUN_ID -notmatch '^\d+$') { throw "Invalid installer run id: $env:INSTALLER_RUN_ID" }
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $runUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:INSTALLER_RUN_ID"
+          $run = Invoke-RestMethod -Headers $headers -Uri $runUri
+          if ([string]$run.name -ne 'Windows installer candidate') { throw "Run $env:INSTALLER_RUN_ID is not Windows installer candidate." }
+          if ([string]$run.conclusion -ne 'success') { throw "Installer run did not conclude success: $($run.conclusion)" }
+          if ([string]$run.head_sha -ne $env:CANDIDATE_SHA) { throw "Installer run head SHA mismatch: $($run.head_sha)" }
+
+          $artifactsUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:INSTALLER_RUN_ID/artifacts?per_page=100"
+          $listing = Invoke-RestMethod -Headers $headers -Uri $artifactsUri
+          $expectedName = "aevrix-windows-installer-candidate-$env:CANDIDATE_SHA"
+          $matches = @($listing.artifacts | Where-Object { -not $_.expired -and [string]$_.name -eq $expectedName })
+          if ($matches.Count -ne 1) { throw "Expected exactly one non-expired artifact '$expectedName'; got $($matches.Count)." }
+          $artifact = $matches[0]
+
+          $zip = Join-Path $env:RUNNER_TEMP 'aevrix-installer-ava.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'aevrix-installer-ava'
+          Invoke-WebRequest -Headers $headers -Uri ([string]$artifact.archive_download_url) -OutFile $zip -MaximumRedirection 10
+          if ((Get-Item -LiteralPath $zip).Length -lt 1MB) { throw 'Downloaded installer AVA artifact is unexpectedly small.' }
+          Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+
+          $candidateFiles = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter 'candidate-evidence.json')
+          if ($candidateFiles.Count -ne 1) { throw "Expected one candidate-evidence.json; got $($candidateFiles.Count)." }
+          $candidate = Get-Content -LiteralPath $candidateFiles[0].FullName -Raw | ConvertFrom-Json
+          if ([string]$candidate.candidateSha -ne $env:CANDIDATE_SHA) { throw 'candidate-evidence.json is not bound to the exact candidate.' }
+          $version = [string]$candidate.newVersion
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'candidate-evidence.json does not declare newVersion.' }
+          $installerName = "AEVRIX-$version-win-x64-Setup.exe"
+          $installers = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $installerName)
+          if ($installers.Count -ne 1) { throw "Expected one exact upgrade installer '$installerName'; got $($installers.Count)." }
+          $installerHash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          "installer_path=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "installer_sha256=$installerHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "product_version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "artifact_id=$($artifact.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "artifact_digest=$($artifact.digest)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Exact installer artifact acquired: run=$env:INSTALLER_RUN_ID artifact=$($artifact.id) digest=$($artifact.digest) installerSHA256=$installerHash"
+
+      - name: Prove decline blocks product entry without creating acceptance
+        id: decline
+        shell: pwsh
+        env:
+          INSTALLER_PATH: ${{ steps.installer.outputs.installer_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+
+          function Find-UiElement {
+            param([int]$ProcessId, [string]$AutomationId, [string]$Name)
+            $conditions = @([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId))
+            if ($AutomationId) { $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId) }
+            if ($Name) { $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name) }
+            $condition = if ($conditions.Count -eq 1) { $conditions[0] } else { [System.Windows.Automation.AndCondition]::new([System.Windows.Automation.Condition[]]$conditions) }
+            [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+          }
+          function Wait-UiElement {
+            param([int]$ProcessId, [string]$AutomationId, [string]$Name, [int]$Seconds = 20)
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds($Seconds)
+            while ([DateTimeOffset]::UtcNow -lt $deadline) {
+              $element = Find-UiElement -ProcessId $ProcessId -AutomationId $AutomationId -Name $Name
+              if ($null -ne $element) { return $element }
+              Start-Sleep -Milliseconds 200
+            }
+            throw "UI Automation element not found. AutomationId='$AutomationId' Name='$Name'."
+          }
+
+          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Exact installer failed before decline AVA: $($install.ExitCode)" }
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs\AEVRIX'
+          $desktop = Join-Path $installDir 'AEVRIX.Desktop.exe'
+          $uninstall = Join-Path $installDir 'uninstall.exe'
+          $stateRoot = Join-Path $env:LOCALAPPDATA 'AEVRIX\UserData'
+          $acceptance = Join-Path $stateRoot 'first-run-acceptance.json'
+          $presentation = Join-Path $stateRoot 'first-run-presentation.json'
+          Remove-Item -LiteralPath $acceptance,$presentation -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path -LiteralPath $desktop -PathType Leaf)) { throw 'Installed Desktop is missing.' }
+
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $desktop -PassThru
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
+            while (-not (Test-Path -LiteralPath $presentation -PathType Leaf) -and [DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
+            if (-not (Test-Path -LiteralPath $presentation -PathType Leaf)) { throw 'Terms presentation evidence was not persisted before decline.' }
+            $decline = Wait-UiElement -ProcessId $process.Id -AutomationId 'AevrixFirstRunDecline' -Name $null
+            $mainNavigation = Find-UiElement -ProcessId $process.Id -AutomationId $null -Name 'Navegação principal do AEVRIX'
+            if ($null -ne $mainNavigation) { throw 'Main product navigation was reachable before mandatory terms acceptance.' }
+            $invoke = [System.Windows.Automation.InvokePattern]$decline.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invoke.Invoke()
+            if (-not $process.WaitForExit(10000)) { throw 'Desktop did not exit after terms decline.' }
+            if (Test-Path -LiteralPath $acceptance -PathType Leaf) { throw 'Declining terms unexpectedly created acceptance state.' }
+          }
+          finally {
+            if ($null -ne $process) {
+              $process.Refresh()
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; $process.WaitForExit() }
+            }
+            if (Test-Path -LiteralPath $uninstall -PathType Leaf) {
+              $u = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
+              if ($u.ExitCode -ne 0) { throw "Uninstall after decline smoke failed: $($u.ExitCode)" }
+            }
+          }
+          "pre_acceptance_navigation_absent=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "decline_exited_without_acceptance=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host 'PASS: before acceptance, main navigation was absent; decline exited without creating acceptance.'
+
+      - name: Exercise exact installed accept persist relaunch and uninstall flow
+        id: accept
+        shell: pwsh
+        env:
+          INSTALLER_PATH: ${{ steps.installer.outputs.installer_path }}
+          PRODUCT_VERSION: ${{ steps.installer.outputs.product_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidenceDir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
+          New-Item -ItemType Directory -Force -Path $evidenceDir | Out-Null
+          $report = Join-Path $evidenceDir 'first-run-terms-evidence.json'
+          & ./apps/aevrix-windows/installer/test-first-run-terms.ps1 -Installer $env:INSTALLER_PATH -ProductVersion $env:PRODUCT_VERSION -CandidateSha $env:CANDIDATE_SHA -EvidencePath $report
+          if ($LASTEXITCODE -ne 0) { throw "Installed first-run terms AVA failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'First-run terms evidence report is missing.' }
+          $data = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ([int]$data.schemaVersion -ne 2 -or [string]$data.candidateSha -ne $env:CANDIDATE_SHA -or [string]$data.productVersion -ne $env:PRODUCT_VERSION) { throw 'First-run evidence identity mismatch.' }
+          foreach ($field in @('presentationObserved','initialAcceptDisabled','explicitConfirmationRequired','acceptancePersisted','commandCenterTransitionObserved','secondLaunchSkippedFirstRun','acceptanceSurvivedUninstall')) {
+            if ($data.$field -ne $true) { throw "First-run evidence requires $field=true" }
+          }
+          $hash = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  first-run-terms-evidence.json" | Set-Content -LiteralPath (Join-Path $evidenceDir 'first-run-terms-evidence.json.sha256') -Encoding utf8NoBOM
+          "evidence_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "PASS: exact installed first-run terms accept/relaunch/uninstall evidence SHA256=$hash"
+
+      - name: Build combined exact-candidate first-run AVA record
+        shell: pwsh
+        env:
+          INSTALLER_SHA256: ${{ steps.installer.outputs.installer_sha256 }}
+          PRODUCT_VERSION: ${{ steps.installer.outputs.product_version }}
+          ARTIFACT_ID: ${{ steps.installer.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.installer.outputs.artifact_digest }}
+          FIRST_RUN_EVIDENCE_SHA256: ${{ steps.accept.outputs.evidence_sha256 }}
+          PRE_ACCEPTANCE_NAVIGATION_ABSENT: ${{ steps.decline.outputs.pre_acceptance_navigation_absent }}
+          DECLINE_EXITED_WITHOUT_ACCEPTANCE: ${{ steps.decline.outputs.decline_exited_without_acceptance }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
+          $combined = Join-Path $dir 'first-run-ava-record.json'
+          [pscustomobject]@{
+            schemaVersion = 1
+            candidateSha = $env:CANDIDATE_SHA
+            installerRunId = [long]$env:INSTALLER_RUN_ID
+            installerArtifactId = [long]$env:ARTIFACT_ID
+            installerArtifactDigest = $env:ARTIFACT_DIGEST
+            productVersion = $env:PRODUCT_VERSION
+            installerSha256 = $env:INSTALLER_SHA256
+            firstRunEvidenceSha256 = $env:FIRST_RUN_EVIDENCE_SHA256
+            preAcceptanceNavigationAbsent = ($env:PRE_ACCEPTANCE_NAVIGATION_ABSENT -eq 'true')
+            declineExitedWithoutAcceptance = ($env:DECLINE_EXITED_WITHOUT_ACCEPTANCE -eq 'true')
+            acceptPersistRelaunchUninstall = $true
+            finalTermsGate = 'PASS'
+            generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $combined -Encoding utf8NoBOM
+          $hash = (Get-FileHash -LiteralPath $combined -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  first-run-ava-record.json" | Set-Content -LiteralPath (Join-Path $dir 'first-run-ava-record.json.sha256') -Encoding utf8NoBOM
+          Write-Host "PASS: combined first-run AVA record SHA256=$hash"
+          "COMBINED_EVIDENCE_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload exact-candidate first-run AVA evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aevrix-windows-first-run-terms-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/aevrix-first-run-ava
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Publish first-run AVA summary
+        shell: pwsh
+        run: |
+          @"
+          ## AEVRIX Windows first-run / terms AVA
+
+          - Exact candidate: ``$env:CANDIDATE_SHA``
+          - Source installer workflow run: **$env:INSTALLER_RUN_ID**
+          - Installer SHA-256: ``${{ steps.installer.outputs.installer_sha256 }}``
+          - Pre-acceptance main navigation absent: **PASS**
+          - Decline exits without acceptance: **PASS**
+          - Explicit confirmation required: **PASS**
+          - Acceptance persistence + relaunch: **PASS**
+          - Acceptance user data survives uninstall: **PASS**
+          - Combined evidence SHA-256: ``$env:COMBINED_EVIDENCE_SHA256``
+          - Terms/first-run AVA: **PASS**
+
+          This workflow validates only the mandatory installed first-run/terms gate. It does not imply full AEVRIX homologation.
+          "@ >> $env:GITHUB_STEP_SUMMARY
