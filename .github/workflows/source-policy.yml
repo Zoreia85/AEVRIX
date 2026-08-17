@@ -30,5 +30,8 @@ jobs:
           AEVRIX_POLICY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python3 tools/ci/ip_boundary_audit.py
 
+      - name: IP boundary unit tests
+        run: python3 -m unittest discover -s tools/ci/tests -p 'test_ip_boundary_audit.py' -v
+
       - name: Release evidence unit tests
         run: python3 -m unittest discover -s tools/release/tests -p 'test_*.py' -v
