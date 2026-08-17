@@ -27,6 +27,7 @@ $firstRunRoot = Join-Path $env:LOCALAPPDATA 'AEVRIX\UserData'
 $acceptancePath = Join-Path $firstRunRoot 'first-run-acceptance.json'
 $presentationPath = Join-Path $firstRunRoot 'first-run-presentation.json'
 $expectedRevision = 'preview-authorized-use-v1'
+$mainNavigationName = 'Navegação principal do AEVRIX'
 
 function Invoke-Setup {
     param(
@@ -109,6 +110,19 @@ function Wait-File {
     throw "Expected file was not created within ${TimeoutSeconds}s: $Path"
 }
 
+function Wait-ProcessExit {
+    param([Parameter(Mandatory)] [System.Diagnostics.Process]$Process, [int]$TimeoutSeconds = 10)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Process $($Process.Id) did not exit within ${TimeoutSeconds}s."
+}
+
 function Stop-TestProcess {
     param([System.Diagnostics.Process]$Process)
     if ($null -eq $Process) { return }
@@ -134,19 +148,50 @@ if (-not (Test-Path -LiteralPath $desktopPath -PathType Leaf)) {
     throw 'Installed Desktop executable is missing before first-run AVA.'
 }
 
-$firstProcess = $null
-$secondProcess = $null
+$declineProcess = $null
+$acceptProcess = $null
+$relaunchProcess = $null
+$preAcceptanceNavigationAbsent = $false
+$declineExitedWithoutAcceptance = $false
 $initialAcceptDisabled = $false
 $acceptanceTransitionObserved = $false
 $secondLaunchSkippedFirstRun = $false
 
 try {
+    Write-Host '[first-run] Prove Decline keeps every operational route blocked'
+    $declineProcess = Start-Process -FilePath $desktopPath -PassThru
+    Wait-File -Path $presentationPath
+    $null = Wait-UiElement -ProcessId $declineProcess.Id -AutomationId 'AevrixFirstRunDecline'
+
+    $unexpectedNavigation = Find-UiElement -ProcessId $declineProcess.Id -Name $mainNavigationName
+    if ($null -ne $unexpectedNavigation) {
+        throw 'Main operational navigation was exposed before first-run acceptance.'
+    }
+    $preAcceptanceNavigationAbsent = $true
+
+    $decline = Wait-UiElement -ProcessId $declineProcess.Id -AutomationId 'AevrixFirstRunDecline'
+    $declineInvoke = [System.Windows.Automation.InvokePattern]$decline.GetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern)
+    $declineInvoke.Invoke()
+    Wait-ProcessExit -Process $declineProcess
+    if (Test-Path -LiteralPath $acceptancePath) {
+        throw 'Declining first-run conditions created an acceptance record.'
+    }
+    $declineExitedWithoutAcceptance = $true
+
+    Remove-Item -LiteralPath $presentationPath -Force -ErrorAction SilentlyContinue
+
     Write-Host '[first-run] Launch installed Desktop with no acceptance state'
-    $firstProcess = Start-Process -FilePath $desktopPath -PassThru
+    $acceptProcess = Start-Process -FilePath $desktopPath -PassThru
     Wait-File -Path $presentationPath
 
-    $confirm = Wait-UiElement -ProcessId $firstProcess.Id -AutomationId 'AevrixFirstRunConfirm'
-    $accept = Wait-UiElement -ProcessId $firstProcess.Id -AutomationId 'AevrixFirstRunAccept'
+    $unexpectedNavigation = Find-UiElement -ProcessId $acceptProcess.Id -Name $mainNavigationName
+    if ($null -ne $unexpectedNavigation) {
+        throw 'Main operational navigation was exposed before explicit first-run acceptance.'
+    }
+
+    $confirm = Wait-UiElement -ProcessId $acceptProcess.Id -AutomationId 'AevrixFirstRunConfirm'
+    $accept = Wait-UiElement -ProcessId $acceptProcess.Id -AutomationId 'AevrixFirstRunAccept'
     $initialAcceptDisabled = -not $accept.Current.IsEnabled
     if (-not $initialAcceptDisabled) {
         throw 'First-run accept button was enabled before explicit confirmation.'
@@ -159,11 +204,11 @@ try {
         [System.Windows.Automation.TogglePattern]::Pattern)
     $toggle.Toggle()
 
-    $accept = Wait-UiElement -ProcessId $firstProcess.Id -AutomationId 'AevrixFirstRunAccept'
+    $accept = Wait-UiElement -ProcessId $acceptProcess.Id -AutomationId 'AevrixFirstRunAccept'
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
     while (-not $accept.Current.IsEnabled -and [DateTimeOffset]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 100
-        $accept = Wait-UiElement -ProcessId $firstProcess.Id -AutomationId 'AevrixFirstRunAccept' -TimeoutSeconds 2
+        $accept = Wait-UiElement -ProcessId $acceptProcess.Id -AutomationId 'AevrixFirstRunAccept' -TimeoutSeconds 2
     }
     if (-not $accept.Current.IsEnabled) {
         throw 'First-run accept button did not enable after explicit confirmation.'
@@ -179,23 +224,24 @@ try {
         throw 'Persisted first-run acceptance did not match the current schema/revision.'
     }
 
-    $null = Wait-UiElement -ProcessId $firstProcess.Id -Name 'Navegação principal do AEVRIX'
+    $null = Wait-UiElement -ProcessId $acceptProcess.Id -Name $mainNavigationName
     $acceptanceTransitionObserved = $true
-    Stop-TestProcess -Process $firstProcess
+    Stop-TestProcess -Process $acceptProcess
 
     Write-Host '[first-run] Relaunch installed Desktop with persisted acceptance'
-    $secondProcess = Start-Process -FilePath $desktopPath -PassThru
-    $null = Wait-UiElement -ProcessId $secondProcess.Id -Name 'Navegação principal do AEVRIX'
+    $relaunchProcess = Start-Process -FilePath $desktopPath -PassThru
+    $null = Wait-UiElement -ProcessId $relaunchProcess.Id -Name $mainNavigationName
     Start-Sleep -Milliseconds 500
-    $firstRunAgain = Find-UiElement -ProcessId $secondProcess.Id -AutomationId 'AevrixFirstRunAccept'
+    $firstRunAgain = Find-UiElement -ProcessId $relaunchProcess.Id -AutomationId 'AevrixFirstRunAccept'
     if ($null -ne $firstRunAgain) {
         throw 'First-run terms surface reappeared after current acceptance was persisted.'
     }
     $secondLaunchSkippedFirstRun = $true
 }
 finally {
-    Stop-TestProcess -Process $firstProcess
-    Stop-TestProcess -Process $secondProcess
+    Stop-TestProcess -Process $declineProcess
+    Stop-TestProcess -Process $acceptProcess
+    Stop-TestProcess -Process $relaunchProcess
 }
 
 $uninstallExit = Invoke-Setup -Path $uninstallPath
@@ -220,6 +266,8 @@ New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
     uninstallExitCode = $uninstallExit
     presentationObserved = $true
     presentedAtUtc = [string]$presentation.PresentedAtUtc
+    preAcceptanceNavigationAbsent = $preAcceptanceNavigationAbsent
+    declineExitedWithoutAcceptance = $declineExitedWithoutAcceptance
     initialAcceptDisabled = $initialAcceptDisabled
     explicitConfirmationRequired = $true
     acceptancePersisted = $true
@@ -229,4 +277,4 @@ New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
     acceptanceSurvivedUninstall = $true
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $EvidencePath -Encoding utf8NoBOM
 
-Write-Host "PASS: exact-candidate $CandidateSha installed first-run terms were presented, explicit confirmation was required, acceptance transitioned to Command Center, persisted across relaunch, and survived uninstall."
+Write-Host "PASS: exact-candidate $CandidateSha blocks operational navigation before acceptance, Decline exits without accepting, explicit acceptance transitions to Command Center, persists across relaunch, and survives uninstall."
