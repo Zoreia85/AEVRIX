@@ -70,6 +70,7 @@ public sealed class TrustedKnowledgeBlueprintPrivacyTests
         public Task<CandidateKnowledge?> LoadAsync(string knowledgeId, CancellationToken cancellationToken = default) =>
             Task.FromResult(string.Equals(knowledgeId, item.KnowledgeId, StringComparison.Ordinal) ? item : null);
         public Task StoreValidationAsync(KnowledgeValidationRecord validation, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task PromoteAsync(string knowledgeId, KnowledgeTrustState state, string validationRecordId, DateTimeOffset promotedAt, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ApplyValidationOutcomeAsync(string knowledgeId, KnowledgeTrustState state, string validationRecordId, DateTimeOffset decidedAt, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PromoteTrustedAsync(TrustedKnowledgeAdmissionAuthorization authorization, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }
