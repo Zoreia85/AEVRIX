@@ -57,6 +57,12 @@ jobs:
           }
           Write-Host "Exact candidate verified: $actual / $author"
 
+      - name: Initialize first-run AVA evidence directory
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
       - name: Download exact installer AVA artifact from triggering run
         id: installer
         shell: pwsh
@@ -106,76 +112,194 @@ jobs:
           "artifact_digest=$($artifact.digest)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Exact installer artifact acquired: run=$env:INSTALLER_RUN_ID artifact=$($artifact.id) digest=$($artifact.digest) installerSHA256=$installerHash"
 
-      - name: Prove decline blocks product entry without creating acceptance
+      - name: Diagnose and prove pre-acceptance decline gate
         id: decline
         shell: pwsh
         env:
           INSTALLER_PATH: ${{ steps.installer.outputs.installer_path }}
+          INSTALLER_SHA256: ${{ steps.installer.outputs.installer_sha256 }}
+          PRODUCT_VERSION: ${{ steps.installer.outputs.product_version }}
+          ARTIFACT_ID: ${{ steps.installer.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.installer.outputs.artifact_digest }}
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName UIAutomationClient
           Add-Type -AssemblyName UIAutomationTypes
 
-          function Find-UiElement {
+          function Find-UiElementSafe {
             param([int]$ProcessId, [string]$AutomationId, [string]$Name)
-            $conditions = @([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId))
-            if ($AutomationId) { $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId) }
-            if ($Name) { $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name) }
-            $condition = if ($conditions.Count -eq 1) { $conditions[0] } else { [System.Windows.Automation.AndCondition]::new([System.Windows.Automation.Condition[]]$conditions) }
-            [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
-          }
-          function Wait-UiElement {
-            param([int]$ProcessId, [string]$AutomationId, [string]$Name, [int]$Seconds = 20)
-            $deadline = [DateTimeOffset]::UtcNow.AddSeconds($Seconds)
-            while ([DateTimeOffset]::UtcNow -lt $deadline) {
-              $element = Find-UiElement -ProcessId $ProcessId -AutomationId $AutomationId -Name $Name
-              if ($null -ne $element) { return $element }
-              Start-Sleep -Milliseconds 200
+            try {
+              $conditions = @([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId))
+              if ($AutomationId) { $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId) }
+              if ($Name) { $conditions += [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name) }
+              $condition = if ($conditions.Count -eq 1) { $conditions[0] } else { [System.Windows.Automation.AndCondition]::new([System.Windows.Automation.Condition[]]$conditions) }
+              return [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
             }
-            throw "UI Automation element not found. AutomationId='$AutomationId' Name='$Name'."
+            catch {
+              return $null
+            }
           }
 
-          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList '/S' -Wait -PassThru
-          if ($install.ExitCode -ne 0) { throw "Exact installer failed before decline AVA: $($install.ExitCode)" }
+          $evidenceDir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
+          $diagnosticPath = Join-Path $evidenceDir 'pre-acceptance-diagnostic.json'
           $installDir = Join-Path $env:LOCALAPPDATA 'Programs\AEVRIX'
           $desktop = Join-Path $installDir 'AEVRIX.Desktop.exe'
           $uninstall = Join-Path $installDir 'uninstall.exe'
           $stateRoot = Join-Path $env:LOCALAPPDATA 'AEVRIX\UserData'
           $acceptance = Join-Path $stateRoot 'first-run-acceptance.json'
           $presentation = Join-Path $stateRoot 'first-run-presentation.json'
-          Remove-Item -LiteralPath $acceptance,$presentation -Force -ErrorAction SilentlyContinue
-          if (-not (Test-Path -LiteralPath $desktop -PathType Leaf)) { throw 'Installed Desktop is missing.' }
 
+          $status = 'FAIL'
+          $reason = 'Pre-acceptance probe did not complete.'
           $process = $null
+          $processId = $null
+          $processAliveAtObservation = $false
+          $declineVisible = $false
+          $mainNavigationVisible = $false
+          $presentationExists = $false
+          $acceptanceExists = $false
+          $preAcceptanceNavigationAbsent = $false
+          $declineExitedWithoutAcceptance = $false
+          $uninstallExitCode = $null
+
           try {
+            Remove-Item -LiteralPath $acceptance,$presentation -Force -ErrorAction SilentlyContinue
+            $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList '/S' -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "Exact installer failed before decline AVA: $($install.ExitCode)" }
+            if (-not (Test-Path -LiteralPath $desktop -PathType Leaf)) { throw 'Installed Desktop is missing.' }
+
             $process = Start-Process -FilePath $desktop -PassThru
+            $processId = $process.Id
+            $decline = $null
             $deadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
-            while (-not (Test-Path -LiteralPath $presentation -PathType Leaf) -and [DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
-            if (-not (Test-Path -LiteralPath $presentation -PathType Leaf)) { throw 'Terms presentation evidence was not persisted before decline.' }
-            $decline = Wait-UiElement -ProcessId $process.Id -AutomationId 'AevrixFirstRunDecline' -Name $null
-            $mainNavigation = Find-UiElement -ProcessId $process.Id -AutomationId $null -Name 'Navegação principal do AEVRIX'
-            if ($null -ne $mainNavigation) { throw 'Main product navigation was reachable before mandatory terms acceptance.' }
-            $invoke = [System.Windows.Automation.InvokePattern]$decline.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            $invoke.Invoke()
-            if (-not $process.WaitForExit(10000)) { throw 'Desktop did not exit after terms decline.' }
-            if (Test-Path -LiteralPath $acceptance -PathType Leaf) { throw 'Declining terms unexpectedly created acceptance state.' }
+            while ([DateTimeOffset]::UtcNow -lt $deadline) {
+              $process.Refresh()
+              if ($process.HasExited) { break }
+              $decline = Find-UiElementSafe -ProcessId $process.Id -AutomationId 'AevrixFirstRunDecline' -Name $null
+              $presentationExists = Test-Path -LiteralPath $presentation -PathType Leaf
+              if ($null -ne $decline -or $presentationExists) { break }
+              Start-Sleep -Milliseconds 200
+            }
+
+            $process.Refresh()
+            $processAliveAtObservation = -not $process.HasExited
+            $presentationExists = Test-Path -LiteralPath $presentation -PathType Leaf
+            $acceptanceExists = Test-Path -LiteralPath $acceptance -PathType Leaf
+            if ($processAliveAtObservation) {
+              $decline = Find-UiElementSafe -ProcessId $process.Id -AutomationId 'AevrixFirstRunDecline' -Name $null
+              $declineVisible = $null -ne $decline
+              $mainNavigation = Find-UiElementSafe -ProcessId $process.Id -AutomationId $null -Name 'Navegação principal do AEVRIX'
+              $mainNavigationVisible = $null -ne $mainNavigation
+            }
+
+            if ($mainNavigationVisible) {
+              $status = 'FAIL'
+              $reason = 'Main product navigation was reachable before mandatory terms acceptance.'
+            }
+            elseif (-not $processAliveAtObservation) {
+              $status = 'FAIL'
+              $reason = 'Desktop exited before the mandatory first-run surface could be proven.'
+            }
+            elseif ($declineVisible -and -not $presentationExists) {
+              $status = 'FAIL'
+              $reason = 'First-run UI was observable but presentation audit state was not persisted.'
+            }
+            elseif (-not $declineVisible -and $presentationExists) {
+              $status = 'INFRASTRUCTURE_INCONCLUSIVE'
+              $reason = 'Presentation audit state exists, but hosted-runner UI Automation could not observe the first-run controls.'
+            }
+            elseif (-not $declineVisible -and -not $presentationExists) {
+              $status = 'INFRASTRUCTURE_INCONCLUSIVE'
+              $reason = 'Desktop remained alive, but neither first-run UI Automation nor presentation audit state became observable in the hosted Windows session.'
+            }
+            else {
+              $preAcceptanceNavigationAbsent = $true
+              $invoke = [System.Windows.Automation.InvokePattern]$decline.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              $invoke.Invoke()
+              if (-not $process.WaitForExit(10000)) {
+                $status = 'FAIL'
+                $reason = 'Desktop did not exit after the user declined the mandatory terms.'
+              }
+              elseif (Test-Path -LiteralPath $acceptance -PathType Leaf) {
+                $status = 'FAIL'
+                $reason = 'Declining mandatory terms unexpectedly created acceptance state.'
+              }
+              else {
+                $status = 'PASS'
+                $reason = 'Main navigation was absent before acceptance and Decline exited without creating acceptance state.'
+                $declineExitedWithoutAcceptance = $true
+              }
+            }
+          }
+          catch {
+            $status = 'FAIL'
+            $reason = $_.Exception.Message
           }
           finally {
             if ($null -ne $process) {
-              $process.Refresh()
-              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; $process.WaitForExit() }
+              try {
+                $process.Refresh()
+                if (-not $process.HasExited) {
+                  Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                  $process.WaitForExit()
+                }
+              } catch { }
             }
             if (Test-Path -LiteralPath $uninstall -PathType Leaf) {
-              $u = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
-              if ($u.ExitCode -ne 0) { throw "Uninstall after decline smoke failed: $($u.ExitCode)" }
+              try {
+                $u = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
+                $uninstallExitCode = $u.ExitCode
+                if ($u.ExitCode -ne 0 -and $status -eq 'PASS') {
+                  $status = 'FAIL'
+                  $reason = "Uninstall after decline smoke failed with exit code $($u.ExitCode)."
+                }
+              }
+              catch {
+                if ($status -eq 'PASS') {
+                  $status = 'FAIL'
+                  $reason = "Uninstall after decline smoke failed: $($_.Exception.Message)"
+                }
+              }
             }
+
+            $presentationExists = Test-Path -LiteralPath $presentation -PathType Leaf
+            $acceptanceExists = Test-Path -LiteralPath $acceptance -PathType Leaf
+            [pscustomobject]@{
+              schemaVersion = 1
+              generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+              candidateSha = $env:CANDIDATE_SHA
+              installerRunId = [long]$env:INSTALLER_RUN_ID
+              installerArtifactId = [long]$env:ARTIFACT_ID
+              installerArtifactDigest = $env:ARTIFACT_DIGEST
+              installerSha256 = $env:INSTALLER_SHA256
+              productVersion = $env:PRODUCT_VERSION
+              runnerOs = $env:RUNNER_OS
+              processId = $processId
+              processAliveAtObservation = $processAliveAtObservation
+              declineVisible = $declineVisible
+              mainNavigationVisible = $mainNavigationVisible
+              presentationExists = $presentationExists
+              acceptanceExists = $acceptanceExists
+              preAcceptanceNavigationAbsent = $preAcceptanceNavigationAbsent
+              declineExitedWithoutAcceptance = $declineExitedWithoutAcceptance
+              uninstallExitCode = $uninstallExitCode
+              status = $status
+              reason = $reason
+            } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $diagnosticPath -Encoding utf8NoBOM
+            $diagnosticHash = (Get-FileHash -LiteralPath $diagnosticPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$diagnosticHash  pre-acceptance-diagnostic.json" | Set-Content -LiteralPath (Join-Path $evidenceDir 'pre-acceptance-diagnostic.json.sha256') -Encoding utf8NoBOM
+            "status=$status" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "pre_acceptance_navigation_absent=$($preAcceptanceNavigationAbsent.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "decline_exited_without_acceptance=$($declineExitedWithoutAcceptance.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "diagnostic_sha256=$diagnosticHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Pre-acceptance classification: $status — $reason"
+            Write-Host "Diagnostic SHA-256: $diagnosticHash"
           }
-          "pre_acceptance_navigation_absent=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "decline_exited_without_acceptance=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host 'PASS: before acceptance, main navigation was absent; decline exited without creating acceptance.'
 
       - name: Exercise exact installed accept persist relaunch and uninstall flow
+        if: ${{ steps.decline.outputs.status == 'PASS' }}
         id: accept
+        continue-on-error: true
         shell: pwsh
         env:
           INSTALLER_PATH: ${{ steps.installer.outputs.installer_path }}
@@ -183,14 +307,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $evidenceDir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
-          New-Item -ItemType Directory -Force -Path $evidenceDir | Out-Null
           $report = Join-Path $evidenceDir 'first-run-terms-evidence.json'
           & ./apps/aevrix-windows/installer/test-first-run-terms.ps1 -Installer $env:INSTALLER_PATH -ProductVersion $env:PRODUCT_VERSION -CandidateSha $env:CANDIDATE_SHA -EvidencePath $report
           if ($LASTEXITCODE -ne 0) { throw "Installed first-run terms AVA failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'First-run terms evidence report is missing.' }
           $data = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
           if ([int]$data.schemaVersion -ne 2 -or [string]$data.candidateSha -ne $env:CANDIDATE_SHA -or [string]$data.productVersion -ne $env:PRODUCT_VERSION) { throw 'First-run evidence identity mismatch.' }
-          foreach ($field in @('presentationObserved','initialAcceptDisabled','explicitConfirmationRequired','acceptancePersisted','commandCenterTransitionObserved','secondLaunchSkippedFirstRun','acceptanceSurvivedUninstall')) {
+          foreach ($field in @('presentationObserved','preAcceptanceNavigationAbsent','declineExitedWithoutAcceptance','initialAcceptDisabled','explicitConfirmationRequired','acceptancePersisted','commandCenterTransitionObserved','secondLaunchSkippedFirstRun','acceptanceSurvivedUninstall')) {
             if ($data.$field -ne $true) { throw "First-run evidence requires $field=true" }
           }
           $hash = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -199,6 +322,7 @@ jobs:
           Write-Host "PASS: exact installed first-run terms accept/relaunch/uninstall evidence SHA256=$hash"
 
       - name: Build combined exact-candidate first-run AVA record
+        if: ${{ steps.decline.outputs.status == 'PASS' && steps.accept.outcome == 'success' }}
         shell: pwsh
         env:
           INSTALLER_SHA256: ${{ steps.installer.outputs.installer_sha256 }}
@@ -208,18 +332,20 @@ jobs:
           FIRST_RUN_EVIDENCE_SHA256: ${{ steps.accept.outputs.evidence_sha256 }}
           PRE_ACCEPTANCE_NAVIGATION_ABSENT: ${{ steps.decline.outputs.pre_acceptance_navigation_absent }}
           DECLINE_EXITED_WITHOUT_ACCEPTANCE: ${{ steps.decline.outputs.decline_exited_without_acceptance }}
+          DECLINE_DIAGNOSTIC_SHA256: ${{ steps.decline.outputs.diagnostic_sha256 }}
         run: |
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
           $combined = Join-Path $dir 'first-run-ava-record.json'
           [pscustomobject]@{
-            schemaVersion = 1
+            schemaVersion = 2
             candidateSha = $env:CANDIDATE_SHA
             installerRunId = [long]$env:INSTALLER_RUN_ID
             installerArtifactId = [long]$env:ARTIFACT_ID
             installerArtifactDigest = $env:ARTIFACT_DIGEST
             productVersion = $env:PRODUCT_VERSION
             installerSha256 = $env:INSTALLER_SHA256
+            preAcceptanceDiagnosticSha256 = $env:DECLINE_DIAGNOSTIC_SHA256
             firstRunEvidenceSha256 = $env:FIRST_RUN_EVIDENCE_SHA256
             preAcceptanceNavigationAbsent = ($env:PRE_ACCEPTANCE_NAVIGATION_ABSENT -eq 'true')
             declineExitedWithoutAcceptance = ($env:DECLINE_EXITED_WITHOUT_ACCEPTANCE -eq 'true')
@@ -233,6 +359,7 @@ jobs:
           "COMBINED_EVIDENCE_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload exact-candidate first-run AVA evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aevrix-windows-first-run-terms-${{ env.CANDIDATE_SHA }}
@@ -242,21 +369,38 @@ jobs:
           compression-level: 9
 
       - name: Publish first-run AVA summary
+        if: ${{ always() }}
         shell: pwsh
         run: |
+          $declineStatus = '${{ steps.decline.outputs.status }}'
+          $acceptOutcome = '${{ steps.accept.outcome }}'
           @"
           ## AEVRIX Windows first-run / terms AVA
 
           - Exact candidate: ``$env:CANDIDATE_SHA``
           - Source installer workflow run: **$env:INSTALLER_RUN_ID**
           - Installer SHA-256: ``${{ steps.installer.outputs.installer_sha256 }}``
-          - Pre-acceptance main navigation absent: **PASS**
-          - Decline exits without acceptance: **PASS**
-          - Explicit confirmation required: **PASS**
-          - Acceptance persistence + relaunch: **PASS**
-          - Acceptance user data survives uninstall: **PASS**
+          - Pre-acceptance classification: **$declineStatus**
+          - Pre-acceptance diagnostic SHA-256: ``${{ steps.decline.outputs.diagnostic_sha256 }}``
+          - Accept/persist/relaunch outcome: **$acceptOutcome**
           - Combined evidence SHA-256: ``$env:COMBINED_EVIDENCE_SHA256``
-          - Terms/first-run AVA: **PASS**
 
-          This workflow validates only the mandatory installed first-run/terms gate. It does not imply full AEVRIX homologation.
+          `PASS` is granted only when pre-acceptance/decline and accept/persist/relaunch both pass on the same exact installed bits. `INFRASTRUCTURE_INCONCLUSIVE` never counts as PASS.
           "@ >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Enforce mandatory first-run terms gate
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $declineStatus = '${{ steps.decline.outputs.status }}'
+          $acceptOutcome = '${{ steps.accept.outcome }}'
+          if ($declineStatus -ne 'PASS') {
+            throw "Mandatory first-run pre-acceptance/decline gate is $declineStatus. See uploaded diagnostic evidence."
+          }
+          if ($acceptOutcome -ne 'success') {
+            throw "Mandatory first-run accept/persist/relaunch flow did not pass; outcome=$acceptOutcome."
+          }
+          if (-not $env:COMBINED_EVIDENCE_SHA256) {
+            throw 'Combined exact-candidate first-run AVA record was not produced.'
+          }
+          Write-Host "PASS: mandatory exact installed first-run terms gate. Combined evidence SHA-256=$env:COMBINED_EVIDENCE_SHA256"
