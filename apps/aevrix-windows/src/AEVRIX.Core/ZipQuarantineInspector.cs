@@ -46,8 +46,8 @@ public static class ZipQuarantineInspector
         foreach (var entry in archive.Entries)
         {
             var safePath = NormalizeAndValidateRelativePath(entry.FullName);
-            var isDirectory = entry.FullName.EndsWith('/', StringComparison.Ordinal) ||
-                              entry.FullName.EndsWith('\\', StringComparison.Ordinal);
+            var isDirectory = entry.FullName.EndsWith("/", StringComparison.Ordinal) ||
+                              entry.FullName.EndsWith("\\", StringComparison.Ordinal);
 
             totalCompressed = CheckedAdd(totalCompressed, entry.CompressedLength);
             totalExpanded = CheckedAdd(totalExpanded, entry.Length);
@@ -71,8 +71,7 @@ public static class ZipQuarantineInspector
             throw new InvalidDataException("ZIP entry path is empty.");
 
         var normalized = path.Replace('\\', '/');
-        if (normalized.StartsWith('/', StringComparison.Ordinal) ||
-            normalized.Contains(':', StringComparison.Ordinal))
+        if (normalized.StartsWith("/", StringComparison.Ordinal) || normalized.Contains(':'))
             throw new InvalidDataException("ZIP entry path is absolute or drive-qualified.");
 
         var depth = 0;
