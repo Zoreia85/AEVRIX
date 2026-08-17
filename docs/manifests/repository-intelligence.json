@@ -8,6 +8,8 @@
     "requireArtifactSha256ForConsumption": true,
     "requireProvenanceForConsumption": true,
     "requireLicenseVerificationForVendoring": true,
+    "requireRevisionBoundLicenseEvidenceForConsumption": true,
+    "requireStructuredLicenseScopeExceptions": true,
     "requireIndependentSecurityReviewForExecution": true,
     "discoveryNeverImpliesExecutionApproval": true
   },
@@ -56,7 +58,13 @@
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "MIT",
-      "licenseScopeNote": "MIT applies outside enterprise/; enterprise/ is governed by PolyForm Free Trial 1.0.0 and must remain excluded from any AEVRIX adapter/runtime ingestion unless separately approved.",
+      "licenseEvidence": {
+        "revision": "6670b4726a81fc73e797a193dae86264857a663d",
+        "primaryPath": "LICENSE",
+        "primaryBlobSha": "f6f60f52368bcc96f82fbe59ec65049c2c3af9db",
+        "primarySpdx": "MIT",
+        "scopeExceptions": []
+      },
       "integrationModes": [
         "Reference",
         "OptionalTool"
@@ -135,7 +143,21 @@
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "Apache-2.0",
-      "licenseScopeNote": "Repository is Apache-2.0, with bundled skill subtrees retaining upstream MIT licenses and attribution; preserve per-component provenance.",
+      "licenseEvidence": {
+        "revision": "0cc1b9123adcf3951e438085fcb9dfb71b19703d",
+        "primaryPath": "LICENSE",
+        "primaryBlobSha": "eb79c35bd865477e525b18e56f35d56fbe0f7110",
+        "primarySpdx": "Apache-2.0",
+        "scopeExceptions": [
+          {
+            "pathPrefix": "skills/brandkit/",
+            "spdx": "MIT",
+            "licensePath": "skills/brandkit/LICENSE",
+            "licenseBlobSha": "48a2f6640b81ff8eca9ce7f6a96337692713ef5b",
+            "disposition": "PreserveAttribution"
+          }
+        ]
+      },
       "integrationModes": [
         "Reference",
         "Adapter"
