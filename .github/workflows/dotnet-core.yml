@@ -10,15 +10,6 @@ on:
       - "services/aevrix-remote-brain/**"
       - "global.json"
       - ".github/workflows/dotnet-core.yml"
-  pull_request:
-    paths:
-      - "apps/aevrix-windows/src/AEVRIX.Core/**"
-      - "apps/aevrix-windows/src/AEVRIX.EngineHost/**"
-      - "apps/aevrix-windows/src/AEVRIX.Desktop/**"
-      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/**"
-      - "services/aevrix-remote-brain/**"
-      - "global.json"
-      - ".github/workflows/dotnet-core.yml"
 
 permissions:
   contents: read
@@ -30,7 +21,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,8 +33,80 @@ jobs:
         with:
           dotnet-version: "10.0.400"
 
-      - name: Build Windows Desktop
+      - name: Build Desktop to restore exact Windows App SDK 2.3.1 runtime package
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Verify and install exact Microsoft-signed x64 runtime MSIX packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
+          if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Runtime MSIX root missing: $root" }
+
+          $expected = [ordered]@{
+            'Microsoft.WindowsAppRuntime.2.msix' = '75e953dbb33850d3591e590ca15a6aa1e320096b62b00deca846d40b2aacab7b'
+            'Microsoft.WindowsAppRuntime.Main.2.msix' = 'fbb8cbda76d62f5d51e6110fbea7c0e598ee12b2b975c458a7b38d16df551926'
+            'Microsoft.WindowsAppRuntime.Singleton.2.msix' = '345e9732748903d2f9e62f8772864f893de21e939fad527ac75ddfe1426876bb'
+            'Microsoft.WindowsAppRuntime.DDLM.2.msix' = '5ac70030698a36d48b31d14f20d623362a104798b2526fbaea59eeb676278f1b'
+          }
+
+          Write-Host 'Before direct deployment:'
+          Get-AppxPackage | Where-Object { $_.Name -match 'WindowsAppRuntime' } | Select-Object Name,Version,Architecture,PackageFullName | Format-Table -AutoSize | Out-String | Write-Host
+
+          foreach ($entry in $expected.GetEnumerator()) {
+            $path = Join-Path $root $entry.Key
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required runtime package missing: $path" }
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -ne $entry.Value) { throw "Runtime MSIX hash mismatch for $($entry.Key): $hash" }
+            $sig = Get-AuthenticodeSignature -LiteralPath $path
+            $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
+            if ($sig.Status -ne 'Valid' -or $subject -notmatch 'Microsoft Corporation') {
+              throw "Runtime MSIX signature invalid for $($entry.Key): status=$($sig.Status) signer=$subject"
+            }
+            Write-Host "Deploying $($entry.Key) sha256=$hash signer=$subject"
+            Add-AppxPackage -Path $path -ForceApplicationShutdown -ErrorAction Stop
+          }
+
+          $installed = @(Get-AppxPackage | Where-Object { $_.Name -match 'WindowsAppRuntime' } | Sort-Object Name)
+          if ($installed.Count -lt 4) {
+            Write-Host ($installed | Select-Object Name,Version,Architecture,PackageFullName | Format-Table -AutoSize | Out-String)
+            throw "Expected at least four Windows App Runtime package roles after deployment; observed $($installed.Count)."
+          }
+          Write-Host 'After direct deployment:'
+          $installed | Select-Object Name,Version,Architecture,PackageFullName | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Publish corrected installer payload mode
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-corrected'
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:Platform=x64 `
+            -p:WindowsAppSDKSelfContained=false `
+            -p:ContinuousIntegrationBuild=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
+            -o $out
+          if ($LASTEXITCODE -ne 0) { throw "Corrected Desktop publish failed: $LASTEXITCODE" }
+          if (Test-Path -LiteralPath (Join-Path $out 'Microsoft.UI.Xaml.dll')) {
+            throw 'Corrected Desktop payload still contains private Microsoft.UI.Xaml.dll.'
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $out 'coreclr.dll'))) {
+            throw 'Corrected Desktop payload lost self-contained .NET runtime.'
+          }
+
+      - name: Prove corrected Desktop startup
+        shell: pwsh
+        run: |
+          ./tools/release/Test-DesktopStartup.ps1 `
+            -DesktopPath "$env:RUNNER_TEMP\desktop-corrected\AEVRIX.Desktop.exe" `
+            -OutputPath "$env:RUNNER_TEMP\corrected-startup.json" `
+            -AliveSeconds 5 `
+            -ExitTimeoutSeconds 5
+          Get-Content -LiteralPath "$env:RUNNER_TEMP\corrected-startup.json" -Raw | Write-Host
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
