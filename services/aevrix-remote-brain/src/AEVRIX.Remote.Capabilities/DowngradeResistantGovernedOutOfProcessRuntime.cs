@@ -57,12 +57,6 @@ public sealed class DowngradeResistantGovernedOutOfProcessRuntime
         _inner = new GovernedOutOfProcessRuntime(guarded, authority);
     }
 
-    /// <summary>
-    /// Reports only policy/backend compatibility. It deliberately does not consult the external
-    /// monotonic floor and therefore must never be used as launch authorization.
-    /// </summary>
-    public OutOfProcessAuthorityDecision EvaluatePolicyEligibility() => _inner.EvaluateAuthority();
-
     public Task<OutOfProcessExecutionResult> ExecuteAsync(
         OutOfProcessExecutionRequest request,
         CancellationToken cancellationToken = default) =>
