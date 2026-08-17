@@ -20,6 +20,8 @@ public sealed class RepositoryVerificationTests
         var report = RepositoryProvenanceVerifier.Verify(expected, observed, Now);
 
         Assert.IsTrue(report.HasBlockers);
+        Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.authority.required"));
+        Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.manifest-runtime-approval.required"));
         CollectionAssert.IsSubsetOf(
             new[]
             {
@@ -98,6 +100,59 @@ public sealed class RepositoryVerificationTests
         Assert.IsTrue(report.HasBlockers);
         Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.archived"));
         Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.non-executable-by-design"));
+    }
+
+    [TestMethod]
+    public void ReferenceOnlyHealthyRepositoryCannotBecomeRuntimeEligible()
+    {
+        var expected = RepositoryIntelligenceCatalog.Find("microsoft/mxc");
+        var observed = Observation(
+            expected.FullName,
+            expected.CanonicalUrl,
+            "692275b84eaa3f83cd8582dc774bc5f354f46ccf",
+            "MIT");
+
+        var report = RepositoryProvenanceVerifier.Verify(expected, observed, Now);
+
+        Assert.IsFalse(report.HasBlockers);
+        Assert.IsFalse(report.CanRemainRuntimeEligible);
+        Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.non-executable-by-design"));
+    }
+
+    [TestMethod]
+    public void DiscoveryModeCannotBeCollapsedIntoAuditedExecutablePermission()
+    {
+        var expected = new RepositoryIntelligenceRecord(
+            Owner: "example",
+            Name: "mixed",
+            CanonicalUrl: new Uri("https://github.com/example/mixed", UriKind.Absolute),
+            Purpose: "Mixed mode fixture",
+            IntegrationMode: RepositoryIntegrationMode.Adapter,
+            SpdxLicense: "MIT",
+            PinnedRevision: "0123456789abcdef0123456789abcdef01234567",
+            ContentSha256: new string('e', 64),
+            SecurityReview: RepositorySecurityReviewState.Approved,
+            RuntimeAllowlisted: false,
+            LastVerifiedAt: Now,
+            AllowedCapabilities: new[] { "analysis" },
+            DeniedCapabilities: Array.Empty<string>())
+        {
+            GovernanceAuthority = RepositoryGovernanceAuthority.AuditedManifest,
+            ManifestRuntimeApproval = "Approved",
+            IntegrationModes = [RepositoryIntegrationMode.Adapter, RepositoryIntegrationMode.DiscoverySeed]
+        };
+        var observed = Observation(
+            expected.FullName,
+            expected.CanonicalUrl,
+            expected.PinnedRevision!,
+            "MIT",
+            expected.ContentSha256);
+
+        var report = RepositoryProvenanceVerifier.Verify(expected, observed, Now);
+
+        Assert.IsTrue(report.HasBlockers);
+        Assert.IsFalse(report.CanRemainRuntimeEligible);
+        Assert.IsTrue(report.Findings.Any(finding => finding.Code == "repository.integration-mode.denied"));
     }
 
     [TestMethod]

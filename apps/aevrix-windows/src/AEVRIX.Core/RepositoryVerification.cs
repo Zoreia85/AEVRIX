@@ -68,7 +68,8 @@ public sealed record RepositoryVerificationReport(
     IReadOnlyList<RepositoryVerificationFinding> Findings)
 {
     public bool HasBlockers => Findings.Any(finding => finding.Severity == RepositoryVerificationSeverity.Blocker);
-    public bool CanRemainRuntimeEligible => !HasBlockers;
+    public bool CanRemainRuntimeEligible => !HasBlockers
+        && Findings.All(finding => finding.Code != "repository.non-executable-by-design");
 }
 
 public static class RepositoryProvenanceVerifier
@@ -136,8 +137,28 @@ public static class RepositoryProvenanceVerifier
             }
         }
 
-        if (IsExecutableMode(expected.IntegrationMode))
+        var integrationModes = expected.EffectiveIntegrationModes;
+        var hasExecutableMode = integrationModes.Any(IsExecutableMode);
+        var hasDenyingMode = integrationModes.Contains(RepositoryIntegrationMode.DiscoverySeed)
+            || integrationModes.Contains(RepositoryIntegrationMode.Blocked);
+
+        if (hasExecutableMode)
         {
+            if (expected.GovernanceAuthority != RepositoryGovernanceAuthority.AuditedManifest)
+            {
+                findings.Add(Blocker("repository.authority.required", "Executable integration requires the audited canonical manifest as its governance authority."));
+            }
+
+            if (!string.Equals(expected.ManifestRuntimeApproval, "Approved", StringComparison.Ordinal))
+            {
+                findings.Add(Blocker("repository.manifest-runtime-approval.required", "Executable integration requires an explicit Approved runtime decision from the audited manifest."));
+            }
+
+            if (hasDenyingMode)
+            {
+                findings.Add(Blocker("repository.integration-mode.denied", "Discovery or blocked integration modes cannot be collapsed into executable permission."));
+            }
+
             if (expected.SecurityReview != RepositorySecurityReviewState.Approved)
             {
                 findings.Add(Blocker("repository.security-review.required", "Executable integration requires an approved security review."));
@@ -159,12 +180,12 @@ public static class RepositoryProvenanceVerifier
             }
         }
 
-        if (expected.IntegrationMode is RepositoryIntegrationMode.Reference or RepositoryIntegrationMode.DiscoverySeed)
+        if (!hasExecutableMode)
         {
             findings.Add(new RepositoryVerificationFinding(
                 "repository.non-executable-by-design",
                 RepositoryVerificationSeverity.Info,
-                "Reference and discovery records remain non-executable regardless of upstream health."));
+                "Reference, discovery and blocked records remain non-executable regardless of upstream health."));
         }
 
         if (findings.Count == 0)
