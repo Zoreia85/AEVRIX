@@ -35,6 +35,9 @@ public static class ZipQuarantineInspector
         if (!effectivePolicy.ReadOnly || effectivePolicy.NetworkAllowed || effectivePolicy.ExecutionAllowed)
             throw new ArgumentException("ZIP quarantine requires a read-only, offline, non-executing policy.", nameof(policy));
 
+        if (input.CanSeek && input.Length > effectivePolicy.MaxInputBytes)
+            throw new InvalidDataException("ZIP input size exceeds the quarantine input limit.");
+
         using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
         if (archive.Entries.Count > effectivePolicy.MaxExtractedFiles)
             throw new InvalidDataException("ZIP entry count exceeds the quarantine file limit.");
@@ -45,7 +48,7 @@ public static class ZipQuarantineInspector
 
         foreach (var entry in archive.Entries)
         {
-            var safePath = NormalizeAndValidateRelativePath(entry.FullName);
+            var safePath = NormalizeAndValidateRelativePath(entry.FullName, effectivePolicy.MaxNestingDepth);
             var isDirectory = entry.FullName.EndsWith("/", StringComparison.Ordinal) ||
                               entry.FullName.EndsWith("\\", StringComparison.Ordinal);
 
@@ -65,7 +68,7 @@ public static class ZipQuarantineInspector
         return new ZipContainerInspection(entries, totalCompressed, totalExpanded);
     }
 
-    private static string NormalizeAndValidateRelativePath(string path)
+    private static string NormalizeAndValidateRelativePath(string path, int maxNestingDepth)
     {
         if (string.IsNullOrWhiteSpace(path))
             throw new InvalidDataException("ZIP entry path is empty.");
@@ -74,23 +77,29 @@ public static class ZipQuarantineInspector
         if (normalized.StartsWith("/", StringComparison.Ordinal) || normalized.Contains(':'))
             throw new InvalidDataException("ZIP entry path is absolute or drive-qualified.");
 
-        var depth = 0;
+        var segments = new List<string>();
         foreach (var segment in normalized.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
             if (segment == ".")
                 continue;
+
             if (segment == "..")
             {
-                depth--;
-                if (depth < 0)
+                if (segments.Count == 0)
                     throw new InvalidDataException("ZIP entry path escapes the quarantine root.");
+                segments.RemoveAt(segments.Count - 1);
                 continue;
             }
 
-            depth++;
+            segments.Add(segment);
+            if (segments.Count > maxNestingDepth)
+                throw new InvalidDataException("ZIP entry path exceeds the quarantine nesting-depth limit.");
         }
 
-        return normalized;
+        if (segments.Count == 0)
+            throw new InvalidDataException("ZIP entry path resolves to the quarantine root.");
+
+        return string.Join('/', segments);
     }
 
     private static long CheckedAdd(long current, long value)
