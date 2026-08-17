@@ -24,5 +24,8 @@ jobs:
       - name: Public source audit
         run: python3 tools/ci/public_repo_audit.py
 
+      - name: Public/private IP boundary audit
+        run: python3 tools/ci/ip_boundary_audit.py
+
       - name: Release evidence unit tests
         run: python3 -m unittest discover -s tools/release/tests -p 'test_*.py' -v
