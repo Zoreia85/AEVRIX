@@ -67,6 +67,61 @@ public sealed class OllamaLegacyTrustBoundaryTests
             assumption.Contains("cannot self-promote", StringComparison.OrdinalIgnoreCase)));
     }
 
+    [TestMethod]
+    public void NonAllowlistedModelIsRejectedBeforeTransport()
+    {
+        var handler = new StaticHandler(JsonResponse("{}"));
+        using HttpClient client = new(handler);
+
+        try
+        {
+            _ = new OllamaModelProvider(
+                client,
+                new OllamaRuntimeOptions(
+                    new Uri("http://127.0.0.1:11434", UriKind.Absolute),
+                    "llama3.2:3b",
+                    TimeSpan.FromSeconds(30))
+                {
+                    AllowedModels = Allowlist()
+                });
+            Assert.Fail("Expected legacy Ollama allowlist rejection.");
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        Assert.AreEqual(0, handler.Calls);
+    }
+
+    [TestMethod]
+    public async Task ModelDiscoveryFiltersEntriesOutsideAllowlist()
+    {
+        var handler = new StaticHandler(JsonResponse("""
+            {
+              "models": [
+                { "name": "qwen3:8b", "size": 100, "digest": "sha256:allowed" },
+                { "name": "llama3.2:3b", "size": 200, "digest": "sha256:blocked" }
+              ]
+            }
+            """));
+        using HttpClient client = new(handler);
+        var provider = new OllamaModelProvider(
+            client,
+            new OllamaRuntimeOptions(
+                new Uri("http://127.0.0.1:11434", UriKind.Absolute),
+                "qwen3:8b",
+                TimeSpan.FromSeconds(30))
+            {
+                AllowedModels = Allowlist()
+            });
+
+        var models = await provider.ListModelsAsync();
+
+        Assert.AreEqual(1, models.Count);
+        Assert.AreEqual("qwen3:8b", models[0].Name);
+        Assert.AreEqual(1, handler.Calls);
+    }
+
     private static IReadOnlySet<string> Allowlist() =>
         new HashSet<string>(StringComparer.Ordinal) { "qwen3:8b" };
 
@@ -81,11 +136,14 @@ public sealed class OllamaLegacyTrustBoundaryTests
 
         public StaticHandler(HttpResponseMessage response) => _response = response;
 
+        public int Calls { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
             return Task.FromResult(_response);
         }
     }
