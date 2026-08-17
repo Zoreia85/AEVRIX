@@ -131,7 +131,10 @@ public sealed partial class ResearchBrowserView : UserControl
 
             var profilePath = _paths.ProjectBrowserProfile(project.Id, project.TargetId);
             Directory.CreateDirectory(profilePath);
-            var environment = await CoreWebView2Environment.CreateAsync(null, profilePath);
+            var environment = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
+                null,
+                profilePath,
+                null);
             if (generation != _loadGeneration)
             {
                 return;
@@ -174,7 +177,7 @@ public sealed partial class ResearchBrowserView : UserControl
         }
     }
 
-    private void ConfigureCore(CoreWebView2 core)
+    private static void ConfigureCore(CoreWebView2 core)
     {
         core.Settings.AreDevToolsEnabled = false;
         core.Settings.AreDefaultContextMenusEnabled = false;
@@ -190,6 +193,8 @@ public sealed partial class ResearchBrowserView : UserControl
         core.NavigationCompleted += Core_NavigationCompleted;
         core.NewWindowRequested += Core_NewWindowRequested;
         core.DownloadStarting += Core_DownloadStarting;
+        core.PermissionRequested += Core_PermissionRequested;
+        core.ServerCertificateErrorDetected += Core_ServerCertificateErrorDetected;
         core.ProcessFailed += Core_ProcessFailed;
     }
 
@@ -199,6 +204,8 @@ public sealed partial class ResearchBrowserView : UserControl
         core.NavigationCompleted -= Core_NavigationCompleted;
         core.NewWindowRequested -= Core_NewWindowRequested;
         core.DownloadStarting -= Core_DownloadStarting;
+        core.PermissionRequested -= Core_PermissionRequested;
+        core.ServerCertificateErrorDetected -= Core_ServerCertificateErrorDetected;
         core.ProcessFailed -= Core_ProcessFailed;
     }
 
@@ -276,6 +283,24 @@ public sealed partial class ResearchBrowserView : UserControl
             InfoBarSeverity.Warning,
             "Download bloqueado",
             "Downloads ainda não possuem pipeline de evidência/quarentena homologado no Research Browser e são cancelados por padrão.");
+    }
+
+    private void Core_PermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
+    {
+        e.State = CoreWebView2PermissionState.Deny;
+        SetNotice(
+            InfoBarSeverity.Warning,
+            "Permissão do site negada",
+            "O Research Browser não concede câmera, microfone, geolocalização, notificações ou outros recursos privilegiados sem política específica.");
+    }
+
+    private void Core_ServerCertificateErrorDetected(object? sender, CoreWebView2ServerCertificateErrorDetectedEventArgs e)
+    {
+        e.Action = CoreWebView2ServerCertificateErrorAction.Cancel;
+        SetNotice(
+            InfoBarSeverity.Error,
+            "TLS inválido bloqueado",
+            "O certificado apresentado pelo destino não pôde ser validado. O Research Browser cancelou a solicitação e não oferece bypass interativo.");
     }
 
     private void Core_ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
