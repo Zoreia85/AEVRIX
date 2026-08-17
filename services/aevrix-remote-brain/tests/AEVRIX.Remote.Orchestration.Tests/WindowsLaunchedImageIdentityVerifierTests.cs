@@ -55,4 +55,14 @@ public sealed class WindowsLaunchedImageIdentityVerifierTests
         Assert.Throws<ArgumentException>(() =>
             WindowsLaunchedImageIdentityVerifier.GetLaunchedImageIdentity(IntPtr.Zero));
     }
+
+    [TestMethod]
+    public void MissingAuthenticatedIdentity_IsRejected()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var process = Process.GetCurrentProcess();
+        Assert.Throws<InvalidOperationException>(() =>
+            WindowsLaunchedImageIdentityVerifier.VerifyMatches(process.Handle, null));
+    }
 }
