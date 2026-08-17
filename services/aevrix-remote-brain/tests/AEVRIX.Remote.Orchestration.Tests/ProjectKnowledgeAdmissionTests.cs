@@ -85,7 +85,7 @@ public sealed class ProjectKnowledgeAdmissionTests
         var candidate = await judge.AnalyzeToCandidateAsync(TaskFixture());
         var forgedHead = ledger.Head with { HeadHashSha256 = new string('0', 64) };
 
-        await Assert.ThrowsExactlyAsync<CryptographicException>(async () => await judge.ValidateAndPromoteAsync(
+        await Assert.ThrowsExactlyAsync<System.Security.Cryptography.CryptographicException>(async () => await judge.ValidateAndPromoteAsync(
             candidate.KnowledgeId,
             new MemoryAdmissionContext(MissionId, observations, ledger.Snapshot(), forgedHead)));
     }
