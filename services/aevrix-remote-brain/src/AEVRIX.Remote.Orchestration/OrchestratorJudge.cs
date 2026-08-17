@@ -154,7 +154,7 @@ public sealed class OrchestratorJudge
     private readonly IEvidenceValidationService _validator;
     private readonly JudgePolicy _policy;
     private readonly TimeProvider _time;
-    private readonly IMemoryAdmissionGate? _memoryAdmissionGate;
+    private readonly IMemoryAdmissionGate _memoryAdmissionGate;
 
     public OrchestratorJudge(
         IAevrixModelProvider primary,
@@ -162,8 +162,7 @@ public sealed class OrchestratorJudge
         IEvidenceValidationService validator,
         IAevrixModelProvider? secondary = null,
         JudgePolicy? policy = null,
-        TimeProvider? timeProvider = null,
-        IMemoryAdmissionGate? memoryAdmissionGate = null)
+        TimeProvider? timeProvider = null)
     {
         _primary = primary ?? throw new ArgumentNullException(nameof(primary));
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -171,7 +170,7 @@ public sealed class OrchestratorJudge
         _secondary = secondary;
         _policy = (policy ?? new JudgePolicy()).Validate();
         _time = timeProvider ?? TimeProvider.System;
-        _memoryAdmissionGate = memoryAdmissionGate;
+        _memoryAdmissionGate = new ProjectKnowledgeAdmissionGate(repository);
     }
 
     public async Task<CandidateKnowledge> AnalyzeToCandidateAsync(AnalysisTask task, CancellationToken cancellationToken = default)
@@ -234,9 +233,8 @@ public sealed class OrchestratorJudge
 
         if (validation.EligibleForTrustedPromotion)
         {
-            if (admissionContext is null || _memoryAdmissionGate is null)
-                throw new InvalidOperationException("Trusted knowledge requires the Judge-bound execution-proof memory admission gate.");
-
+            if (admissionContext is null)
+                throw new InvalidOperationException("Trusted knowledge requires Judge-bound execution-proof memory admission context.");
             await _memoryAdmissionGate.AdmitTrustedAsync(
                 candidate, validation, admissionContext, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
             var trusted = await _repository.LoadAsync(candidate.KnowledgeId, cancellationToken).ConfigureAwait(false)
