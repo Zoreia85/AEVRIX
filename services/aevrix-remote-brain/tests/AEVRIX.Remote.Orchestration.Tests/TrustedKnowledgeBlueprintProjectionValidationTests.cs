@@ -58,11 +58,15 @@ public sealed class TrustedKnowledgeBlueprintProjectionValidationTests
 
         public Task StoreValidationAsync(KnowledgeValidationRecord validation, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task PromoteAsync(
+        public Task ApplyValidationOutcomeAsync(
             string knowledgeId,
             KnowledgeTrustState state,
             string validationRecordId,
-            DateTimeOffset promotedAt,
+            DateTimeOffset decidedAt,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task PromoteTrustedAsync(
+            TrustedKnowledgeAdmissionAuthorization authorization,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }
