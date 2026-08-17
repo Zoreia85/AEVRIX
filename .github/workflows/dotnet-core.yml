@@ -30,7 +30,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,10 +45,10 @@ jobs:
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
 
-      - name: Publish installer-equivalent Desktop baseline
+      - name: Publish installer-equivalent self-contained Desktop
         shell: pwsh
         run: |
-          $out = Join-Path $env:RUNNER_TEMP 'desktop-self-contained-baseline'
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-self-contained'
           dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
             -c Release `
             -r win-x64 `
@@ -58,55 +58,83 @@ jobs:
             -p:DebugType=none `
             -p:DebugSymbols=false `
             -o $out
-          if ($LASTEXITCODE -ne 0) { throw "Baseline self-contained publish failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Self-contained publish failed: $LASTEXITCODE" }
 
-      - name: Smoke installer-equivalent Desktop baseline
-        id: baseline_smoke
+      - name: Smoke self-contained Desktop
+        id: self_contained_smoke
         continue-on-error: true
         shell: pwsh
         run: |
           ./tools/release/Test-DesktopStartup.ps1 `
-            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-self-contained-baseline\AEVRIX.Desktop.exe') `
-            -OutputPath (Join-Path $env:RUNNER_TEMP 'baseline-startup.json') `
+            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-self-contained\AEVRIX.Desktop.exe') `
+            -OutputPath (Join-Path $env:RUNNER_TEMP 'self-contained-startup.json') `
             -AliveSeconds 5 `
             -ExitTimeoutSeconds 5
 
-      - name: Publish explicit x64 self-contained Desktop
+      - name: Acquire official Windows App Runtime 2.3.1 x64
+        id: wasdk_runtime
         shell: pwsh
         run: |
-          $out = Join-Path $env:RUNNER_TEMP 'desktop-self-contained-x64'
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://aka.ms/windowsappsdk/2.3/2.3.1/windowsappruntimeinstall-x64.exe'
+          $path = Join-Path $env:RUNNER_TEMP 'WindowsAppRuntimeInstall-2.3.1-x64.exe'
+          Invoke-WebRequest -Uri $url -OutFile $path -MaximumRedirection 10
+          if ((Get-Item -LiteralPath $path).Length -lt 1MB) { throw 'Windows App Runtime installer download is unexpectedly small.' }
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sig = Get-AuthenticodeSignature -LiteralPath $path
+          $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
+          $thumbprint = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { '' }
+          Write-Host "Windows App Runtime 2.3.1 x64: sha256=$hash signature=$($sig.Status) subject=$subject thumbprint=$thumbprint"
+          if ($sig.Status -ne 'Valid') { throw "Official Windows App Runtime installer signature is not valid: $($sig.Status)" }
+          if ($subject -notmatch 'Microsoft') { throw "Unexpected Windows App Runtime signer subject: $subject" }
+          "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signer_subject=$subject" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signer_thumbprint=$thumbprint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install official Windows App Runtime 2.3.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = Start-Process -FilePath '${{ steps.wasdk_runtime.outputs.path }}' -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Windows App Runtime installer exited with $($p.ExitCode)" }
+          Write-Host 'Windows App Runtime installer completed with exit code 0.'
+
+      - name: Publish framework-dependent Desktop
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-framework-dependent'
           dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
             -c Release `
             -r win-x64 `
-            --self-contained true `
+            --self-contained false `
             -p:Platform=x64 `
-            -p:WindowsAppSDKSelfContained=true `
             -p:ContinuousIntegrationBuild=true `
             -p:DebugType=none `
             -p:DebugSymbols=false `
             -o $out
-          if ($LASTEXITCODE -ne 0) { throw "Explicit x64 self-contained publish failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Framework-dependent publish failed: $LASTEXITCODE" }
 
-      - name: Smoke explicit x64 self-contained Desktop
-        id: x64_smoke
+      - name: Smoke framework-dependent Desktop
+        id: framework_smoke
         continue-on-error: true
         shell: pwsh
         run: |
           ./tools/release/Test-DesktopStartup.ps1 `
-            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-self-contained-x64\AEVRIX.Desktop.exe') `
-            -OutputPath (Join-Path $env:RUNNER_TEMP 'x64-startup.json') `
+            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-framework-dependent\AEVRIX.Desktop.exe') `
+            -OutputPath (Join-Path $env:RUNNER_TEMP 'framework-startup.json') `
             -AliveSeconds 5 `
             -ExitTimeoutSeconds 5
 
-      - name: Diagnose self-contained startup comparison
+      - name: Diagnose deployment-mode comparison
         if: always()
         shell: pwsh
         env:
-          BASELINE_OUTCOME: ${{ steps.baseline_smoke.outcome }}
-          X64_OUTCOME: ${{ steps.x64_smoke.outcome }}
+          SELF_CONTAINED_OUTCOME: ${{ steps.self_contained_smoke.outcome }}
+          FRAMEWORK_OUTCOME: ${{ steps.framework_smoke.outcome }}
         run: |
-          Write-Host "baseline=$env:BASELINE_OUTCOME x64=$env:X64_OUTCOME"
-          foreach ($name in @('baseline-startup.json','x64-startup.json')) {
+          Write-Host "selfContained=$env:SELF_CONTAINED_OUTCOME frameworkDependent=$env:FRAMEWORK_OUTCOME"
+          foreach ($name in @('self-contained-startup.json','framework-startup.json')) {
             $path = Join-Path $env:RUNNER_TEMP $name
             if (Test-Path -LiteralPath $path) {
               Write-Host "=== $name ==="
@@ -123,14 +151,14 @@ jobs:
             Write-Warning "Application event log diagnostic unavailable: $($_.Exception.Message)"
           }
 
-      - name: Require explicit x64 self-contained startup
+      - name: Require framework-dependent startup
         if: always()
         shell: pwsh
         env:
-          X64_OUTCOME: ${{ steps.x64_smoke.outcome }}
+          FRAMEWORK_OUTCOME: ${{ steps.framework_smoke.outcome }}
         run: |
-          if ($env:X64_OUTCOME -ne 'success') {
-            throw "Explicit x64 self-contained Desktop startup failed; see diagnostic comparison above."
+          if ($env:FRAMEWORK_OUTCOME -ne 'success') {
+            throw "Framework-dependent Desktop startup failed; see diagnostic comparison above."
           }
 
       - name: Test Windows Core
