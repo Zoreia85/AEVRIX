@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not $IsWindows) {
+if ($env:OS -ne 'Windows_NT') {
     throw 'Windows App Runtime deployment requires Windows.'
 }
 
@@ -31,11 +31,11 @@ function Get-MsixIdentity {
 
     $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
     try {
-        $entry = $archive.GetEntry('AppxManifest.xml')
-        if ($null -eq $entry) {
+        $manifestEntry = $archive.GetEntry('AppxManifest.xml')
+        if ($null -eq $manifestEntry) {
             throw "MSIX does not contain AppxManifest.xml: $Path"
         }
-        $stream = $entry.Open()
+        $stream = $manifestEntry.Open()
         try {
             $reader = New-Object System.IO.StreamReader($stream, [Text.Encoding]::UTF8, $true)
             try {
@@ -65,30 +65,30 @@ function Get-MsixIdentity {
     }
 }
 
-foreach ($entry in $expected.GetEnumerator()) {
-    $path = Join-Path $RuntimeRoot $entry.Key
+foreach ($packageEntry in $expected.GetEnumerator()) {
+    $path = Join-Path $RuntimeRoot $packageEntry.Key
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required Windows App Runtime package is missing: $path"
     }
 
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($hash -ne $entry.Value) {
-        throw "Windows App Runtime hash mismatch for $($entry.Key). Expected $($entry.Value), got $hash."
+    if ($hash -ne $packageEntry.Value) {
+        throw "Windows App Runtime hash mismatch for $($packageEntry.Key). Expected $($packageEntry.Value), got $hash."
     }
 
     $signature = Get-AuthenticodeSignature -LiteralPath $path
     $subject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
     if ($signature.Status -ne 'Valid' -or $subject -notmatch '(^|,\s*)CN=Microsoft Corporation(,|$)') {
-        throw "Windows App Runtime signature is not valid Microsoft code for $($entry.Key). Status=$($signature.Status); signer=$subject"
+        throw "Windows App Runtime signature is not valid Microsoft code for $($packageEntry.Key). Status=$($signature.Status); signer=$subject"
     }
 
     $identity = Get-MsixIdentity -Path $path
     if ($identity.Architecture -and $identity.Architecture -notin @('x64', 'neutral')) {
-        throw "Unexpected Windows App Runtime architecture for $($entry.Key): $($identity.Architecture)"
+        throw "Unexpected Windows App Runtime architecture for $($packageEntry.Key): $($identity.Architecture)"
     }
 
     $installed = @(Get-AppxPackage -Name $identity.Name -ErrorAction SilentlyContinue | Where-Object {
-        $_.Architecture -in @('X64', 'Neutral')
+        [string]$_.Architecture -in @('X64', 'Neutral')
     } | Sort-Object { [version]$_.Version } -Descending)
 
     if ($installed.Count -gt 0 -and [version]$installed[0].Version -ge $identity.Version) {
@@ -96,11 +96,11 @@ foreach ($entry in $expected.GetEnumerator()) {
         continue
     }
 
-    Write-Host "Installing Windows App Runtime prerequisite: $($identity.Name) $($identity.Version) from $($entry.Key)."
+    Write-Host "Installing Windows App Runtime prerequisite: $($identity.Name) $($identity.Version) from $($packageEntry.Key)."
     Add-AppxPackage -Path $path -ForceApplicationShutdown -ErrorAction Stop
 
     $verified = @(Get-AppxPackage -Name $identity.Name -ErrorAction SilentlyContinue | Where-Object {
-        $_.Architecture -in @('X64', 'Neutral') -and [version]$_.Version -ge $identity.Version
+        [string]$_.Architecture -in @('X64', 'Neutral') -and [version]$_.Version -ge $identity.Version
     })
     if ($verified.Count -eq 0) {
         throw "Windows App Runtime prerequisite was not observable after deployment: $($identity.Name) >= $($identity.Version)."
