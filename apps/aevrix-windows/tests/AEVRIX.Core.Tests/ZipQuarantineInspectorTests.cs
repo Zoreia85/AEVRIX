@@ -25,6 +25,27 @@ public sealed class ZipQuarantineInspectorTests
         Assert.ThrowsExactly<InvalidDataException>(() => ZipQuarantineInspector.Inspect(stream));
     }
 
+    [TestMethod]
+    public void PathIsCanonicalizedInsideQuarantineRoot()
+    {
+        using var stream = BuildArchive(("a/../b/data.txt", "ok"));
+        var result = ZipQuarantineInspector.Inspect(stream);
+
+        Assert.AreEqual("b/data.txt", result.Entries.Single().Path);
+    }
+
+    [TestMethod]
+    public void InputAndNestingLimitsAreEnforced()
+    {
+        using var oversized = BuildArchive(("payload.txt", new string('x', 128)));
+        var inputPolicy = ArtifactQuarantinePolicy.Default with { MaxInputBytes = 1 };
+        Assert.ThrowsExactly<InvalidDataException>(() => ZipQuarantineInspector.Inspect(oversized, inputPolicy));
+
+        using var nested = BuildArchive(("a/b/c/data.txt", "ok"));
+        var depthPolicy = ArtifactQuarantinePolicy.Default with { MaxNestingDepth = 2 };
+        Assert.ThrowsExactly<InvalidDataException>(() => ZipQuarantineInspector.Inspect(nested, depthPolicy));
+    }
+
     private static MemoryStream BuildArchive(params (string Path, string Content)[] entries)
     {
         var stream = new MemoryStream();
