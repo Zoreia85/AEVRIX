@@ -50,23 +50,14 @@ public sealed record OllamaRuntimeOptions(
                 "Ollama local-runtime endpoints must use loopback HTTP. Remote and HTTPS endpoints require a separately governed remote-brain adapter.");
         }
 
-        if (!IsSafeModelName(Model))
+        var localPolicy = CreateLocalPolicy();
+        if (!localPolicy.IsModelAllowed(Model))
         {
-            throw new ArgumentException("Ollama model name is invalid.", nameof(Model));
-        }
-
-        if (RequestTimeout < TimeSpan.FromSeconds(1) || RequestTimeout > TimeSpan.FromMinutes(10))
-        {
-            throw new ArgumentOutOfRangeException(nameof(RequestTimeout));
+            throw new InvalidOperationException("Configured Ollama model is not explicitly allowlisted.");
         }
 
         return this;
     }
-
-    private static bool IsSafeModelName(string value) =>
-        !string.IsNullOrWhiteSpace(value)
-        && value.Length <= 160
-        && value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/');
 }
 
 public sealed record OllamaModelInfo(string Name, long? SizeBytes, string? Digest);
@@ -81,11 +72,13 @@ public sealed class OllamaModelProvider : IAevrixModelProvider
 
     private readonly HttpClient _httpClient;
     private readonly OllamaRuntimeOptions _options;
+    private readonly LocalModelProviderPolicy _policy;
 
     public OllamaModelProvider(HttpClient httpClient, OllamaRuntimeOptions options)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = (options ?? throw new ArgumentNullException(nameof(options))).Validate();
+        _policy = _options.CreateLocalPolicy();
     }
 
     public string ProviderId => "ollama";
@@ -183,7 +176,7 @@ public sealed class OllamaModelProvider : IAevrixModelProvider
         var envelope = JsonSerializer.Deserialize<OllamaTagsEnvelope>(json, JsonOptions);
 
         return envelope?.Models?
-            .Where(model => !string.IsNullOrWhiteSpace(model.Name))
+            .Where(model => !string.IsNullOrWhiteSpace(model.Name) && _policy.IsModelAllowed(model.Name))
             .Select(model => new OllamaModelInfo(model.Name!.Trim(), model.Size, model.Digest))
             .OrderBy(model => model.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray()
