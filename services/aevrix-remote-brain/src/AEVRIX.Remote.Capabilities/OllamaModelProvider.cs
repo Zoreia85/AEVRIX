@@ -13,6 +13,18 @@ public sealed record OllamaRuntimeOptions(
     TimeSpan RequestTimeout,
     bool AllowRemoteEndpoint = false)
 {
+    public IReadOnlySet<string>? AllowedModels { get; init; }
+
+    public LocalModelProviderPolicy CreateLocalPolicy()
+    {
+        if (AllowedModels is null)
+        {
+            throw new InvalidOperationException("Ollama compatibility provider requires an explicit model allowlist.");
+        }
+
+        return new LocalModelProviderPolicy(AllowedModels, RequestTimeout: RequestTimeout).Validate();
+    }
+
     public OllamaRuntimeOptions Validate()
     {
         ArgumentNullException.ThrowIfNull(BaseAddress);

@@ -16,7 +16,10 @@ public sealed class OllamaLegacyTrustBoundaryTests
                 new Uri("https://example.com:11434", UriKind.Absolute),
                 "qwen3:8b",
                 TimeSpan.FromSeconds(30),
-                AllowRemoteEndpoint: true).Validate();
+                AllowRemoteEndpoint: true)
+            {
+                AllowedModels = Allowlist()
+            }.Validate();
             Assert.Fail("Expected remote Ollama endpoint rejection.");
         }
         catch (InvalidOperationException)
@@ -41,7 +44,10 @@ public sealed class OllamaLegacyTrustBoundaryTests
             new OllamaRuntimeOptions(
                 new Uri("http://127.0.0.1:11434", UriKind.Absolute),
                 "qwen3:8b",
-                TimeSpan.FromSeconds(30)));
+                TimeSpan.FromSeconds(30))
+            {
+                AllowedModels = Allowlist()
+            });
 
         var task = new AnalysisTask(
             "task-legacy-ollama-001",
@@ -60,6 +66,9 @@ public sealed class OllamaLegacyTrustBoundaryTests
         Assert.IsTrue(candidate.Assumptions.Any(assumption =>
             assumption.Contains("cannot self-promote", StringComparison.OrdinalIgnoreCase)));
     }
+
+    private static IReadOnlySet<string> Allowlist() =>
+        new HashSet<string>(StringComparer.Ordinal) { "qwen3:8b" };
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {

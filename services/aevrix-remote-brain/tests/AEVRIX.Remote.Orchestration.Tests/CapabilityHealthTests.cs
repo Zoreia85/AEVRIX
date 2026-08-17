@@ -142,7 +142,10 @@ public sealed class CapabilityHealthTests
             new OllamaRuntimeOptions(
                 new Uri("http://127.0.0.1:11434", UriKind.Absolute),
                 "qwen3:8b",
-                TimeSpan.FromSeconds(30)));
+                TimeSpan.FromSeconds(30))
+            {
+                AllowedModels = new HashSet<string>(StringComparer.Ordinal) { "qwen3:8b" }
+            });
 
     private static CapabilityProviderSnapshot ModelProvider(string providerId, DateTimeOffset observedAt) =>
         new(
