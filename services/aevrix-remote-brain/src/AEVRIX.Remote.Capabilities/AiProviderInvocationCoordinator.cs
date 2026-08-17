@@ -42,15 +42,33 @@ public sealed class AiProviderInvocationCoordinator
     public AiBudgetReservationDecision Reserve(AiProviderCallEstimate estimate)
     {
         ArgumentNullException.ThrowIfNull(estimate);
-        var decision = _budgets.Reserve(estimate);
-        if (!decision.Allowed || decision.Reservation is null)
-        {
-            return decision;
-        }
+        estimate.Validate();
 
         lock (_sync)
         {
-            var key = (decision.Reservation.ProjectId, decision.Reservation.RequestId);
+            var key = (estimate.ProjectId, estimate.RequestId);
+            if (_states.TryGetValue(key, out var existingState))
+            {
+                if (existingState.Phase == AiProviderInvocationPhase.InvocationStarted)
+                {
+                    throw new InvalidOperationException(
+                        "Provider invocation already started; the same request id cannot authorize another invocation.");
+                }
+
+                if (existingState.Phase == AiProviderInvocationPhase.Completed)
+                {
+                    return _budgets.Reserve(estimate);
+                }
+            }
+
+            // Lock order is intentionally coordinator -> budget for every mutating lifecycle path.
+            // This avoids the Reserve-vs-Complete/Cancel inversion that could otherwise deadlock.
+            var decision = _budgets.Reserve(estimate);
+            if (!decision.Allowed || decision.Reservation is null)
+            {
+                return decision;
+            }
+
             if (_states.TryGetValue(key, out var existing))
             {
                 if (!ReservationMatches(existing.Reservation, decision.Reservation))
@@ -89,6 +107,8 @@ public sealed class AiProviderInvocationCoordinator
     public AiProjectBudgetSnapshot Complete(AiProviderUsageReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
+        receipt.Validate();
+
         lock (_sync)
         {
             var state = GetState(receipt.ProjectId, receipt.RequestId);
