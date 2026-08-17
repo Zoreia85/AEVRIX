@@ -74,10 +74,53 @@ def validate_installer_evidence(candidate: dict, lifecycle: dict, expected_commi
     }
 
 
+def validate_defender_evidence(candidate: dict, defender: dict, expected_commit: str) -> tuple[str, dict]:
+    require(defender.get("candidateSha") == expected_commit, "Defender candidateSha does not match exact readiness candidate")
+    declared = str(candidate.get("defenderEvidenceSha256") or "").lower()
+    require(bool(HEX64.fullmatch(declared)), "candidate evidence does not declare a valid defenderEvidenceSha256")
+
+    status = str(defender.get("status") or "")
+    require(status in {"PASS", "FAIL", "INFRASTRUCTURE_INCONCLUSIVE"}, f"invalid Defender status: {status!r}")
+
+    hashes = candidate.get("installerHashes") or {}
+    expected_hashes = {
+        str(hashes.get("oldSha256") or "").lower(),
+        str(hashes.get("newSha256") or "").lower(),
+    }
+    require(all(HEX64.fullmatch(value) for value in expected_hashes), "installer hashes are missing before Defender validation")
+
+    before = defender.get("artifactHashesBeforeScan") or {}
+    after = defender.get("artifactHashesAfterScan") or {}
+    before_values = {str(value or "").lower() for value in before.values()}
+    after_values = {str(value or "").lower() for value in after.values()}
+    require(expected_hashes == before_values, "Defender pre-scan hashes do not match exact installer hashes")
+    require(expected_hashes == after_values, "Defender post-scan hashes do not match exact installer hashes")
+
+    detections = int(defender.get("matchingDetectionCount") or 0)
+    if status == "PASS":
+        require(detections == 0, "Defender PASS cannot include path-bound detections")
+        require(defender.get("antivirusEnabled") is True, "Defender PASS requires antivirusEnabled=true")
+        require(defender.get("amServiceEnabled") is True, "Defender PASS requires AMServiceEnabled=true")
+
+    details = {
+        "status": status,
+        "reason": defender.get("reason"),
+        "engineVersion": defender.get("engineVersion"),
+        "productVersion": defender.get("productVersion"),
+        "signatureVersion": defender.get("signatureVersion"),
+        "signatureLastUpdated": defender.get("signatureLastUpdated"),
+        "matchingDetectionCount": detections,
+        "artifactHashesBeforeScan": before,
+        "artifactHashesAfterScan": after,
+    }
+    return status, details
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert exact Windows installer AVA evidence into fail-closed release-gate evidence")
     parser.add_argument("--candidate-evidence", required=True)
     parser.add_argument("--lifecycle-evidence", required=True)
+    parser.add_argument("--defender-evidence")
     parser.add_argument("--expected-source-commit", required=True)
     parser.add_argument("--evidence-ref", required=True)
     parser.add_argument("--output", required=True)
@@ -98,19 +141,49 @@ def main() -> int:
     details = validate_installer_evidence(candidate, lifecycle, args.expected_source_commit)
     candidate_hash = sha256_file(candidate_path)
 
+    gates: dict[str, dict] = {
+        "installer-lifecycle": {
+            "status": "PARCIAL",
+            "evidenceRef": args.evidence_ref,
+            "evidenceSha256": candidate_hash,
+            "reason": "Exact installer lifecycle is proven; mandatory terms/first-run remains outside this lifecycle artifact and prevents full PASS.",
+            "lifecycleEvidenceSha256": actual_lifecycle_hash,
+            "details": details,
+        }
+    }
+
+    if args.defender_evidence:
+        defender_path = Path(args.defender_evidence)
+        require(defender_path.is_file(), "Defender evidence path was supplied but file is missing")
+        actual_defender_hash = sha256_file(defender_path)
+        declared_defender_hash = str(candidate.get("defenderEvidenceSha256") or "").lower()
+        require(declared_defender_hash == actual_defender_hash, "Defender evidence SHA-256 does not match candidate declaration")
+        defender = load_json(defender_path)
+        defender_status, defender_details = validate_defender_evidence(candidate, defender, args.expected_source_commit)
+
+        if defender_status == "PASS":
+            distribution_status = "PARCIAL"
+            reason = "Exact installer artifacts passed Microsoft Defender with stable hashes; Authenticode and signed update/tamper controls remain mandatory."
+        elif defender_status == "FAIL":
+            distribution_status = "FAIL"
+            reason = "Microsoft Defender evidence failed for exact installer artifacts."
+        else:
+            distribution_status = "INFRASTRUCTURE_INCONCLUSIVE"
+            reason = "Microsoft Defender was unavailable or inconclusive on this validation runner; no distribution-security credit is granted."
+
+        gates["distribution-security"] = {
+            "status": distribution_status,
+            "evidenceRef": args.evidence_ref,
+            "evidenceSha256": actual_defender_hash,
+            "reason": reason,
+            "defenderEvidenceSha256": actual_defender_hash,
+            "details": defender_details,
+        }
+
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "sourceCommit": args.expected_source_commit,
-        "gates": {
-            "installer-lifecycle": {
-                "status": "PARCIAL",
-                "evidenceRef": args.evidence_ref,
-                "evidenceSha256": candidate_hash,
-                "reason": "Exact installer lifecycle is proven; mandatory terms/first-run remains outside this lifecycle artifact and prevents full PASS.",
-                "lifecycleEvidenceSha256": actual_lifecycle_hash,
-                "details": details,
-            }
-        },
+        "gates": gates,
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
