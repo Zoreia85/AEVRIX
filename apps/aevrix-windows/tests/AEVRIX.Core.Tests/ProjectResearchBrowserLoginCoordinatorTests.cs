@@ -203,7 +203,7 @@ public sealed class ProjectResearchBrowserLoginCoordinatorTests
         LoggedOutTextMarkers: Array.Empty<string>(),
         LearnedAt: DateTimeOffset.UtcNow);
 
-    private static ResearchBrowserPolicy CreatePolicy(bool automaticRelogin) => new(
+    private static ResearchBrowserPolicy CreatePolicy(bool automaticRelogin) => new ResearchBrowserPolicy(
         TargetId: "target:web",
         AllowedHosts: new[] { "example.com" },
         PersistTargetProfile: true,
