@@ -48,8 +48,30 @@ def lifecycle_payload() -> dict:
     }
 
 
-def candidate_payload(lifecycle_hash: str) -> dict:
+def first_run_payload() -> dict:
     return {
+        "schemaVersion": 2,
+        "candidateSha": COMMIT,
+        "productVersion": "0.0.2",
+        "termsRevision": "preview-authorized-use-v1",
+        "installExitCode": 0,
+        "uninstallExitCode": 0,
+        "presentationObserved": True,
+        "presentedAtUtc": "2026-08-17T12:00:00+00:00",
+        "preAcceptanceNavigationAbsent": True,
+        "declineExitedWithoutAcceptance": True,
+        "initialAcceptDisabled": True,
+        "explicitConfirmationRequired": True,
+        "acceptancePersisted": True,
+        "acceptedAtUtc": "2026-08-17T12:00:05+00:00",
+        "commandCenterTransitionObserved": True,
+        "secondLaunchSkippedFirstRun": True,
+        "acceptanceSurvivedUninstall": True,
+    }
+
+
+def candidate_payload(lifecycle_hash: str, *, first_run_hash: str | None = None) -> dict:
+    payload = {
         "schemaVersion": 7,
         "candidateSha": COMMIT,
         "canonicalPromotion": "BOT_AUTHORED_EXACT_CANDIDATE",
@@ -61,6 +83,11 @@ def candidate_payload(lifecycle_hash: str) -> dict:
         "defenderEvidenceFile": "defender-evidence.json",
         "defenderEvidenceSha256": HEX_E,
     }
+    if first_run_hash is not None:
+        payload["firstRunTermsEvidenceFile"] = "first-run-terms-evidence.json"
+        payload["firstRunTermsEvidenceSha256"] = first_run_hash
+        payload["firstRunTerms"] = first_run_payload()
+    return payload
 
 
 def defender_payload() -> dict:
@@ -84,7 +111,7 @@ def defender_payload() -> dict:
 
 
 class InstallerEvidenceBridgeTests(unittest.TestCase):
-    def test_valid_exact_lifecycle_is_partial_until_first_run(self) -> None:
+    def test_valid_exact_lifecycle_remains_valid_without_synthetic_first_run(self) -> None:
         lifecycle = lifecycle_payload()
         details = MODULE.validate_installer_evidence(candidate_payload(HEX_E), lifecycle, COMMIT)
         self.assertEqual(details["residueVerdict"], "PASS_NO_PRODUCT_OWNED_RESIDUE")
@@ -116,6 +143,48 @@ class InstallerEvidenceBridgeTests(unittest.TestCase):
             digest = hashlib.sha256(lifecycle_path.read_bytes()).hexdigest()
             candidate = candidate_payload(digest)
             self.assertEqual(candidate["lifecycleEvidenceSha256"], MODULE.sha256_file(lifecycle_path))
+
+    def test_exact_first_run_hash_and_semantics_are_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first-run-terms-evidence.json"
+            path.write_text(json.dumps(first_run_payload()), encoding="utf-8")
+            digest = MODULE.sha256_file(path)
+            actual_hash, details = MODULE.validate_first_run_bundle(candidate_payload(HEX_E, first_run_hash=digest), path, COMMIT)
+            self.assertEqual(digest, actual_hash)
+            self.assertEqual(COMMIT, details["candidateSha"])
+            self.assertTrue(details["commandCenterTransitionObserved"])
+            self.assertTrue(details["preAcceptanceNavigationAbsent"])
+            self.assertTrue(details["declineExitedWithoutAcceptance"])
+
+    def test_first_run_hash_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first-run-terms-evidence.json"
+            path.write_text(json.dumps(first_run_payload()), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                MODULE.validate_first_run_bundle(candidate_payload(HEX_E, first_run_hash=HEX_A), path, COMMIT)
+
+    def test_first_run_embedded_candidate_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first-run-terms-evidence.json"
+            first_run = first_run_payload()
+            path.write_text(json.dumps(first_run), encoding="utf-8")
+            digest = MODULE.sha256_file(path)
+            candidate = candidate_payload(HEX_E, first_run_hash=digest)
+            candidate["firstRunTerms"]["preAcceptanceNavigationAbsent"] = False
+            with self.assertRaisesRegex(ValueError, "embedded firstRunTerms mismatch"):
+                MODULE.validate_first_run_bundle(candidate, path, COMMIT)
+
+    def test_first_run_candidate_sha_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first-run-terms-evidence.json"
+            first_run = first_run_payload()
+            first_run["candidateSha"] = "2" * 40
+            path.write_text(json.dumps(first_run), encoding="utf-8")
+            digest = MODULE.sha256_file(path)
+            candidate = candidate_payload(HEX_E, first_run_hash=digest)
+            candidate["firstRunTerms"] = first_run
+            with self.assertRaisesRegex(ValueError, "candidateSha"):
+                MODULE.validate_first_run_bundle(candidate, path, COMMIT)
 
     def test_valid_defender_pass_is_only_distribution_partial(self) -> None:
         status, details = MODULE.validate_defender_evidence(candidate_payload(HEX_E), defender_payload(), COMMIT)
