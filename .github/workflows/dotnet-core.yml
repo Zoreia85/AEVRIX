@@ -47,26 +47,24 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
-          Add-Type -AssemblyName System.IO.Compression
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.msix' -File) {
-            $archive = [System.IO.Compression.ZipFile]::OpenRead($file.FullName)
-            try {
-              $entry = $archive.GetEntry('AppxManifest.xml')
-              $stream = $entry.Open()
-              try {
-                $reader = New-Object System.IO.StreamReader($stream)
-                try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
-              } finally { $stream.Dispose() }
-            } finally { $archive.Dispose() }
-            $name = [string]$manifest.Package.Identity.Name
-            Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
-              Write-Host "Removing diagnostic package $($_.PackageFullName)"
-              Remove-AppxPackage -Package $_.PackageFullName -ErrorAction Stop
+          $orderedNames = @(
+            'Microsoft.WinAppRuntime.DDLM.2.3.1.0-x6',
+            'MicrosoftCorporationII.WinAppRuntime.Singleton',
+            'MicrosoftCorporationII.WinAppRuntime.Main.2',
+            'Microsoft.WindowsAppRuntime.2'
+          )
+          foreach ($name in $orderedNames) {
+            $packages = @(Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -match '_x64__' })
+            foreach ($package in $packages) {
+              Write-Host "Removing diagnostic x64 package $($package.PackageFullName)"
+              Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop
             }
           }
-          Write-Host 'Diagnostic 2.3.1 package roles removed; NSIS will prove fresh prerequisite deployment.'
+          foreach ($name in $orderedNames) {
+            $remaining = @(Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -match '_x64__' })
+            if ($remaining.Count -ne 0) { throw "Diagnostic x64 package still present after cleanup: $name" }
+          }
+          Write-Host 'PASS: diagnostic x64 2.3.1 package roles removed in dependency order; x86 runner packages were preserved.'
 
       - name: Acquire pinned NSIS 3.12
         id: nsis
