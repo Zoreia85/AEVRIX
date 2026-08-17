@@ -44,8 +44,8 @@ public sealed class ProjectLoginSecretPacketTests
         packet.Dispose();
 
         Assert.IsTrue(captured.Span.ToArray().All(value => value == 0));
-        Assert.ThrowsException<ObjectDisposedException>(() => _ = packet.Data);
-        Assert.ThrowsException<ObjectDisposedException>(() => _ = packet.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = packet.Data);
+        Assert.Throws<ObjectDisposedException>(() => _ = packet.Length);
         Array.Clear(userChars);
         Array.Clear(secretChars);
     }
@@ -71,13 +71,13 @@ public sealed class ProjectLoginSecretPacketTests
     [TestMethod]
     public void Create_RejectsEmptyOrOversizedCredentialParts()
     {
-        Assert.ThrowsException<ArgumentException>(() =>
+        Assert.Throws<ArgumentException>(() =>
             ProjectLoginSecretPacket.Create(ReadOnlyMemory<char>.Empty, new[] { 'x' }));
-        Assert.ThrowsException<ArgumentException>(() =>
+        Assert.Throws<ArgumentException>(() =>
             ProjectLoginSecretPacket.Create(new[] { 'u' }, ReadOnlyMemory<char>.Empty));
-        Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             ProjectLoginSecretPacket.Create(new string('u', 321).ToCharArray(), new[] { 'x' }));
-        Assert.ThrowsException<ArgumentOutOfRangeException>(() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             ProjectLoginSecretPacket.Create(new[] { 'u' }, new string('x', 1025).ToCharArray()));
     }
 }
