@@ -16,8 +16,15 @@ public sealed class SpecialistLabCoordinationTests
         Assert.IsTrue(route.IsRoutable);
         Assert.IsTrue(route.RequiresContentVerification);
 
+        var credentialBearingTarget = new UriBuilder(Uri.UriSchemeHttps, "example.test")
+        {
+            UserName = "synthetic-user",
+            Password = "synthetic-secret",
+            Path = "/app"
+        }.Uri;
+
         Assert.ThrowsExactly<ArgumentException>(() =>
-            TargetIntakeRouter.ClassifyWeb(new Uri("https://user:secret@example.test/app")));
+            TargetIntakeRouter.ClassifyWeb(credentialBearingTarget));
     }
 
     [TestMethod]
