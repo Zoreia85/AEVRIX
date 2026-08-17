@@ -52,6 +52,20 @@ public interface IResearchBrowserLoginFormAdapter
 }
 
 /// <summary>
+/// Optional stronger adapter boundary for browser hosts that can transfer username/password together through
+/// an ephemeral binary/shared-memory channel. The coordinator prefers this atomic path when available while
+/// preserving the legacy adapter contract for non-WebView implementations.
+/// </summary>
+public interface IResearchBrowserCredentialPacketAdapter : IResearchBrowserLoginFormAdapter
+{
+    Task FillCredentialsAndSubmitAsync(
+        LoginRecipe recipe,
+        ReadOnlyMemory<char> userName,
+        ReadOnlyMemory<char> password,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// Coordinates a project-scoped credential with a validated Research Browser login recipe.
 /// The coordinator never exposes a secret unless project execution, autofill policy, target binding and host allowlist all pass.
 /// </summary>
@@ -131,9 +145,21 @@ public sealed class ProjectResearchBrowserLoginCoordinator
             await adapter.NavigateAsync(recipe.LoginUri, cancellationToken);
         }
 
-        await adapter.FillAsync(recipe.UsernameSelector, credential.UserName, cancellationToken);
-        await adapter.FillAsync(recipe.PasswordSelector, credential.Password, cancellationToken);
-        await adapter.SubmitAsync(recipe.SubmitSelector, cancellationToken);
+        if (adapter is IResearchBrowserCredentialPacketAdapter packetAdapter)
+        {
+            await packetAdapter.FillCredentialsAndSubmitAsync(
+                recipe,
+                credential.UserName,
+                credential.Password,
+                cancellationToken);
+        }
+        else
+        {
+            await adapter.FillAsync(recipe.UsernameSelector, credential.UserName, cancellationToken);
+            await adapter.FillAsync(recipe.PasswordSelector, credential.Password, cancellationToken);
+            await adapter.SubmitAsync(recipe.SubmitSelector, cancellationToken);
+        }
+
         return ProjectLoginAutomationResult.Submitted();
     }
 
