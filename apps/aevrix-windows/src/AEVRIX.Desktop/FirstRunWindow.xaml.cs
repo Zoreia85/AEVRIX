@@ -16,18 +16,12 @@ public sealed partial class FirstRunWindow : Window
 
         InitializeComponent();
         Title = "AEVRIX — Primeira execução";
-        Activated += FirstRunWindow_Activated;
-    }
 
-    private void FirstRunWindow_Activated(object sender, WindowActivatedEventArgs args)
-    {
-        if (args.WindowActivationState == WindowActivationState.Deactivated)
-        {
-            return;
-        }
-
-        Activated -= FirstRunWindow_Activated;
-
+        // Record the auditable first-run surface deterministically once the window has been
+        // constructed successfully. Relying on Window.Activated made the audit marker dependent
+        // on desktop-session focus semantics, which are not guaranteed on hosted Windows runners.
+        // Failure remains fail-closed: operational navigation is still never created and all
+        // acceptance controls are disabled if the presentation cannot be persisted.
         try
         {
             _store.RecordPresentation();
