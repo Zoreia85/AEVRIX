@@ -53,7 +53,7 @@ Any required FAIL, stale evidence, missing mandatory evidence, mandatory SKIP, u
 
 ## Administrative main-write incident
 
-Commits `9c9f4c950dbda456741b5a2b3130f54aa97c1ddb`, `b33bb50a0583e46b7a616cd4d7149b45c8d129cc`, and `5bfd4ace874cb582981230ed30efb02bc6964198` created/updated this sanitation ledger directly on `main` through the connected Contents API. These are administrative documentation-only writes, not functional implementation promotions. The resulting main SHA must be post-validated by public CI/policy checks before it is called fully trusted. No functional code may use this direct-main path.
+Commits `9c9f4c950dbda456741b5a2b3130f54aa97c1ddb`, `b33bb50a0583e46b7a616cd4d7149b45c8d129cc`, `5bfd4ace874cb582981230ed30efb02bc6964198`, and `8aa0548ff96a930ee8dae1e586be0340a10ce011` created/updated this sanitation ledger directly on `main` through the connected Contents API. These are administrative documentation-only writes, not functional implementation promotions. The resulting main SHA must be post-validated by public CI/policy checks before it is called fully trusted. No functional code may use this direct-main path.
 
 ## Deletion limitation
 
