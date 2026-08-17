@@ -50,12 +50,16 @@ jobs:
           Add-Type -AssemblyName UIAutomationTypes
 
           $stateRoot = Join-Path $env:LOCALAPPDATA 'AEVRIX\UserData'
+          $acceptancePath = Join-Path $stateRoot 'first-run-acceptance.json'
+          $presentationPath = Join-Path $stateRoot 'first-run-presentation.json'
           New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+          Remove-Item -LiteralPath $presentationPath -Force -ErrorAction SilentlyContinue
           @{
             SchemaVersion = 1
             TermsRevision = 'preview-authorized-use-v1'
             AcceptedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot 'first-run-acceptance.json') -Encoding utf8NoBOM
+          } | ConvertTo-Json | Set-Content -LiteralPath $acceptancePath -Encoding utf8NoBOM
+          Write-Host "acceptanceFixture=$(Get-Content -LiteralPath $acceptancePath -Raw)"
 
           $before = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
           $exe = Join-Path $env:RUNNER_TEMP 'desktop\AEVRIX.Desktop.exe'
@@ -63,6 +67,7 @@ jobs:
           try {
             $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
             $mainFound = $false
+            $window = $null
             while ([DateTimeOffset]::UtcNow -lt $deadline) {
               $process.Refresh()
               if ($process.HasExited) {
@@ -78,7 +83,26 @@ jobs:
               }
               Start-Sleep -Milliseconds 200
             }
-            if (-not $mainFound) { throw 'MainWindow navigation was not observed after persisted first-run acceptance.' }
+
+            if (-not $mainFound) {
+              Write-Host "presentationCreated=$(Test-Path -LiteralPath $presentationPath)"
+              if (Test-Path -LiteralPath $presentationPath) { Write-Host "presentation=$(Get-Content -LiteralPath $presentationPath -Raw)" }
+              Write-Host "acceptanceAfterLaunch=$(Get-Content -LiteralPath $acceptancePath -Raw)"
+              if ($null -ne $window) {
+                Write-Host "topWindowName=$($window.Current.Name) automationId=$($window.Current.AutomationId) class=$($window.Current.ClassName)"
+                $all = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                for ($i = 0; $i -lt [Math]::Min($all.Count, 120); $i++) {
+                  $el = $all.Item($i)
+                  $name = [string]$el.Current.Name
+                  $id = [string]$el.Current.AutomationId
+                  $type = [string]$el.Current.ControlType.ProgrammaticName
+                  if ($name -or $id) { Write-Host "uia[$i] type=$type name='$name' id='$id'" }
+                }
+              } else {
+                Write-Host 'No top-level UIAutomation window was found for the Desktop PID.'
+              }
+              throw 'MainWindow navigation was not observed after persisted first-run acceptance.'
+            }
 
             Start-Sleep -Seconds 2
             $after = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
