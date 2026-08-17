@@ -150,6 +150,22 @@ jobs:
             -NewVersion $env:NEW_VERSION `
             -EvidencePath (Join-Path $evidence 'lifecycle.json')
 
+      - name: Print runtime bootstrap diagnostic after lifecycle failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:TEMP 'AEVRIX-wasdk-runtime-install.log'
+          if (Test-Path -LiteralPath $log -PathType Leaf) {
+            Write-Host '--- AEVRIX Windows App Runtime bootstrap log ---'
+            Get-Content -LiteralPath $log -Raw | Write-Host
+            Write-Host '--- end bootstrap log ---'
+          }
+          else {
+            Write-Host "Runtime bootstrap log not found at $log"
+          }
+          $runtimePackages = @(Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'WindowsAppRuntime' } | ForEach-Object { "$($_.Name)@$($_.Version)/$($_.Architecture)" })
+          Write-Host "Observed runtime packages: $($runtimePackages -join ',')"
+
       - name: Prove installed first-run and terms on corrected installer
         shell: pwsh
         run: |
