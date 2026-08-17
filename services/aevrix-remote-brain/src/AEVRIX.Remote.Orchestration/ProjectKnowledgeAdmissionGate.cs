@@ -68,9 +68,9 @@ internal interface ITrustedKnowledgePromotionStore
 }
 
 /// <summary>
-/// The only authority permitted to turn validated project knowledge into Trusted memory.
-/// It closes every admitted EvidenceId against the exact verified ExecutionProofLedger snapshot
-/// and persists no raw evidence in the admission receipt.
+/// The only Judge-facing authority permitted to turn independently validated project knowledge
+/// into Trusted memory. It closes every admitted EvidenceId against the exact verified
+/// ExecutionProofLedger snapshot and persists no raw evidence in the admission receipt.
 /// </summary>
 public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
 {
@@ -80,10 +80,7 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
     public ProjectKnowledgeAdmissionGate(ICandidateKnowledgeRepository repository)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _promotionStore = repository as ITrustedKnowledgePromotionStore
-            ?? throw new ArgumentException(
-                "Trusted memory admission requires a repository with the internal trusted-promotion boundary.",
-                nameof(repository));
+        _promotionStore = new RepositoryTrustedPromotionStore(repository);
     }
 
     public async Task<MemoryAdmissionReceipt> AdmitTrustedAsync(
@@ -254,5 +251,21 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
 
         var canonical = string.Concat(fields.Select(value => $"{Encoding.UTF8.GetByteCount(value)}:{value}"));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
+
+    private sealed class RepositoryTrustedPromotionStore(ICandidateKnowledgeRepository repository)
+        : ITrustedKnowledgePromotionStore
+    {
+        public Task PromoteTrustedAsync(
+            string knowledgeId,
+            string validationRecordId,
+            DateTimeOffset promotedAt,
+            CancellationToken cancellationToken = default) =>
+            repository.PromoteAsync(
+                knowledgeId,
+                KnowledgeTrustState.Trusted,
+                validationRecordId,
+                promotedAt,
+                cancellationToken);
     }
 }
