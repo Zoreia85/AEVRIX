@@ -8,7 +8,6 @@ public sealed partial class FirstRunWindow : Window
 {
     private readonly FirstRunAcceptanceStore _store;
     private readonly Action _continueToProduct;
-    private bool _accepted;
 
     public FirstRunWindow(FirstRunAcceptanceStore store, Action continueToProduct)
     {
@@ -59,7 +58,6 @@ public sealed partial class FirstRunWindow : Window
                 throw new InvalidOperationException("Persisted first-run acceptance could not be revalidated.");
             }
 
-            _accepted = true;
             _continueToProduct();
             Close();
         }
@@ -73,7 +71,6 @@ public sealed partial class FirstRunWindow : Window
 
     private void DeclineFirstRunButton_Click(object sender, RoutedEventArgs e)
     {
-        _accepted = false;
         Close();
     }
 }
