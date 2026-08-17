@@ -6,7 +6,40 @@ namespace Aevrix.Remote.Orchestration.Tests;
 public sealed class MissionEvidenceJudgePipelineTests
 {
     [TestMethod]
-    public async Task ExecuteAsync_PromotesOnlyConvergentValidatedEvidence()
+    public async Task ExecuteAsync_PromotesOnlyConvergentValidatedEvidenceWithExecutionProofClosure()
+    {
+        var bus = new EvidenceBus();
+        var director = TestProofBoundMissionDirector.Create([
+            new PublishingSpecialist(MissionSpecialistKind.StaticAnalysis, bus, "obs-static", "framework", "ASP.NET"),
+            new PublishingSpecialist(MissionSpecialistKind.DynamicAnalysis, bus, "obs-dynamic", "framework", "ASP.NET")
+        ]);
+        var repository = new MemoryRepository();
+        var pipeline = new MissionEvidenceJudgePipeline(
+            director, bus, new EvidenceFusionEngine(), repository, new PassingValidator());
+        var plan = Plan([
+            Spec("static", MissionSpecialistKind.StaticAnalysis, "ev-static"),
+            Spec("dynamic", MissionSpecialistKind.DynamicAnalysis, "ev-dynamic")
+        ]);
+        var ledger = BuildLedger(plan, [
+            ("static", MissionSpecialistKind.StaticAnalysis),
+            ("dynamic", MissionSpecialistKind.DynamicAnalysis)
+        ]);
+
+        var result = await pipeline.ExecuteAsync(new MissionKnowledgeRequest(
+            plan,
+            ["framework"],
+            ProofRecords: ledger.Snapshot(),
+            ExpectedProofHead: ledger.Head));
+
+        Assert.IsTrue(result.Mission.RequiredTasksSucceeded);
+        var item = result.KnowledgeItems.Single();
+        Assert.AreEqual(EvidenceFusionState.Convergent, item.FusionState);
+        Assert.AreEqual(KnowledgeTrustState.Trusted, item.Knowledge.TrustState);
+        CollectionAssert.AreEquivalent(new[] { "obs-static", "obs-dynamic" }, item.Knowledge.EvidenceIds.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_ConvergentTrustedValidationWithoutProofSnapshotFailsClosed()
     {
         var bus = new EvidenceBus();
         var director = TestProofBoundMissionDirector.Create([
@@ -17,18 +50,13 @@ public sealed class MissionEvidenceJudgePipelineTests
         var pipeline = new MissionEvidenceJudgePipeline(
             director, bus, new EvidenceFusionEngine(), repository, new PassingValidator());
 
-        var result = await pipeline.ExecuteAsync(new MissionKnowledgeRequest(
-            Plan([
-                Spec("static", MissionSpecialistKind.StaticAnalysis, "ev-static"),
-                Spec("dynamic", MissionSpecialistKind.DynamicAnalysis, "ev-dynamic")
-            ]),
-            ["framework"]));
-
-        Assert.IsTrue(result.Mission.RequiredTasksSucceeded);
-        var item = result.KnowledgeItems.Single();
-        Assert.AreEqual(EvidenceFusionState.Convergent, item.FusionState);
-        Assert.AreEqual(KnowledgeTrustState.Trusted, item.Knowledge.TrustState);
-        CollectionAssert.AreEquivalent(new[] { "obs-static", "obs-dynamic" }, item.Knowledge.EvidenceIds.ToArray());
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () => await pipeline.ExecuteAsync(
+            new MissionKnowledgeRequest(
+                Plan([
+                    Spec("static", MissionSpecialistKind.StaticAnalysis, "ev-static"),
+                    Spec("dynamic", MissionSpecialistKind.DynamicAnalysis, "ev-dynamic")
+                ]),
+                ["framework"])));
     }
 
     [TestMethod]
@@ -85,6 +113,33 @@ public sealed class MissionEvidenceJudgePipelineTests
 
     private static MissionTaskSpec Spec(string id, MissionSpecialistKind kind, string evidenceId) =>
         new(id, kind, $"Analyze {id}.", [evidenceId], []);
+
+    private static ExecutionProofLedger BuildLedger(
+        MissionPlan plan,
+        IReadOnlyList<(string TaskId, MissionSpecialistKind Specialist)> tasks)
+    {
+        var ledger = new ExecutionProofLedger();
+        foreach (var item in tasks)
+        {
+            var executionId = MissionExecutionProofIdentity.CreateExecutionId(
+                plan.ProjectId, plan.MissionId, plan.TargetId, item.TaskId, item.Specialist);
+            var inputDigest = new string('a', 64);
+            var resultDigest = item.Specialist == MissionSpecialistKind.StaticAnalysis
+                ? new string('b', 64)
+                : new string('c', 64);
+            var at = DateTimeOffset.Parse("2026-08-17T12:10:00Z");
+            ledger.Append(new ExecutionProofEvent(
+                $"evt-start-{item.TaskId}", plan.ProjectId, plan.MissionId, executionId,
+                ExecutionProofStage.Started, "mission-specialist", item.Specialist.ToString(),
+                ExecutionProofOutcome.Pending, inputDigest, null, null, null, null, null, null, null, null, at));
+            ledger.Append(new ExecutionProofEvent(
+                $"evt-done-{item.TaskId}", plan.ProjectId, plan.MissionId, executionId,
+                ExecutionProofStage.Completed, "mission-specialist", item.Specialist.ToString(),
+                ExecutionProofOutcome.Succeeded, inputDigest, null, resultDigest, null, null, null, null, null, null,
+                at.AddSeconds(1)));
+        }
+        return ledger;
+    }
 
     private sealed class PublishingSpecialist(
         MissionSpecialistKind kind,
