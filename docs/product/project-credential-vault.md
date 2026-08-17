@@ -21,7 +21,8 @@ Credentials are local-only by design:
 - the non-secret local index lives under the per-user AEVRIX Vault root;
 - the secret payload is stored through Windows Credential Manager as a generic credential with `LOCAL_MACHINE` persistence;
 - the Windows Credential Manager target name contains only opaque project/credential identifiers, not the login URL, username or password;
-- missing local secret material is a fail-closed condition.
+- missing local secret material is a fail-closed condition;
+- deleting a project must also delete its project-scoped credential records and persistent browser-session directory as part of the project lifecycle cleanup gate.
 
 ## URL binding
 
