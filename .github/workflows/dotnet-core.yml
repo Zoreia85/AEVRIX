@@ -11,6 +11,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  helper-ps51:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10.0.400
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.400"
+
+      - name: Restore exact Windows App SDK runtime package
+        run: dotnet restore ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -r win-x64
+
+      - name: Prove exact runtime helper under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
+          Write-Host "PowerShell=$($PSVersionTable.PSVersion) RuntimeRoot=$packageRoot"
+          & ./apps/aevrix-windows/installer/install-windows-app-runtime.ps1 -RuntimeRoot $packageRoot
+          $required = @(
+            'Microsoft.WindowsAppRuntime.2',
+            'MicrosoftCorporationII.WinAppRuntime.Main.2',
+            'MicrosoftCorporationII.WinAppRuntime.Singleton',
+            'Microsoft.WinAppRuntime.DDLM.2.3.1.0-x6'
+          )
+          foreach ($name in $required) {
+            $installed = @(Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -match '_x64__' })
+            if ($installed.Count -eq 0) { throw "Required x64 runtime role missing after PS5.1 helper: $name" }
+          }
+          Write-Host 'PASS: helper executes under Windows PowerShell 5.1 and materializes all required x64 runtime roles.'
+
   test:
     runs-on: windows-latest
     timeout-minutes: 55
@@ -33,38 +69,6 @@ jobs:
 
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
-
-      - name: Diagnose exact runtime helper under Windows PowerShell 5.1
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $packageRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
-          Write-Host "PowerShell=$($PSVersionTable.PSVersion) RuntimeRoot=$packageRoot"
-          & ./apps/aevrix-windows/installer/install-windows-app-runtime.ps1 -RuntimeRoot $packageRoot
-          Write-Host 'PASS: helper executes directly under Windows PowerShell 5.1.'
-
-      - name: Remove diagnostic runtime packages before NSIS fresh-install proof
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $orderedNames = @(
-            'Microsoft.WinAppRuntime.DDLM.2.3.1.0-x6',
-            'MicrosoftCorporationII.WinAppRuntime.Singleton',
-            'MicrosoftCorporationII.WinAppRuntime.Main.2',
-            'Microsoft.WindowsAppRuntime.2'
-          )
-          foreach ($name in $orderedNames) {
-            $packages = @(Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -match '_x64__' })
-            foreach ($package in $packages) {
-              Write-Host "Removing diagnostic x64 package $($package.PackageFullName)"
-              Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop
-            }
-          }
-          foreach ($name in $orderedNames) {
-            $remaining = @(Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -match '_x64__' })
-            if ($remaining.Count -ne 0) { throw "Diagnostic x64 package still present after cleanup: $name" }
-          }
-          Write-Host 'PASS: diagnostic x64 2.3.1 package roles removed in dependency order; x86 runner packages were preserved.'
 
       - name: Acquire pinned NSIS 3.12
         id: nsis
@@ -165,8 +169,8 @@ jobs:
           $helper = (Resolve-Path './apps/aevrix-windows/installer/install-windows-app-runtime.ps1').Path
           $p = Start-Process -FilePath $powershell -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',"`"$helper`"",'-RuntimeRoot',"`"$packageRoot`"") -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Windows PowerShell 5.1 idempotence probe failed: $($p.ExitCode)" }
-          $framework = @(Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.2' -ErrorAction SilentlyContinue | Where-Object { [version]$_.Version -ge [version]'2.3.1.0' })
-          if ($framework.Count -eq 0) { throw 'Shared Windows App Runtime did not survive AEVRIX uninstall.' }
+          $framework = @(Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.2' -ErrorAction SilentlyContinue | Where-Object { [version]$_.Version -ge [version]'2.3.1.0' -and $_.PackageFullName -match '_x64__' })
+          if ($framework.Count -eq 0) { throw 'Shared x64 Windows App Runtime did not survive AEVRIX uninstall.' }
           Write-Host 'PASS: shared runtime survives product uninstall and helper is idempotent under Windows PowerShell 5.1.'
 
       - name: Test Windows Core
