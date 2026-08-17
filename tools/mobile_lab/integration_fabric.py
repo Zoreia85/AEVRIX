@@ -26,6 +26,11 @@ from .tool_provenance import (
     GitHubProvenanceApiClient, ReleaseAssetProvenance, ToolProvenanceSnapshot,
     summarize_release,
 )
+from .native_toolchain import (
+    ApkidPlans, AuthorizedDerivedArtifact, GhidraPlans, NATIVE_INTEGRATION_CANDIDATES,
+    NATIVE_TOOL_PROBES, NATIVE_TOOL_SOURCES, PythonDistributionEvidence,
+    PythonDistributionProbe, native_toolchain_inventory,
+)
 
 __all__ = [
     "BoundedHttpsTransport", "GitHubPublicApiClient", "GITHUB_API_VERSION",
@@ -41,5 +46,7 @@ __all__ = [
     "LoopbackMobSFTransport", "MobSFAnalysisResult", "MobSFEvidence",
     "MobSFLocalApiClient", "MobSFResponse", "MobSFScanHandle",
     "GitHubProvenanceApiClient", "ReleaseAssetProvenance", "ToolProvenanceSnapshot",
-    "summarize_release",
+    "summarize_release", "ApkidPlans", "AuthorizedDerivedArtifact", "GhidraPlans",
+    "NATIVE_INTEGRATION_CANDIDATES", "NATIVE_TOOL_PROBES", "NATIVE_TOOL_SOURCES",
+    "PythonDistributionEvidence", "PythonDistributionProbe", "native_toolchain_inventory",
 ]
