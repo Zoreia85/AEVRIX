@@ -22,7 +22,7 @@ public sealed class WindowsFileIdentityTests
 
         Assert.AreEqual(firstIdentity, secondIdentity);
         Assert.AreNotEqual(0UL, firstIdentity.VolumeSerialNumber);
-        Assert.AreEqual(32, firstIdentity.FileIdHex.Length);
+        Assert.AreNotEqual(Guid.Empty, firstIdentity.FileId);
     }
 
     [TestMethod]
@@ -78,7 +78,7 @@ public sealed class WindowsFileIdentityTests
             stream.Dispose();
         }
 
-        Assert.Throws<ObjectDisposedException>(() => WindowsFileIdentity.FromHandle(handle));
+        Assert.Throws<ArgumentException>(() => WindowsFileIdentity.FromHandle(handle));
     }
 
     private static void RequireWindows()
