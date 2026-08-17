@@ -39,12 +39,12 @@ public static class QirCognitiveBaseline
         ledger.Record(Observation("obs-b", b, QirLearningSensitivity.Public, 0.92));
         var promoted = ledger.Promote("dom-structure", FeatureHash());
         var advisor = new QirMissionHintAdvisor([
-            new QirRoutingRule("dom-structure", MissionSpecialistKind.StaticStructure, 0.9, "validated-cross-project-pattern")
+            new QirRoutingRule("dom-structure", MissionSpecialistKind.StructuralAnalysis, 0.9, "validated-cross-project-pattern")
         ]);
         var hints = advisor.BuildHints([promoted]);
         var success = promoted.IndependentProjectCount == 2
             && hints.Count == 1
-            && hints[0].Specialist == MissionSpecialistKind.StaticStructure
+            && hints[0].Specialist == MissionSpecialistKind.StructuralAnalysis
             && hints[0].PriorityScore > 0;
         return Result(CognitiveMetric.Generalization, success);
     }
