@@ -134,9 +134,18 @@ Section "AEVRIX" SEC_MAIN
   DetailPrint "Verificando pré-requisito Microsoft Windows App Runtime 2.3.1..."
   ; NSIS is an x86 process. On 64-bit Windows, System32 access from x86 is redirected to
   ; SysWOW64. Sysnative is the documented WOW64 alias for invoking native 64-bit PowerShell.
+  ; Persist sanitized bootstrap output so a silent pre-product failure is diagnosable by AVA.
+  Delete "$TEMP\AEVRIX-wasdk-runtime-install.log"
   nsExec::ExecToStack '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wasdk-runtime\install-windows-app-runtime.ps1" -RuntimeRoot "$PLUGINSDIR\wasdk-runtime"'
   Pop $0
   Pop $1
+  ClearErrors
+  FileOpen $2 "$TEMP\AEVRIX-wasdk-runtime-install.log" w
+  IfErrors runtime_log_done
+  FileWrite $2 "exitCode=$0$\r$\n"
+  FileWrite $2 "$1$\r$\n"
+  FileClose $2
+runtime_log_done:
   StrCmp $0 "0" runtime_ready 0
     DetailPrint "Falha ao preparar o Windows App Runtime. Código: $0"
     DetailPrint "$1"
