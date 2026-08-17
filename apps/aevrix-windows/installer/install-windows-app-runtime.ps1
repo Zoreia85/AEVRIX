@@ -26,6 +26,26 @@ $expected = [ordered]@{
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)] [string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha256.ComputeHash($stream)
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($bytes)).Replace('-', '').ToLowerInvariant()
+}
+
 function Get-MsixIdentity {
     param([Parameter(Mandatory)] [string]$Path)
 
@@ -71,7 +91,7 @@ foreach ($packageEntry in $expected.GetEnumerator()) {
         throw "Required Windows App Runtime package is missing: $path"
     }
 
-    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-Sha256Hex -Path $path
     if ($hash -ne $packageEntry.Value) {
         throw "Windows App Runtime hash mismatch for $($packageEntry.Key). Expected $($packageEntry.Value), got $hash."
     }
