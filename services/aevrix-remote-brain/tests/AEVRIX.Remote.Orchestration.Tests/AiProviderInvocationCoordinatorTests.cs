@@ -29,7 +29,7 @@ public sealed class AiProviderInvocationCoordinatorTests
 
         var duplicateAttempt = coordinator.Reserve(Estimate("paid-2", 200));
         Assert.IsFalse(duplicateAttempt.Allowed);
-        Assert.AreEqual(AiBudgetDenialReason.SpendLimitExceeded, duplicateAttempt.DenialReason);
+        Assert.AreEqual(AiBudgetDenialReason.MeteredCallLimitExceeded, duplicateAttempt.DenialReason);
     }
 
     [TestMethod]
