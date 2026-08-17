@@ -34,7 +34,9 @@ public partial class App : Application
 
     private void OpenMainWindow()
     {
-        _window = new MainWindow();
+        var mainWindow = new MainWindow();
+        mainWindow.InitializeProjectCredentialsSurface();
+        _window = mainWindow;
         _window.Activate();
     }
 }
