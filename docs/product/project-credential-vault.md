@@ -38,6 +38,15 @@ A project can contain multiple credentials for the same canonical login URL.
 - if several match and no unique default exists, resolution returns `Ambiguous` and automation must not guess;
 - setting a new default automatically revokes the previous default for that same canonical login URL only.
 
+## Runtime authorization
+
+Saving a credential does not grant unconditional access to it. Automatic login goes through `ProjectCredentialAutofillBroker` and requires both:
+
+1. the project execution/scan is currently authorized; and
+2. credential autofill is authorized for that project execution.
+
+If either gate is false, the broker returns `BlockedByPolicy` without reading the secret store at all. Only after both gates pass does the broker resolve the canonical login URL and request a matching project credential.
+
 ## Runtime handling
 
 Secret material is retrieved only when a matching authorized login operation needs it. The Core exposes it through a disposable credential lease and clears the lease's managed character buffers on disposal.
@@ -53,7 +62,8 @@ Password autofill does not imply bypassing MFA. One-time codes, hardware-key pro
 Core:
 
 - `ProjectCredentialVault.cs` — project-scoped metadata, canonical URL resolution, default-account arbitration and disposable secret lease;
-- `WindowsCredentialManagerProjectSecretStore.cs` — Windows Credential Manager backend with local-machine persistence and opaque target names.
+- `WindowsCredentialManagerProjectSecretStore.cs` — Windows Credential Manager backend with local-machine persistence and opaque target names;
+- `ProjectCredentialAutofillBroker.cs` — fail-closed bridge that prevents automatic secret retrieval outside an authorized project execution.
 
 Tests cover:
 
@@ -65,6 +75,9 @@ Tests cover:
 - fail-closed missing secret behavior;
 - corrupt registry handling;
 - disposed lease access rejection;
+- policy-blocked autofill performs zero secret reads;
+- authorized autofill returns a disposable matching credential;
+- ambiguous accounts never trigger secret retrieval;
 - real Windows Credential Manager save/read/delete round trip on Windows CI.
 
 ## Next integration gate
