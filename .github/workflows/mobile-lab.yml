@@ -27,4 +27,5 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tools/mobile_lab/tests -v
       - name: Empty scorecard must remain unmeasured
-        run: python -m tools.mobile_lab.cli scorecard-empty | grep -q '"homologation_status": "NOT_MEASURED"'
+        run: |
+          python -m tools.mobile_lab.cli scorecard-empty | grep -q '"homologation_status": "NOT_MEASURED"'
