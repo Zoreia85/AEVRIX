@@ -198,7 +198,7 @@ if ($downgradeExit -ne 1638) {
 }
 Assert-InstalledVersion -Expected $NewVersion
 
-Write-Host "[6/6] Uninstall and preserve user data"
+Write-Host '[6/6] Uninstall and preserve user data'
 $phaseExitCodes.uninstall = Invoke-Setup -Path (Join-Path $installDir 'uninstall.exe') -Arguments @('/S') -AllowedExitCodes @(0)
 Start-Sleep -Milliseconds 500
 $afterUninstall = Get-ProductInventory
