@@ -19,7 +19,8 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
         AnonymousPipeServerStream stderr,
         WindowsJobObjectLease jobLease,
         bool restrictedTokenEnforced,
-        bool appContainerEnforced)
+        bool appContainerEnforced,
+        bool launchedImageIdentityVerified)
     {
         Process = process;
         _stdout = stdout;
@@ -27,6 +28,7 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
         JobLease = jobLease;
         RestrictedTokenEnforced = restrictedTokenEnforced;
         AppContainerEnforced = appContainerEnforced;
+        LaunchedImageIdentityVerified = launchedImageIdentityVerified;
     }
 
     internal Process Process { get; }
@@ -35,6 +37,7 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
     internal WindowsJobObjectLease JobLease { get; }
     internal bool RestrictedTokenEnforced { get; }
     internal bool AppContainerEnforced { get; }
+    internal bool LaunchedImageIdentityVerified { get; }
 
     public void Dispose()
     {
@@ -51,8 +54,9 @@ internal sealed class WindowsRaceFreeProcessLaunch : IDisposable
 /// Windows-only launcher that creates the child with CREATE_SUSPENDED, optionally under a
 /// DISABLE_MAX_PRIVILEGE primary token and/or an AppContainer SECURITY_CAPABILITIES attribute,
 /// assigns the native process handle to an already-configured Job Object, and resumes the primary
-/// thread only after assignment and token/AppContainer verification succeed. Handle inheritance is
-/// restricted with STARTUPINFOEX so the child receives only its three governed standard-I/O handles.
+/// thread only after assignment, token/AppContainer checks and optional stable launched-image identity
+/// verification against the cryptographically authenticated executable object succeed. Handle inheritance
+/// is restricted with STARTUPINFOEX so the child receives only its three governed standard-I/O handles.
 /// </summary>
 internal static class WindowsRaceFreeProcessLauncher
 {
@@ -74,7 +78,8 @@ internal static class WindowsRaceFreeProcessLauncher
         IReadOnlyDictionary<string, string> environment,
         WindowsJobObjectPolicy jobPolicy,
         WindowsRestrictedTokenLease? restrictedToken = null,
-        WindowsAppContainerProfileLease? appContainerProfile = null)
+        WindowsAppContainerProfileLease? appContainerProfile = null,
+        WindowsFileIdentity? authenticatedImageIdentity = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -100,6 +105,7 @@ internal static class WindowsRaceFreeProcessLauncher
         var ownershipTransferred = false;
         var restrictedTokenEnforced = false;
         var appContainerEnforced = false;
+        var launchedImageIdentityVerified = false;
 
         try
         {
@@ -189,6 +195,13 @@ internal static class WindowsRaceFreeProcessLauncher
                 }
 
                 jobLease = WindowsJobObjectLease.CreateAndAssign(processInfo.hProcess, jobPolicy);
+
+                if (authenticatedImageIdentity is not null)
+                {
+                    WindowsLaunchedImageIdentityVerifier.VerifyMatches(processInfo.hProcess, authenticatedImageIdentity);
+                    launchedImageIdentityVerified = true;
+                }
+
                 process = Process.GetProcessById(checked((int)processInfo.dwProcessId));
 
                 var previousSuspendCount = NativeMethods.ResumeThread(processInfo.hThread);
@@ -204,7 +217,8 @@ internal static class WindowsRaceFreeProcessLauncher
                     stderr,
                     jobLease,
                     restrictedTokenEnforced,
-                    appContainerEnforced);
+                    appContainerEnforced,
+                    launchedImageIdentityVerified);
             }
             catch
             {
