@@ -1,6 +1,6 @@
 # AEVRIX Mobile Reverse Engineering, Reconstruction & App Lab
 
-Status: foundational vertical slice (v0.1).
+Status: foundational vertical slices v0.1 + v0.2.
 
 ## Boundary
 
@@ -38,14 +38,27 @@ The following are candidates only until benchmarked through `docs/qa/CAPABILITY_
 
 A candidate does not receive production authority merely because it is widely used. Each must earn a lifecycle state from reproducible evidence and hard-gate checks.
 
+## v0.2 — observation, disposable lifecycle and inference foundation
+
+The second vertical slice adds four contracts while preserving capability governance:
+
+- `ObservationRecord`: timezone-aware, hash-linked dynamic evidence records for state transitions, screenshots, UI trees, logs, network traces, persistence snapshots and resource metrics;
+- `DisposableLabRunner`: adapter-neutral lifecycle enforcement for `create -> boot -> probe -> destroy`, including mandatory explicit authorization and cleanup on both success and failure;
+- `Algorithm Inference`: conservative black-box numeric inference with constant, proportional and affine rule families, ambiguity detection and automatic selection of discriminating test cases;
+- `NumericDifferential`: tolerance-aware Original × Reconstruction numeric comparison.
+
+The inference engine deliberately does **not** call a finite sample a mathematical proof. `PROVEN_WITHIN_DECLARED_DOMAIN` is possible only when the caller explicitly declares that the supplied cases exhaust a finite domain and exactly one tested rule family explains all cases within tolerance. Otherwise the engine emits `HIGHLY_PROBABLE`, `INFERRED`, `INFERRED_AMBIGUOUS`, or `UNEXPLAINED`.
+
+The disposable runner is not itself an emulator. Android SDK and Apple simulator implementations remain capability adapters and stay unavailable to this runner until governance permits their lifecycle state.
+
 ## Planned next vertical slices
 
 1. Android manifest/resource adapters behind sandboxed capability contracts.
-2. Disposable AVD lifecycle with deterministic snapshot/reset and evidence capture.
-3. Dynamic observation record: timestamp, prior state, action, next state, screenshots, UI tree, logs and resource metrics.
-4. Algorithm inference corpus and differential harness.
-5. Canonical Mobile Blueprint and Original × Reconstruction comparator.
-6. iOS simulator adapter on compliant Apple infrastructure.
+2. Governed Android SDK adapter implementing the disposable lifecycle after benchmark/hard-gate approval.
+3. Evidence Bus adapter for raw screenshots, UI trees, logs, traces and persistence snapshots.
+4. Algorithm inference corpus expansion: boundary-value, metamorphic, piecewise, rounding and classification families.
+5. Canonical Mobile Blueprint and richer Original × Reconstruction comparator.
+6. iOS simulator adapter on compliant Apple infrastructure after governance approval.
 
 ## Homologation semantics
 
