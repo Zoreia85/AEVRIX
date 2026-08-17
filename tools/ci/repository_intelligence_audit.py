@@ -66,6 +66,8 @@ def audit_registry(data: dict) -> list[str]:
         "requireArtifactSha256ForConsumption",
         "requireProvenanceForConsumption",
         "requireLicenseVerificationForVendoring",
+        "requireRevisionBoundLicenseEvidenceForConsumption",
+        "requireStructuredLicenseScopeExceptions",
         "requireIndependentSecurityReviewForExecution",
         "discoveryNeverImpliesExecutionApproval",
     ):
