@@ -106,6 +106,8 @@ def validate_first_run_bundle(candidate: dict, first_run_path: Path, expected_co
         "uninstallExitCode",
         "presentationObserved",
         "presentedAtUtc",
+        "preAcceptanceNavigationAbsent",
+        "declineExitedWithoutAcceptance",
         "initialAcceptDisabled",
         "explicitConfirmationRequired",
         "acceptancePersisted",
