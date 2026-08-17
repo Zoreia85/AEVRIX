@@ -136,6 +136,121 @@ jobs:
             Write-Host "Candidate $version Authenticode status: $($signature.Status)"
           }
 
+      - name: Microsoft Defender scan exact installer candidates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:RUNNER_TEMP 'aevrix-installer-evidence'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $reportPath = Join-Path $evidence 'defender-evidence.json'
+          $artifactPaths = @(
+            "$env:RUNNER_TEMP\aevrix-installer-old\AEVRIX-$env:OLD_VERSION-win-x64-Setup.exe",
+            "$env:RUNNER_TEMP\aevrix-installer-new\AEVRIX-$env:NEW_VERSION-win-x64-Setup.exe"
+          ) | ForEach-Object { [IO.Path]::GetFullPath($_) }
+
+          $beforeHashes = [ordered]@{}
+          foreach ($path in $artifactPaths) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Defender scan artifact missing: $path" }
+            $beforeHashes[[IO.Path]::GetFileName($path)] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+
+          function Write-DefenderReport {
+            param(
+              [Parameter(Mandatory)] [string]$Status,
+              [string]$Reason = '',
+              $ComputerStatus = $null,
+              [object[]]$Detections = @()
+            )
+            $afterHashes = [ordered]@{}
+            foreach ($path in $artifactPaths) {
+              $afterHashes[[IO.Path]::GetFileName($path)] = if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            }
+            [pscustomobject]@{
+              schemaVersion = 1
+              candidateSha = $env:CANDIDATE_SHA
+              status = $Status
+              reason = $Reason
+              engineVersion = if ($ComputerStatus) { [string]$ComputerStatus.AMEngineVersion } else { $null }
+              productVersion = if ($ComputerStatus) { [string]$ComputerStatus.AMProductVersion } else { $null }
+              signatureVersion = if ($ComputerStatus) { [string]$ComputerStatus.AntivirusSignatureVersion } else { $null }
+              signatureLastUpdated = if ($ComputerStatus) { [string]$ComputerStatus.AntivirusSignatureLastUpdated } else { $null }
+              antivirusEnabled = if ($ComputerStatus) { [bool]$ComputerStatus.AntivirusEnabled } else { $false }
+              amServiceEnabled = if ($ComputerStatus) { [bool]$ComputerStatus.AMServiceEnabled } else { $false }
+              realTimeProtectionEnabled = if ($ComputerStatus) { [bool]$ComputerStatus.RealTimeProtectionEnabled } else { $false }
+              artifactHashesBeforeScan = [pscustomobject]$beforeHashes
+              artifactHashesAfterScan = [pscustomobject]$afterHashes
+              matchingDetectionCount = @($Detections).Count
+              detections = @($Detections | ForEach-Object {
+                [pscustomobject]@{
+                  threatId = [string]$_.ThreatID
+                  initialDetectionTime = [string]$_.InitialDetectionTime
+                  resources = @($_.Resources | ForEach-Object { [string]$_ })
+                }
+              })
+              generatedAt = [DateTimeOffset]::UtcNow.ToString('O')
+            } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8NoBOM
+          }
+
+          if (-not (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) -or -not (Get-Command Start-MpScan -ErrorAction SilentlyContinue) -or -not (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue)) {
+            Write-DefenderReport -Status 'INFRASTRUCTURE_INCONCLUSIVE' -Reason 'Microsoft Defender PowerShell cmdlets are unavailable on this Windows runner.'
+            Write-Warning 'Defender AVA is infrastructure inconclusive: required cmdlets unavailable.'
+            exit 0
+          }
+
+          try {
+            $mp = Get-MpComputerStatus
+          }
+          catch {
+            Write-DefenderReport -Status 'INFRASTRUCTURE_INCONCLUSIVE' -Reason "Get-MpComputerStatus failed: $($_.Exception.Message)"
+            Write-Warning "Defender AVA is infrastructure inconclusive: $($_.Exception.Message)"
+            exit 0
+          }
+
+          if (-not $mp.AntivirusEnabled -or -not $mp.AMServiceEnabled) {
+            Write-DefenderReport -Status 'INFRASTRUCTURE_INCONCLUSIVE' -Reason 'Microsoft Defender antivirus/service is not enabled on this runner.' -ComputerStatus $mp
+            Write-Warning 'Defender AVA is infrastructure inconclusive: antivirus/service disabled.'
+            exit 0
+          }
+
+          try {
+            foreach ($path in $artifactPaths) {
+              Start-MpScan -ScanType CustomScan -ScanPath $path
+            }
+          }
+          catch {
+            Write-DefenderReport -Status 'INFRASTRUCTURE_INCONCLUSIVE' -Reason "Start-MpScan failed: $($_.Exception.Message)" -ComputerStatus $mp
+            Write-Warning "Defender AVA is infrastructure inconclusive: $($_.Exception.Message)"
+            exit 0
+          }
+
+          $detections = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object {
+            $resources = @($_.Resources | ForEach-Object { [string]$_ })
+            $matched = $false
+            foreach ($resource in $resources) {
+              foreach ($artifactPath in $artifactPaths) {
+                if ($resource.IndexOf($artifactPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $matched = $true }
+              }
+            }
+            $matched
+          })
+
+          foreach ($path in $artifactPaths) {
+            $name = [IO.Path]::GetFileName($path)
+            $after = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($after -ne $beforeHashes[$name]) {
+              Write-DefenderReport -Status 'FAIL' -Reason "Artifact hash changed during Defender scan: $name" -ComputerStatus $mp -Detections $detections
+              throw "Defender scan violated artifact immutability for $name"
+            }
+          }
+
+          if ($detections.Count -gt 0) {
+            Write-DefenderReport -Status 'FAIL' -Reason 'Microsoft Defender reported one or more detections bound to exact installer paths.' -ComputerStatus $mp -Detections $detections
+            throw "Microsoft Defender detected a threat in an exact AEVRIX installer candidate."
+          }
+
+          Write-DefenderReport -Status 'PASS' -Reason 'Microsoft Defender custom scan completed for both exact installer artifacts with no path-bound detections and unchanged SHA-256 hashes.' -ComputerStatus $mp
+          Write-Host "PASS: Microsoft Defender scanned the exact old/new installer candidates; hashes remained unchanged and no path-bound detections were reported."
+
       - name: Exercise interruption recovery repair upgrade downgrade resistance and uninstall
         shell: pwsh
         run: |
@@ -167,10 +282,12 @@ jobs:
           $newManifest = if (Test-Path -LiteralPath $newManifestPath) { Get-Content -LiteralPath $newManifestPath -Raw | ConvertFrom-Json } else { $null }
           $lifecyclePath = Join-Path $evidence 'lifecycle-evidence.json'
           $lifecycle = if (Test-Path -LiteralPath $lifecyclePath) { Get-Content -LiteralPath $lifecyclePath -Raw | ConvertFrom-Json } else { $null }
+          $defenderPath = Join-Path $evidence 'defender-evidence.json'
+          $defender = if (Test-Path -LiteralPath $defenderPath) { Get-Content -LiteralPath $defenderPath -Raw | ConvertFrom-Json } else { $null }
           $os = Get-CimInstance Win32_OperatingSystem
           $candidatePath = Join-Path $evidence 'candidate-evidence.json'
           [pscustomobject]@{
-            schemaVersion = 6
+            schemaVersion = 7
             candidateSha = $env:CANDIDATE_SHA
             workflowRunId = '${{ github.run_id }}'
             trigger = '${{ github.event_name }}'
@@ -197,6 +314,10 @@ jobs:
             lifecycleEvidenceSha256 = if (Test-Path -LiteralPath $lifecyclePath) { (Get-FileHash -LiteralPath $lifecyclePath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
             lifecycleLogFile = 'lifecycle.log'
             lifecycleLogSha256 = if (Test-Path -LiteralPath (Join-Path $evidence 'lifecycle.log')) { (Get-FileHash -LiteralPath (Join-Path $evidence 'lifecycle.log') -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            defenderStatus = if ($defender) { [string]$defender.status } else { 'NOT_RUN' }
+            defenderEvidenceFile = 'defender-evidence.json'
+            defenderEvidenceSha256 = if (Test-Path -LiteralPath $defenderPath) { (Get-FileHash -LiteralPath $defenderPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            defender = $defender
             aevrixAuthenticodeGate = 'BLOCKED_UNSIGNED_CANDIDATE'
             canonicalPromotion = 'BOT_AUTHORED_EXACT_CANDIDATE'
             generatedAt = [DateTimeOffset]::UtcNow.ToString('O')
