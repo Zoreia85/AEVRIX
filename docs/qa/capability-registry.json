@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "policy": "docs/qa/CAPABILITY_CONTINUOUS_EVALUATION.md",
   "score_scale": "0-10 per dimension; weighted total 0-100",
   "weights": {
@@ -148,6 +148,106 @@
       "hard_gates": "PENDING",
       "task_families": ["hybrid-quantum-classical-experiment"],
       "recommendation": "research-only-until-measured"
+    },
+    {
+      "id": "ollama-local-runtime",
+      "name": "Ollama local runtime",
+      "family": "local-model-runtime",
+      "state": "LAB",
+      "evaluation_status": "IMPLEMENTED_UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "source_repositories": ["ollama/ollama"],
+      "implementation_paths": [
+        "services/aevrix-remote-brain/src/AEVRIX.Remote.Capabilities/OllamaCapabilityHealthProbe.cs",
+        "services/aevrix-remote-brain/src/AEVRIX.Remote.Capabilities/OllamaModelProvider.cs",
+        "services/aevrix-remote-brain/src/AEVRIX.Remote.Orchestration/OllamaLocalModelProvider.cs"
+      ],
+      "task_families": ["local-model-inference", "offline-model-challenger"],
+      "recommendation": "keep-in-lab-until-benchmarked"
+    },
+    {
+      "id": "mcp-streamable-http",
+      "name": "MCP Streamable HTTP capability",
+      "family": "tool-protocol-client",
+      "state": "LAB",
+      "evaluation_status": "IMPLEMENTED_UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "source_repositories": [],
+      "implementation_paths": [
+        "services/aevrix-remote-brain/src/AEVRIX.Remote.Capabilities/McpCapabilityHealthProbe.cs",
+        "services/aevrix-remote-brain/src/AEVRIX.Remote.Capabilities/McpStreamableHttpClient.cs"
+      ],
+      "task_families": ["mcp-health", "mcp-streamable-http-client"],
+      "recommendation": "keep-in-lab-until-protocol-security-and-value-benchmarks"
+    },
+    {
+      "id": "openhands-sandbox-backend",
+      "name": "OpenHands sandbox backend",
+      "family": "coding-agent-backend",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "source_repositories": ["OpenHands/OpenHands"],
+      "implementation_paths": [
+        "services/aevrix-remote-brain/src/AEVRIX.Remote.Capabilities/SandboxAgentBackendClient.cs"
+      ],
+      "task_families": ["sandboxed-code-repair", "coding-agent-challenger"],
+      "recommendation": "sandbox-license-scope-and-benchmark-before-admission"
+    },
+    {
+      "id": "langflow-adapter",
+      "name": "Langflow adapter",
+      "family": "visual-workflow-adapter",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "source_repositories": ["langflow-ai/langflow"],
+      "implementation_paths": [],
+      "task_families": ["workflow-authoring-comparison", "mcp-workflow-adapter"],
+      "recommendation": "no-runtime-admission-before-pinned-adapter-benchmark"
+    },
+    {
+      "id": "open-design-adapter",
+      "name": "Open Design adapter",
+      "family": "design-reconstruction-reference",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "source_repositories": ["nexu-io/open-design"],
+      "implementation_paths": [],
+      "task_families": ["ui-reconstruction-reference", "design-system-adapter"],
+      "recommendation": "benchmark-and-provenance-review-before-admission"
+    },
+    {
+      "id": "scrapling-authorized-parser",
+      "name": "Scrapling authorized parser subset",
+      "family": "authorized-web-evidence-parser",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "source_repositories": ["D4Vinci/Scrapling"],
+      "implementation_paths": [],
+      "task_families": ["authorized-html-fetch", "resilient-content-parsing"],
+      "forbidden_surfaces": [
+        "captcha-bypass",
+        "cloudflare-bypass",
+        "anti-bot-evasion",
+        "turnstile-bypass",
+        "stealth-browser-mode"
+      ],
+      "recommendation": "restricted-subset-only-after-independent-review-and-benchmark"
     }
   ]
 }
