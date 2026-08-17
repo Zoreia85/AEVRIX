@@ -11,7 +11,18 @@ public sealed partial class MainWindow : Window
 {
     private readonly DispatcherTimer _engineHealthTimer;
     private readonly OperationalActivityJournal _activityJournal = new(capacity: 200);
+    private readonly DesktopFirstRunProfileStore _firstRunProfileStore;
+    private DesktopFirstRunProfile _firstRunProfile;
+    private Exception? _firstRunProfileError;
+    private DesktopLocalIntegrityResult? _localIntegrityResult;
+    private DeviceKeySecurityTier? _deviceSecurityTier;
     private EngineHostSupervisor? _engineSupervisor;
+    private bool _firstRunReady;
+    private bool _integrityAttempted;
+    private bool _engineVerificationAttempted;
+    private bool _deviceCertificateValidated;
+    private bool _remoteSessionAuthenticated;
+    private bool _suppressFirstRunPersistence;
     private bool _engineAuthenticated;
     private bool _engineOperationInProgress;
     private bool _engineHealthProbeInProgress;
@@ -24,6 +35,21 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Title = "AEVRIX Desktop";
         Closed += MainWindow_Closed;
+
+        _firstRunProfileStore = DesktopFirstRunProfileStore.ForCurrentUser();
+        try
+        {
+            _firstRunProfile = _firstRunProfileStore.LoadOrCreate();
+        }
+        catch (Exception ex)
+        {
+            _firstRunProfileError = ex;
+            _firstRunProfile = DesktopFirstRunProfile.CreateNew();
+        }
+
+        InitializeFirstRunControls();
+        _firstRunReady = true;
+        TryValidatePersistedDeviceCertificate();
 
         _engineHealthTimer = new DispatcherTimer
         {
@@ -40,13 +66,22 @@ public sealed partial class MainWindow : Window
             "Desktop",
             "Sessão iniciada",
             "Shell Windows carregado. Estados sem prova permanecem indisponíveis.");
-        ShowSection("home", "Command Center");
+
+        RefreshFirstRunView();
+        var firstRunRequired = _firstRunProfileError is not null || _firstRunProfile.CompletedAtUtc is null;
+        RootNavigation.SelectedItem = firstRunRequired ? OnboardingNavItem : HomeNavItem;
+        ShowSection(firstRunRequired ? "onboarding" : "home", firstRunRequired ? "Inicialização segura" : "Command Center");
     }
 
     private void RootNavigation_SelectionChanged(
         NavigationView sender,
         NavigationViewSelectionChangedEventArgs args)
     {
+        if (!_firstRunReady)
+        {
+            return;
+        }
+
         if (args.SelectedItemContainer is not NavigationViewItem item)
         {
             ShowSection("home", "Command Center");
@@ -62,6 +97,12 @@ public sealed partial class MainWindow : Window
     {
         RootNavigation.SelectedItem = NewInvestigationNavItem;
         ShowSection("new", "Nova investigação");
+    }
+
+    private void OpenOnboardingButton_Click(object sender, RoutedEventArgs e)
+    {
+        RootNavigation.SelectedItem = OnboardingNavItem;
+        ShowSection("onboarding", "Inicialização segura");
     }
 
     private void OpenMissionControlButton_Click(object sender, RoutedEventArgs e)
@@ -130,11 +171,13 @@ public sealed partial class MainWindow : Window
         {
             _engineOperationInProgress = false;
             SetEngineControlsBusy(false);
+            RefreshFirstRunView();
         }
     }
 
     private async Task VerifyEngineHostAsync(bool restart)
     {
+        _engineVerificationAttempted = true;
         _engineOperationInProgress = true;
         _engineStoppedByUser = false;
         _engineAuthenticated = false;
@@ -190,6 +233,7 @@ public sealed partial class MainWindow : Window
         {
             _engineOperationInProgress = false;
             SetEngineControlsBusy(false);
+            RefreshFirstRunView();
         }
     }
 
@@ -218,6 +262,7 @@ public sealed partial class MainWindow : Window
                 "O supervisor detectou encerramento inesperado e revogou o estado autenticado da sessão.");
             await DisposeEngineSupervisorAsync();
             SetEngineControlsBusy(false);
+            RefreshFirstRunView();
             return;
         }
 
@@ -252,6 +297,7 @@ public sealed partial class MainWindow : Window
             if (!_isClosing)
             {
                 SetEngineControlsBusy(false);
+                RefreshFirstRunView();
             }
         }
     }
@@ -267,6 +313,353 @@ public sealed partial class MainWindow : Window
         {
             throw new InvalidDataException("EngineHost returned an invalid authenticated Ping response.");
         }
+    }
+
+    private void VerifyLocalIntegrityButton_Click(object sender, RoutedEventArgs e)
+    {
+        _integrityAttempted = true;
+        try
+        {
+            _localIntegrityResult = DesktopLocalIntegrityProbe.Probe(
+                ("Desktop", typeof(MainWindow).Assembly.Location),
+                ("Core", typeof(DesktopFirstRunReadiness).Assembly.Location),
+                ("EngineHost", typeof(EngineHostRuntime).Assembly.Location));
+
+            RecordActivity(
+                _localIntegrityResult.Verified ? OperationalActivityLevel.Success : OperationalActivityLevel.Error,
+                "Integridade",
+                _localIntegrityResult.Verified ? "Estrutura local verificada" : "Estrutura local bloqueada",
+                _localIntegrityResult.Detail);
+        }
+        catch (Exception ex)
+        {
+            _localIntegrityResult = new DesktopLocalIntegrityResult(
+                false,
+                $"A verificação estrutural falhou de forma fechada ({ex.GetType().Name}).",
+                Array.Empty<DesktopIntegrityArtifact>());
+            RecordActivity(
+                OperationalActivityLevel.Error,
+                "Integridade",
+                "Verificação estrutural falhou",
+                _localIntegrityResult.Detail);
+        }
+
+        RefreshFirstRunView();
+    }
+
+    private void PrepareDeviceIdentityButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var provisioner = new WindowsDeviceIdentityProvisioner();
+            using var key = provisioner.GetOrCreateTpmKey(_firstRunProfile.InstallationId);
+            _deviceSecurityTier = key.SecurityTierValue;
+            RecordActivity(
+                OperationalActivityLevel.Success,
+                "Identidade",
+                "Identidade TPM preparada",
+                "Uma chave ECDSA P-256 não exportável vinculada ao provedor TPM foi comprovada para esta instalação.");
+            OnboardingResultNotice.Severity = InfoBarSeverity.Success;
+            OnboardingResultNotice.Title = "Identidade local pronta";
+            OnboardingResultNotice.Message = "A chave TPM não exportável foi criada ou reaberta com sucesso. Nenhum fallback de software foi aplicado.";
+            OnboardingResultNotice.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            _deviceSecurityTier = null;
+            RecordActivity(
+                OperationalActivityLevel.Error,
+                "Identidade",
+                "Identidade TPM bloqueada",
+                $"A identidade TPM não pôde ser comprovada ({ex.GetType().Name}); fallback de software não foi aplicado automaticamente.");
+            OnboardingResultNotice.Severity = InfoBarSeverity.Error;
+            OnboardingResultNotice.Title = "Identidade TPM indisponível";
+            OnboardingResultNotice.Message = $"Falha fechada ({ex.GetType().Name}). O AEVRIX não reduziu automaticamente o tier de segurança.";
+            OnboardingResultNotice.IsOpen = true;
+        }
+
+        RefreshFirstRunView();
+    }
+
+    private void OperatingModeInput_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_firstRunReady || _suppressFirstRunPersistence)
+        {
+            return;
+        }
+
+        var mode = (OperatingModeInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+        {
+            "local" => DesktopOperatingMode.LocalSupervised,
+            "remote" => DesktopOperatingMode.RemoteGoverned,
+            _ => (DesktopOperatingMode?)null
+        };
+
+        _firstRunProfile = _firstRunProfile with
+        {
+            RequestedMode = mode,
+            CompletedAtUtc = null
+        };
+        TrySaveFirstRunProfile();
+        RecordActivity(
+            OperationalActivityLevel.Informational,
+            "Inicialização",
+            "Modo operacional alterado",
+            mode == DesktopOperatingMode.RemoteGoverned
+                ? "Modo remoto governado selecionado; conclusão permanecerá bloqueada até endpoint, certificado e sessão serem comprovados."
+                : mode == DesktopOperatingMode.LocalSupervised
+                    ? "Modo local supervisionado selecionado; capacidades remotas permanecem indisponíveis."
+                    : "Nenhum modo operacional selecionado.");
+        RefreshFirstRunView();
+    }
+
+    private void PermissionsAcknowledgementCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_firstRunReady || _suppressFirstRunPersistence)
+        {
+            return;
+        }
+
+        _firstRunProfile = _firstRunProfile with
+        {
+            PermissionsAcknowledged = PermissionsAcknowledgementCheckBox.IsChecked == true,
+            CompletedAtUtc = null
+        };
+        TrySaveFirstRunProfile();
+        RefreshFirstRunView();
+    }
+
+    private void CompleteOnboardingButton_Click(object sender, RoutedEventArgs e)
+    {
+        var evaluation = GetFirstRunEvaluation();
+        if (_firstRunProfileError is not null || !evaluation.CanComplete)
+        {
+            OnboardingResultNotice.Severity = InfoBarSeverity.Warning;
+            OnboardingResultNotice.Title = "Inicialização ainda bloqueada";
+            OnboardingResultNotice.Message = _firstRunProfileError is not null
+                ? "O perfil persistido precisa ser reparado antes da conclusão."
+                : evaluation.Summary;
+            OnboardingResultNotice.IsOpen = true;
+            return;
+        }
+
+        _firstRunProfile = _firstRunProfile with { CompletedAtUtc = DateTimeOffset.UtcNow };
+        if (!TrySaveFirstRunProfile())
+        {
+            OnboardingResultNotice.Severity = InfoBarSeverity.Error;
+            OnboardingResultNotice.Title = "Não foi possível persistir a conclusão";
+            OnboardingResultNotice.Message = "O Desktop permanece em estado não concluído porque o perfil local não pôde ser gravado de forma confiável.";
+            OnboardingResultNotice.IsOpen = true;
+            return;
+        }
+
+        RecordActivity(
+            OperationalActivityLevel.Success,
+            "Inicialização",
+            "First-run concluído",
+            $"A configuração inicial foi concluída para o modo {_firstRunProfile.RequestedMode}. Estados operacionais continuam sujeitos a prova em cada sessão.");
+        OnboardingResultNotice.Severity = InfoBarSeverity.Success;
+        OnboardingResultNotice.Title = "Inicialização concluída";
+        OnboardingResultNotice.Message = "A configuração inicial foi persistida. Isso não substitui os health-checks e gates de runtime de cada sessão.";
+        OnboardingResultNotice.IsOpen = true;
+        RefreshFirstRunView();
+    }
+
+    private void ResetFirstRunProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var replacement = DesktopFirstRunProfile.CreateNew();
+        try
+        {
+            _firstRunProfileStore.Save(replacement);
+            _firstRunProfile = replacement;
+            _firstRunProfileError = null;
+            _deviceSecurityTier = null;
+            _deviceCertificateValidated = false;
+            _remoteSessionAuthenticated = false;
+            InitializeFirstRunControls();
+            RecordActivity(
+                OperationalActivityLevel.Warning,
+                "Inicialização",
+                "Perfil local recriado",
+                "O perfil persistido de first-run foi substituído por um estado limpo; nenhuma confiança anterior foi reaproveitada.");
+        }
+        catch (Exception ex)
+        {
+            _firstRunProfileError = ex;
+            RecordActivity(
+                OperationalActivityLevel.Error,
+                "Inicialização",
+                "Falha ao recriar perfil",
+                $"O perfil local não pôde ser recriado ({ex.GetType().Name}).");
+        }
+
+        RefreshFirstRunView();
+    }
+
+    private void SettingsRefreshButton_Click(object sender, RoutedEventArgs e)
+    {
+        TryValidatePersistedDeviceCertificate();
+        RefreshFirstRunView();
+    }
+
+    private void InitializeFirstRunControls()
+    {
+        _suppressFirstRunPersistence = true;
+        try
+        {
+            OperatingModeInput.SelectedIndex = _firstRunProfile.RequestedMode switch
+            {
+                DesktopOperatingMode.LocalSupervised => 0,
+                DesktopOperatingMode.RemoteGoverned => 1,
+                _ => -1
+            };
+            PermissionsAcknowledgementCheckBox.IsChecked = _firstRunProfile.PermissionsAcknowledged;
+        }
+        finally
+        {
+            _suppressFirstRunPersistence = false;
+        }
+    }
+
+    private void TryValidatePersistedDeviceCertificate()
+    {
+        _deviceCertificateValidated = false;
+        if (string.IsNullOrWhiteSpace(_firstRunProfile.DeviceCertificateThumbprint))
+        {
+            return;
+        }
+
+        try
+        {
+            var provider = new WindowsDeviceCertificateProvider();
+            using var certificate = provider.LoadByThumbprint(_firstRunProfile.DeviceCertificateThumbprint);
+            _deviceCertificateValidated = true;
+        }
+        catch (Exception ex)
+        {
+            RecordActivity(
+                OperationalActivityLevel.Warning,
+                "Identidade",
+                "Certificado persistido não validado",
+                $"O certificado de dispositivo referenciado pelo perfil não foi aceito nesta sessão ({ex.GetType().Name}).");
+        }
+    }
+
+    private bool TrySaveFirstRunProfile()
+    {
+        if (_firstRunProfileError is not null)
+        {
+            return false;
+        }
+
+        try
+        {
+            _firstRunProfileStore.Save(_firstRunProfile);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _firstRunProfileError = ex;
+            return false;
+        }
+    }
+
+    private DesktopFirstRunEvaluation GetFirstRunEvaluation()
+    {
+        var signals = new DesktopFirstRunSignals(
+            StructuralIntegrityAttempted: _integrityAttempted,
+            StructuralIntegrityVerified: _localIntegrityResult?.Verified == true,
+            EngineHostVerificationAttempted: _engineVerificationAttempted,
+            EngineHostAuthenticated: _engineAuthenticated,
+            DeviceSecurityTier: _deviceSecurityTier,
+            DeviceCertificateValidated: _deviceCertificateValidated,
+            RemoteEndpointConfigured: !string.IsNullOrWhiteSpace(_firstRunProfile.RemoteBaseUri),
+            RemoteSessionAuthenticated: _remoteSessionAuthenticated,
+            RequestedMode: _firstRunProfile.RequestedMode,
+            PermissionsAcknowledged: _firstRunProfile.PermissionsAcknowledged);
+
+        return DesktopFirstRunReadiness.Evaluate(signals);
+    }
+
+    private void RefreshFirstRunView()
+    {
+        if (!_firstRunReady)
+        {
+            return;
+        }
+
+        var evaluation = GetFirstRunEvaluation();
+        RenderGate(evaluation.Gate("integrity"), IntegrityGateStatusText, IntegrityGateDetailText);
+        RenderGate(evaluation.Gate("enginehost"), EngineGateStatusText, EngineGateDetailText);
+        RenderGate(evaluation.Gate("device-identity"), DeviceIdentityGateStatusText, DeviceIdentityGateDetailText);
+        RenderGate(evaluation.Gate("operating-mode"), OperatingModeGateStatusText, OperatingModeGateDetailText);
+        RenderGate(evaluation.Gate("remote-identity"), RemoteIdentityGateStatusText, RemoteIdentityGateDetailText);
+        RenderGate(evaluation.Gate("permissions"), PermissionsGateStatusText, PermissionsGateDetailText);
+
+        OnboardingSummaryText.Text = _firstRunProfileError is null
+            ? evaluation.Summary
+            : $"Perfil local bloqueado ({_firstRunProfileError.GetType().Name}). Recrie o perfil antes de concluir.";
+        CompleteOnboardingButton.IsEnabled = _firstRunProfileError is null && evaluation.CanComplete;
+
+        FirstRunProfileNotice.IsOpen = _firstRunProfileError is not null;
+        if (_firstRunProfileError is not null)
+        {
+            FirstRunProfileNotice.Message = $"O perfil persistido falhou na validação ({_firstRunProfileError.GetType().Name}). Nenhuma configuração anterior foi tratada como confiável.";
+        }
+        ResetFirstRunProfileButton.Visibility = _firstRunProfileError is null ? Visibility.Collapsed : Visibility.Visible;
+
+        CommandCenterOnboardingStatusText.Text = _firstRunProfile.CompletedAtUtc is { } completed
+            ? $"Concluída • {completed.ToLocalTime():dd/MM/yyyy HH:mm}"
+            : evaluation.CanComplete
+                ? "Pronta para concluir"
+                : "Pendente / bloqueada";
+
+        RefreshSettingsView();
+    }
+
+    private static void RenderGate(
+        DesktopReadinessGate gate,
+        TextBlock statusText,
+        TextBlock detailText)
+    {
+        statusText.Text = gate.Status switch
+        {
+            DesktopReadinessStatus.Ready => "PRONTO",
+            DesktopReadinessStatus.Blocked => "BLOQUEADO",
+            _ => "PENDENTE"
+        };
+        detailText.Text = gate.Detail;
+    }
+
+    private void RefreshSettingsView()
+    {
+        SettingsInstallationIdText.Text = $"Installation ID: {_firstRunProfile.InstallationId}";
+        SettingsCompletionText.Text = _firstRunProfile.CompletedAtUtc is { } completed
+            ? $"First-run concluído em {completed.ToLocalTime():dd/MM/yyyy HH:mm}."
+            : "First-run ainda não concluído.";
+        SettingsModeText.Text = _firstRunProfile.RequestedMode switch
+        {
+            DesktopOperatingMode.LocalSupervised => "Local supervisionado",
+            DesktopOperatingMode.RemoteGoverned => "Remoto governado",
+            _ => "Não selecionado"
+        };
+        SettingsIdentityText.Text = _deviceSecurityTier switch
+        {
+            DeviceKeySecurityTier.TpmNonExportable => "TPM não exportável comprovado nesta sessão.",
+            DeviceKeySecurityTier.SoftwareNonExportable => "Software não exportável comprovado nesta sessão.",
+            _ when _deviceCertificateValidated => "Certificado do dispositivo validado; tier da chave local ainda não foi comprovado nesta sessão.",
+            _ => "Identidade local não comprovada nesta sessão."
+        };
+        SettingsEngineText.Text = _engineAuthenticated
+            ? "EngineHost autenticado nesta sessão."
+            : _engineVerificationAttempted
+                ? "EngineHost sem prova autenticada válida nesta sessão."
+                : "EngineHost ainda não verificado nesta sessão.";
+        SettingsRemoteText.Text = _remoteSessionAuthenticated
+            ? "Sessão remota autenticada."
+            : !string.IsNullOrWhiteSpace(_firstRunProfile.RemoteBaseUri)
+                ? "Endpoint configurado, porém sessão remota não autenticada."
+                : "Endpoint remoto não configurado; sessão remota indisponível.";
     }
 
     private void RenderAuthenticatedEngineState(string message)
@@ -291,6 +684,8 @@ public sealed partial class MainWindow : Window
         VerifyEngineHostButton.IsEnabled = !busy;
         RestartEngineHostButton.IsEnabled = !busy;
         StopEngineHostButton.IsEnabled = !busy && _engineSupervisor?.IsRunning == true;
+        OnboardingVerifyEngineButton.IsEnabled = !busy;
+        SettingsVerifyEngineButton.IsEnabled = !busy;
     }
 
     private async Task DisposeEngineSupervisorAsync()
@@ -379,15 +774,19 @@ public sealed partial class MainWindow : Window
     private void ShowSection(string route, string title)
     {
         var showHome = string.Equals(route, "home", StringComparison.Ordinal);
+        var showOnboarding = string.Equals(route, "onboarding", StringComparison.Ordinal);
         var showNew = string.Equals(route, "new", StringComparison.Ordinal);
         var showMission = string.Equals(route, "mission", StringComparison.Ordinal);
         var showActivity = string.Equals(route, "activity", StringComparison.Ordinal);
+        var showSettings = string.Equals(route, "settings", StringComparison.Ordinal);
 
         CommandCenterView.Visibility = showHome ? Visibility.Visible : Visibility.Collapsed;
+        OnboardingView.Visibility = showOnboarding ? Visibility.Visible : Visibility.Collapsed;
         NewInvestigationView.Visibility = showNew ? Visibility.Visible : Visibility.Collapsed;
         MissionControlView.Visibility = showMission ? Visibility.Visible : Visibility.Collapsed;
         ActivityView.Visibility = showActivity ? Visibility.Visible : Visibility.Collapsed;
-        PlannedSectionView.Visibility = !showHome && !showNew && !showMission && !showActivity
+        SettingsView.Visibility = showSettings ? Visibility.Visible : Visibility.Collapsed;
+        PlannedSectionView.Visibility = !showHome && !showOnboarding && !showNew && !showMission && !showActivity && !showSettings
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -395,8 +794,12 @@ public sealed partial class MainWindow : Window
         {
             RefreshActivityView();
         }
+        if (_firstRunReady && (showOnboarding || showSettings || showHome))
+        {
+            RefreshFirstRunView();
+        }
 
-        if (!showHome && !showNew && !showMission && !showActivity)
+        if (!showHome && !showOnboarding && !showNew && !showMission && !showActivity && !showSettings)
         {
             PlannedSectionTitle.Text = title;
         }
