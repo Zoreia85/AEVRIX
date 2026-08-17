@@ -1,0 +1,105 @@
+name: Windows first-run terms driver
+
+on:
+  repository_dispatch:
+    types: [aevrix-candidate-promoted]
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Exact bot-authored candidate SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: windows-first-run-driver-${{ github.event.client_payload.sha || inputs.candidate_sha }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch-after-installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.event.client_payload.sha || inputs.candidate_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate exact candidate identity input
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid candidate SHA: $CANDIDATE_SHA" >&2
+            exit 1
+          fi
+
+      - name: Resolve successful exact installer run
+        id: installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-installer-candidate.yml/runs?head_sha=${CANDIDATE_SHA}&event=repository_dispatch&per_page=20"
+          run_id=""
+          for attempt in $(seq 1 80); do
+            payload="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$api")"
+            result="$(python -c 'import json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; runs=[r for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows installer candidate"]; runs.sort(key=lambda r:r.get("created_at", ""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s" % (r.get("id"), r.get("status"), r.get("conclusion") or ""))' "$CANDIDATE_SHA" <<<"$payload")"
+            IFS='|' read -r candidate_run status conclusion <<<"$result"
+            if [[ "$candidate_run" != "NONE" && "$status" == "completed" ]]; then
+              if [[ "$conclusion" != "success" ]]; then
+                echo "Exact installer run $candidate_run completed $conclusion; first-run AVA remains fail-closed." >&2
+                exit 2
+              fi
+              run_id="$candidate_run"
+              break
+            fi
+            sleep 15
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "No completed exact installer run was resolved for $CANDIDATE_SHA within the bounded driver window." >&2
+            exit 3
+          fi
+          echo "installer_run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Resolved exact successful installer run: $run_id"
+
+      - name: Dispatch exact installed first-run terms AVA
+        env:
+          INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(python -c 'import json,os; print(json.dumps({"ref":"main","inputs":{"installer_run_id":os.environ["INSTALLER_RUN_ID"],"candidate_sha":os.environ["CANDIDATE_SHA"]}}))')"
+          code="$(curl --silent --show-error --output response.txt --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/dispatches" \
+            -d "$body")"
+          if [[ "$code" != "204" ]]; then
+            cat response.txt >&2 || true
+            echo "First-run AVA workflow dispatch failed with HTTP $code" >&2
+            exit 1
+          fi
+          echo "Dispatched Windows first-run terms AVA for candidate $CANDIDATE_SHA using installer run $INSTALLER_RUN_ID."
+
+      - name: Publish driver summary
+        env:
+          INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
+        shell: bash
+        run: |
+          {
+            echo '## AEVRIX first-run AVA driver'
+            echo
+            echo "- Exact candidate: \`$CANDIDATE_SHA\`"
+            echo "- Exact installer run: **$INSTALLER_RUN_ID**"
+            echo '- Installer conclusion: **SUCCESS**'
+            echo '- First-run AVA dispatch: **SENT**'
+            echo
+            echo 'The driver does not grant release credit. The dispatched Windows first-run terms AVA must complete PASS on the exact installer bits.'
+          } >> "$GITHUB_STEP_SUMMARY"
