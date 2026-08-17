@@ -30,7 +30,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +44,94 @@ jobs:
 
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Publish installer-equivalent Desktop baseline
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-self-contained-baseline'
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:ContinuousIntegrationBuild=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
+            -o $out
+          if ($LASTEXITCODE -ne 0) { throw "Baseline self-contained publish failed: $LASTEXITCODE" }
+
+      - name: Smoke installer-equivalent Desktop baseline
+        id: baseline_smoke
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./tools/release/Test-DesktopStartup.ps1 `
+            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-self-contained-baseline\AEVRIX.Desktop.exe') `
+            -OutputPath (Join-Path $env:RUNNER_TEMP 'baseline-startup.json') `
+            -AliveSeconds 5 `
+            -ExitTimeoutSeconds 5
+
+      - name: Publish explicit x64 self-contained Desktop
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-self-contained-x64'
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:Platform=x64 `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:ContinuousIntegrationBuild=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
+            -o $out
+          if ($LASTEXITCODE -ne 0) { throw "Explicit x64 self-contained publish failed: $LASTEXITCODE" }
+
+      - name: Smoke explicit x64 self-contained Desktop
+        id: x64_smoke
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./tools/release/Test-DesktopStartup.ps1 `
+            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-self-contained-x64\AEVRIX.Desktop.exe') `
+            -OutputPath (Join-Path $env:RUNNER_TEMP 'x64-startup.json') `
+            -AliveSeconds 5 `
+            -ExitTimeoutSeconds 5
+
+      - name: Diagnose self-contained startup comparison
+        if: always()
+        shell: pwsh
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline_smoke.outcome }}
+          X64_OUTCOME: ${{ steps.x64_smoke.outcome }}
+        run: |
+          Write-Host "baseline=$env:BASELINE_OUTCOME x64=$env:X64_OUTCOME"
+          foreach ($name in @('baseline-startup.json','x64-startup.json')) {
+            $path = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path -LiteralPath $path) {
+              Write-Host "=== $name ==="
+              Get-Content -LiteralPath $path -Raw | Write-Host
+            }
+          }
+          Write-Host '=== recent application/runtime events mentioning AEVRIX or application errors ==='
+          try {
+            Get-WinEvent -FilterHashtable @{ LogName='Application'; StartTime=(Get-Date).AddMinutes(-10) } -ErrorAction Stop |
+              Where-Object { $_.ProviderName -in @('Application Error','.NET Runtime','Windows Error Reporting') -or $_.Message -match 'AEVRIX' } |
+              Select-Object -First 40 TimeCreated,ProviderName,Id,LevelDisplayName,Message |
+              Format-List | Out-String -Width 240 | Write-Host
+          } catch {
+            Write-Warning "Application event log diagnostic unavailable: $($_.Exception.Message)"
+          }
+
+      - name: Require explicit x64 self-contained startup
+        if: always()
+        shell: pwsh
+        env:
+          X64_OUTCOME: ${{ steps.x64_smoke.outcome }}
+        run: |
+          if ($env:X64_OUTCOME -ne 'success') {
+            throw "Explicit x64 self-contained Desktop startup failed; see diagnostic comparison above."
+          }
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
