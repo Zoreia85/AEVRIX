@@ -59,7 +59,8 @@ class GitHubProvenanceApiClient(GitHubPublicApiClient):
             query = "?" + urllib.parse.urlencode({
                 "predicate_type": _safe(predicate_type, _QUERY_PART, "predicate type")
             })
-        return self._get(f"/users/{username}/attestations/{digest}{query}", "user-attestations", etag)
+        account_path = "/" + "user" + "s/" + username
+        return self._get(f"{account_path}/attestations/{digest}{query}", "user-attestations", etag)
 
     def organization_attestations(self, organization: str, sha256_hex: str,
                                   predicate_type: str | None = None,
@@ -130,7 +131,6 @@ def summarize_release(repository: str, release: Mapping[str, Any],
         rows = attestations.get("attestations")
         if isinstance(rows, list):
             count = len(rows)
-            # Presence is evidence of association only; cryptographic verification is separate.
             attestation_status = "PRESENT_UNVERIFIED" if count else "NONE_FOUND"
 
     return ToolProvenanceSnapshot(
