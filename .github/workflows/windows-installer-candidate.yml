@@ -1,22 +1,15 @@
 name: Windows installer candidate
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "apps/aevrix-windows/installer/**"
-      - "apps/aevrix-windows/src/AEVRIX.Desktop/**"
-      - "apps/aevrix-windows/src/AEVRIX.EngineHost/**"
-      - "apps/aevrix-windows/src/AEVRIX.Core/**"
-      - "global.json"
-      - ".github/workflows/windows-installer-candidate.yml"
+  repository_dispatch:
+    types: [aevrix-candidate-promoted]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-installer-candidate-${{ github.ref }}
+  group: windows-installer-candidate-${{ github.event.client_payload.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -24,6 +17,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
+      CANDIDATE_SHA: ${{ github.event.client_payload.sha || github.sha }}
       NSIS_VERSION: "3.12"
       NSIS_PACKAGE_VERSION: "3.12.0"
       NSIS_SETUP_SHA256: "3BC2B06253A7E4957111BE152AC6A536E0C7478A706E19DA814038DB5D706495"
@@ -32,11 +26,26 @@ jobs:
       NEW_VERSION: "0.0.2"
 
     steps:
-      - name: Checkout exact candidate
+      - name: Checkout exact canonical candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          fetch-depth: 2
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Verify exact bot-authored candidate identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -ne $env:CANDIDATE_SHA) {
+            throw "Installer lifecycle checkout mismatch. Expected $env:CANDIDATE_SHA, got $actual"
+          }
+          $author = (& git show -s --format='%an <%ae>' HEAD).Trim()
+          if ($author -notmatch '^github-actions\[bot\] <41898282\+github-actions\[bot\]@users\.noreply\.github\.com>$') {
+            throw "Installer lifecycle refuses non-canonical author identity: $author"
+          }
+          Write-Host "Exact canonical candidate verified: $actual / $author"
 
       - name: Setup .NET 10.0.400
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -98,6 +107,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '3\.12') { throw "Unexpected makensis version: $versionOutput" }
           "MAKENSIS_EXE=$makensis" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "version=$versionOutput" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "makensis pinned at $makensis : $versionOutput"
 
       - name: Build old installer candidate
         shell: pwsh
@@ -160,9 +170,10 @@ jobs:
           $os = Get-CimInstance Win32_OperatingSystem
           $candidatePath = Join-Path $evidence 'candidate-evidence.json'
           [pscustomobject]@{
-            schemaVersion = 5
-            candidateSha = '${{ github.sha }}'
+            schemaVersion = 6
+            candidateSha = $env:CANDIDATE_SHA
             workflowRunId = '${{ github.run_id }}'
+            trigger = '${{ github.event_name }}'
             runnerOs = $env:RUNNER_OS
             windows = [pscustomobject]@{ caption = [string]$os.Caption; version = [string]$os.Version; buildNumber = [string]$os.BuildNumber }
             dotnetSdk = (& dotnet --version).Trim()
@@ -187,7 +198,7 @@ jobs:
             lifecycleLogFile = 'lifecycle.log'
             lifecycleLogSha256 = if (Test-Path -LiteralPath (Join-Path $evidence 'lifecycle.log')) { (Get-FileHash -LiteralPath (Join-Path $evidence 'lifecycle.log') -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
             aevrixAuthenticodeGate = 'BLOCKED_UNSIGNED_CANDIDATE'
-            canonicalPromotion = 'CANONICAL_MAIN_EXECUTOR'
+            canonicalPromotion = 'BOT_AUTHORED_EXACT_CANDIDATE'
             generatedAt = [DateTimeOffset]::UtcNow.ToString('O')
           } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $candidatePath -Encoding utf8NoBOM
           $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -198,7 +209,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: aevrix-windows-installer-candidate-${{ github.sha }}
+          name: aevrix-windows-installer-candidate-${{ env.CANDIDATE_SHA }}
           path: ${{ runner.temp }}\aevrix-installer-evidence
           if-no-files-found: warn
           retention-days: 7
