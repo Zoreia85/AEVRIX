@@ -131,10 +131,10 @@ public sealed partial class ResearchBrowserView : UserControl
 
             var profilePath = _paths.ProjectBrowserProfile(project.Id, project.TargetId);
             Directory.CreateDirectory(profilePath);
-            var environment = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
+            var environment = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateWithOptionsAsync(
                 null,
                 profilePath,
-                null);
+                new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions());
             if (generation != _loadGeneration)
             {
                 return;
