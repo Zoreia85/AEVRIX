@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 1,
-  "verifiedAtUtc": "2026-08-15T17:30:00Z",
+  "schemaVersion": 2,
+  "verifiedAtUtc": "2026-08-17T12:22:42Z",
   "policy": {
     "defaultRuntimeApproval": "Denied",
+    "requireObservedRevision": true,
     "requirePinnedRevisionForExecution": true,
     "requireLicenseVerificationForVendoring": true,
     "requireIndependentSecurityReviewForExecution": true,
@@ -26,7 +27,9 @@
         "model-allowlist",
         "bounded-io",
         "judge-before-trust"
-      ]
+      ],
+      "observedRevision": "d67ad83426633195089509347ffd4fe795120198",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "sindresorhus/awesome",
@@ -42,7 +45,9 @@
         "never-auto-install",
         "never-auto-execute",
         "independent-license-review"
-      ]
+      ],
+      "observedRevision": "7cb5c8371c0fe73e5444a42d5542f6280c38b1a6",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "OpenHands/OpenHands",
@@ -62,7 +67,9 @@
         "network-policy",
         "no-host-secrets",
         "judge-before-trust"
-      ]
+      ],
+      "observedRevision": "6670b4726a81fc73e797a193dae86264857a663d",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "Shubhamsaboo/awesome-llm-apps",
@@ -78,7 +85,9 @@
         "selective-benchmark-only",
         "no-wholesale-copy",
         "provenance-required"
-      ]
+      ],
+      "observedRevision": "813a55e1a6a80d2329b55287b4f33cbf661538ea",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "langflow-ai/langflow",
@@ -95,7 +104,9 @@
         "permission-scoped",
         "sandbox-external-components",
         "pin-before-execution"
-      ]
+      ],
+      "observedRevision": "dc39e2a72409a14404b2baf9dcb6c25f01b0dd08",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "punkpeye/awesome-mcp-servers",
@@ -113,7 +124,9 @@
         "permission-scope",
         "never-auto-install",
         "never-auto-execute"
-      ]
+      ],
+      "observedRevision": "cbcdf8f7700cfe4c0ef9aeb232f64aeebe8a184c",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "nexu-io/open-design",
@@ -132,7 +145,9 @@
         "workspace-scope",
         "pin-before-execution",
         "provenance-required"
-      ]
+      ],
+      "observedRevision": "0cc1b9123adcf3951e438085fcb9dfb71b19703d",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "public-apis/public-apis",
@@ -151,7 +166,9 @@
         "validate-privacy",
         "validate-uptime",
         "never-auto-call"
-      ]
+      ],
+      "observedRevision": "b2ad91b0784237ef8e7eebfa4d2310c65a0a7b97",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "D4Vinci/Scrapling",
@@ -177,7 +194,9 @@
         "no-agent-skill-import",
         "no-broad-extras-auto-install",
         "bounded-network-scope"
-      ]
+      ],
+      "observedRevision": "5d213a2d4764002bfc4fed33c32fe09fa8b0bf7f",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     },
     {
       "repository": "microsoft/mxc",
@@ -185,7 +204,7 @@
       "archived": false,
       "licenseSpdx": "MIT",
       "pinnedRevision": "692275b84eaa3f83cd8582dc774bc5f354f46ccf",
-      "verifiedAtUtc": "2026-08-16T14:28:00Z",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z",
       "integrationModes": [
         "Reference"
       ],
@@ -199,7 +218,8 @@
         "upstream-preview-not-security-boundary",
         "independent-backend-verification-required",
         "pin-before-any-code-consumption"
-      ]
+      ],
+      "observedRevision": "692275b84eaa3f83cd8582dc774bc5f354f46ccf"
     },
     {
       "repository": "ripienaar/free-for-dev",
@@ -215,7 +235,9 @@
         "no-vendoring-without-license",
         "revalidate-provider-terms",
         "no-catalog-copy"
-      ]
+      ],
+      "observedRevision": "a8f8fab2f4c8b73610a6d20beb34de4678f96605",
+      "verifiedAtUtc": "2026-08-17T12:22:42Z"
     }
   ]
 }

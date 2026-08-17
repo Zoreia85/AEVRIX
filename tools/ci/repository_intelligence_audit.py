@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "docs" / "manifests" / "repository-intelligence.json"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+REVISION_RE = re.compile(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})")
 ALLOWED_MODES = {"Reference", "DiscoverySeed", "Adapter", "OptionalTool", "Vendored", "Blocked"}
 EXECUTABLE_MODES = {"Adapter", "OptionalTool", "Vendored"}
 APPROVED_RUNTIME = "Approved"
@@ -47,8 +48,8 @@ def _is_utc_timestamp(value: object) -> bool:
 
 def audit_registry(data: dict) -> list[str]:
     failures: list[str] = []
-    if data.get("schemaVersion") != 1:
-        failures.append("schemaVersion must be 1")
+    if data.get("schemaVersion") != 2:
+        failures.append("schemaVersion must be 2")
     if not _is_utc_timestamp(data.get("verifiedAtUtc")):
         failures.append("verifiedAtUtc must be an ISO-8601 UTC timestamp ending in Z")
 
@@ -56,6 +57,7 @@ def audit_registry(data: dict) -> list[str]:
     if policy.get("defaultRuntimeApproval") != "Denied":
         failures.append("default runtime approval must be Denied")
     for flag in (
+        "requireObservedRevision",
         "requirePinnedRevisionForExecution",
         "requireLicenseVerificationForVendoring",
         "requireIndependentSecurityReviewForExecution",
@@ -90,6 +92,12 @@ def audit_registry(data: dict) -> list[str]:
         if not isinstance(license_spdx, str) or not license_spdx:
             failures.append(f"{name}: licenseSpdx is required")
 
+        observed_revision = record.get("observedRevision")
+        if not isinstance(observed_revision, str) or REVISION_RE.fullmatch(observed_revision) is None:
+            failures.append(f"{name}: observedRevision must be a full 40- or 64-character hexadecimal revision")
+        if not _is_utc_timestamp(record.get("verifiedAtUtc")):
+            failures.append(f"{name}: verifiedAtUtc is required and must be an ISO-8601 UTC timestamp ending in Z")
+
         modes = record.get("integrationModes")
         if not isinstance(modes, list) or not modes or any(mode not in ALLOWED_MODES for mode in modes):
             failures.append(f"{name}: invalid integrationModes")
@@ -105,10 +113,6 @@ def audit_registry(data: dict) -> list[str]:
         if pinned_revision is not None:
             if not isinstance(pinned_revision, str) or re.fullmatch(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})", pinned_revision) is None:
                 failures.append(f"{name}: pinnedRevision must be a full 40- or 64-character hexadecimal revision")
-
-        record_verified_at = record.get("verifiedAtUtc")
-        if record_verified_at is not None and not _is_utc_timestamp(record_verified_at):
-            failures.append(f"{name}: verifiedAtUtc must be an ISO-8601 UTC timestamp ending in Z")
 
         if name in DISCOVERY_ONLY:
             if modes != ["DiscoverySeed"]:
