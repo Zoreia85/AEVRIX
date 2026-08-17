@@ -142,7 +142,8 @@ public sealed record OutOfProcessExecutionAttestation(
     bool CpuMemoryLimitsEnforced,
     bool FilesystemIsolationEnforced,
     bool RestrictedTokenEnforced = false,
-    bool AppContainerEnforced = false);
+    bool AppContainerEnforced = false,
+    bool LaunchedImageIdentityVerified = false);
 
 public sealed record OutOfProcessExecutionResult(
     int ExitCode,
@@ -156,8 +157,9 @@ public sealed record OutOfProcessExecutionResult(
 /// executable hash verification, governed working-directory containment, bounded stdout/stderr,
 /// a minimal environment, closed stdin and process-tree termination on timeout/cancellation.
 /// On Windows, strict workloads are created suspended, optionally under a reduced primary token
-/// and/or an ephemeral AppContainer profile, assigned to the configured Job Object before any
-/// adapter instruction executes, verified, and resumed only after those controls succeed.
+/// and/or an ephemeral AppContainer profile, assigned to the configured Job Object, bound to the
+/// stable identity of the same executable object that passed SHA-256 verification, and resumed only
+/// after those controls and launched-image identity verification succeed.
 /// </summary>
 public sealed class PinnedOutOfProcessRuntime
 {
@@ -184,11 +186,11 @@ public sealed class PinnedOutOfProcessRuntime
 
         var workingDirectory = EnsureContainedWorkspace(request.WorkingDirectory);
         ValidateRequestedEnvironment(request.Environment);
-        using var executableLock = VerifyExecutableHashAndLock();
+        using var executableLease = VerifyExecutableHashAndLock();
 
         if (_policy.RequireRaceFreeJobAssignment)
         {
-            return await ExecuteRaceFreeWindowsAsync(request, workingDirectory, cancellationToken).ConfigureAwait(false);
+            return await ExecuteRaceFreeWindowsAsync(request, workingDirectory, executableLease, cancellationToken).ConfigureAwait(false);
         }
 
         var startInfo = new ProcessStartInfo
@@ -255,6 +257,7 @@ public sealed class PinnedOutOfProcessRuntime
     private async Task<OutOfProcessExecutionResult> ExecuteRaceFreeWindowsAsync(
         OutOfProcessExecutionRequest request,
         string workingDirectory,
+        VerifiedExecutableLease executableLease,
         CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
@@ -264,6 +267,8 @@ public sealed class PinnedOutOfProcessRuntime
 
         var jobPolicy = _policy.WindowsJobObject
             ?? throw new InvalidOperationException("Race-free Job Object assignment requires a Job Object policy.");
+        var authenticatedImageIdentity = executableLease.WindowsIdentity
+            ?? throw new InvalidOperationException("Strict Windows launch requires authenticated executable file identity.");
         var environment = BuildMinimalEnvironment(request.Environment);
         var started = Stopwatch.GetTimestamp();
         using var restrictedToken = _policy.RequireRestrictedToken
@@ -285,7 +290,8 @@ public sealed class PinnedOutOfProcessRuntime
             environment,
             jobPolicy,
             restrictedToken,
-            appContainer);
+            appContainer,
+            authenticatedImageIdentity);
         var process = launch.Process;
 
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -308,7 +314,8 @@ public sealed class PinnedOutOfProcessRuntime
                     launch.JobLease.CpuRateLimitEnforced,
                     false,
                     launch.RestrictedTokenEnforced,
-                    launch.AppContainerEnforced));
+                    launch.AppContainerEnforced,
+                    launch.LaunchedImageIdentityVerified));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -325,7 +332,7 @@ public sealed class PinnedOutOfProcessRuntime
         }
     }
 
-    private FileStream VerifyExecutableHashAndLock()
+    private VerifiedExecutableLease VerifyExecutableHashAndLock()
     {
         var path = Path.GetFullPath(_executable.ExecutablePath);
         if (!File.Exists(path)) throw new FileNotFoundException("Pinned adapter executable was not found.", path);
@@ -340,7 +347,7 @@ public sealed class PinnedOutOfProcessRuntime
                 if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash)) throw new InvalidDataException("Pinned adapter executable hash does not match the approved SHA-256.");
             }
             finally { CryptographicOperations.ZeroMemory(actualHash); CryptographicOperations.ZeroMemory(expectedHash); }
-            return stream;
+            return VerifiedExecutableLease.FromVerifiedStream(stream);
         }
         catch { stream.Dispose(); throw; }
     }
