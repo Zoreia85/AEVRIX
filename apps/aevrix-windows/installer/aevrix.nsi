@@ -14,6 +14,12 @@ ShowUninstDetails show
 !ifndef PUBLISH_DIR
   !error "PUBLISH_DIR must be defined"
 !endif
+!ifndef WASDK_RUNTIME_DIR
+  !error "WASDK_RUNTIME_DIR must be defined"
+!endif
+!ifndef WASDK_RUNTIME_HELPER
+  !error "WASDK_RUNTIME_HELPER must be defined"
+!endif
 !ifndef OUTFILE
   !error "OUTFILE must be defined"
 !endif
@@ -100,6 +106,29 @@ FunctionEnd
 
 Section "AEVRIX" SEC_MAIN
   SetShellVarContext current
+
+  ; Fail closed before mutating the AEVRIX product surface. The Microsoft Windows App Runtime
+  ; is a shared per-user prerequisite and is intentionally preserved by AEVRIX uninstall.
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR\wasdk-runtime"
+  File /oname=install-windows-app-runtime.ps1 "${WASDK_RUNTIME_HELPER}"
+  File /oname=Microsoft.WindowsAppRuntime.2.msix "${WASDK_RUNTIME_DIR}\Microsoft.WindowsAppRuntime.2.msix"
+  File /oname=Microsoft.WindowsAppRuntime.Main.2.msix "${WASDK_RUNTIME_DIR}\Microsoft.WindowsAppRuntime.Main.2.msix"
+  File /oname=Microsoft.WindowsAppRuntime.Singleton.2.msix "${WASDK_RUNTIME_DIR}\Microsoft.WindowsAppRuntime.Singleton.2.msix"
+  File /oname=Microsoft.WindowsAppRuntime.DDLM.2.msix "${WASDK_RUNTIME_DIR}\Microsoft.WindowsAppRuntime.DDLM.2.msix"
+
+  DetailPrint "Verificando pré-requisito Microsoft Windows App Runtime 2.3.1..."
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wasdk-runtime\install-windows-app-runtime.ps1" -RuntimeRoot "$PLUGINSDIR\wasdk-runtime"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" runtime_ready 0
+    DetailPrint "Falha ao preparar o Windows App Runtime. Código: $0"
+    DetailPrint "$1"
+    SetErrorLevel $0
+    Abort "O AEVRIX não foi instalado porque o pré-requisito Microsoft Windows App Runtime não pôde ser validado/instalado."
+
+runtime_ready:
+  DetailPrint "Microsoft Windows App Runtime validado."
   SetOutPath "$INSTDIR"
 
   ; Product payload is pre-published and validated by build-installer.ps1.
@@ -156,5 +185,6 @@ Section "Uninstall"
   DeleteRegKey HKCU "${APP_REG_KEY}"
 
   ; Application binaries only. User workspaces/data live under AevrixDataPaths and are preserved.
+  ; The Microsoft Windows App Runtime prerequisite is shared and intentionally remains installed.
   RMDir /r "$INSTDIR"
 SectionEnd
