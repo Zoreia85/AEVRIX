@@ -17,6 +17,12 @@ public enum RepositorySecurityReviewState
     Rejected
 }
 
+public enum RepositoryGovernanceAuthority
+{
+    BootstrapProjection,
+    AuditedManifest
+}
+
 public sealed record RepositoryIntelligenceRecord(
     string Owner,
     string Name,
@@ -33,6 +39,17 @@ public sealed record RepositoryIntelligenceRecord(
     IReadOnlyList<string> DeniedCapabilities)
 {
     public string FullName => $"{Owner}/{Name}";
+
+    public RepositoryGovernanceAuthority GovernanceAuthority { get; init; } = RepositoryGovernanceAuthority.BootstrapProjection;
+
+    public string? ManifestRuntimeApproval { get; init; }
+
+    public string? ObservedRevision { get; init; }
+
+    public IReadOnlyList<RepositoryIntegrationMode>? IntegrationModes { get; init; }
+
+    public IReadOnlyList<RepositoryIntegrationMode> EffectiveIntegrationModes =>
+        IntegrationModes is { Count: > 0 } ? IntegrationModes : [IntegrationMode];
 
     public void Validate()
     {
@@ -57,17 +74,41 @@ public sealed record RepositoryIntelligenceRecord(
             throw new ArgumentOutOfRangeException(nameof(LastVerifiedAt));
         }
 
+        if (ObservedRevision is not null && !IsPinnedRevision(ObservedRevision))
+        {
+            throw new ArgumentException("Observed revision must be a full Git revision when supplied.", nameof(ObservedRevision));
+        }
+
+        if (IntegrationModes is { Count: > 0 }
+            && (!IntegrationModes.Contains(IntegrationMode) || IntegrationModes.Distinct().Count() != IntegrationModes.Count))
+        {
+            throw new InvalidOperationException("Projected integration modes must be unique and include the primary mode.");
+        }
+
+        if (GovernanceAuthority == RepositoryGovernanceAuthority.AuditedManifest
+            && string.IsNullOrWhiteSpace(ManifestRuntimeApproval))
+        {
+            throw new InvalidOperationException("Audited-manifest records require the manifest runtime-approval decision.");
+        }
+
         if (RuntimeAllowlisted && !CanExecute())
         {
-            throw new InvalidOperationException("Runtime allowlisting requires every executable-repository gate to pass.");
+            throw new InvalidOperationException("Runtime allowlisting requires audited-manifest authority and every executable-repository gate to pass.");
         }
     }
 
     public bool CanExecute()
     {
-        if (IntegrationMode is RepositoryIntegrationMode.Reference
-            or RepositoryIntegrationMode.DiscoverySeed
-            or RepositoryIntegrationMode.Blocked)
+        if (GovernanceAuthority != RepositoryGovernanceAuthority.AuditedManifest
+            || !string.Equals(ManifestRuntimeApproval, "Approved", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var modes = EffectiveIntegrationModes;
+        if (modes.Contains(RepositoryIntegrationMode.Blocked)
+            || modes.Contains(RepositoryIntegrationMode.DiscoverySeed)
+            || !modes.Any(mode => mode is RepositoryIntegrationMode.Adapter or RepositoryIntegrationMode.OptionalTool or RepositoryIntegrationMode.Vendored))
         {
             return false;
         }
@@ -110,12 +151,14 @@ public sealed record RepositoryIntelligenceRecord(
 
 public static class RepositoryIntelligenceCatalog
 {
+    public const string CanonicalManifestPath = "docs/manifests/repository-intelligence.json";
+
     private static readonly DateTimeOffset VerifiedAt = new(2026, 8, 14, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset MxcVerifiedAt = new(2026, 8, 15, 0, 0, 0, TimeSpan.Zero);
 
     public static IReadOnlyList<RepositoryIntelligenceRecord> InitialSeeds { get; } =
     [
-        Seed("ollama", "ollama", "Local/open-model runtime candidate", RepositoryIntegrationMode.OptionalTool, "MIT", ["loopback-model-inference"], ["implicit-model-download"]),
+        Seed("ollama", "ollama", "Local/open-model runtime candidate", RepositoryIntegrationMode.OptionalTool, "MIT", ["loopback-model-inference"], ["implicit-model-download", "non-loopback-endpoint", "model-outside-allowlist"]),
         Seed("sindresorhus", "awesome", "Curated repository discovery index", RepositoryIntegrationMode.DiscoverySeed, "CC0-1.0", ["repository-discovery"], ["automatic-code-execution"]),
         Seed("OpenHands", "OpenHands", "Sandboxed coding-agent architecture reference and optional backend candidate", RepositoryIntegrationMode.Adapter, "MIT", ["sandboxed-agent-execution"], ["unrestricted-host-filesystem"]),
         Seed("Shubhamsaboo", "awesome-llm-apps", "Agent, RAG and multi-agent pattern/evaluation corpus", RepositoryIntegrationMode.Reference, "Apache-2.0", ["pattern-study", "benchmark-design"], ["wholesale-code-import"]),

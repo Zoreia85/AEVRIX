@@ -49,7 +49,11 @@ public sealed class RepositoryVerificationTests
             RuntimeAllowlisted: true,
             LastVerifiedAt: Now,
             AllowedCapabilities: new[] { "analysis" },
-            DeniedCapabilities: Array.Empty<string>());
+            DeniedCapabilities: Array.Empty<string>())
+        {
+            GovernanceAuthority = RepositoryGovernanceAuthority.AuditedManifest,
+            ManifestRuntimeApproval = "Approved"
+        };
         var observed = Observation(expected.FullName, expected.CanonicalUrl, revision, "MIT", hash);
 
         var report = RepositoryProvenanceVerifier.Verify(expected, observed, Now);
@@ -113,7 +117,11 @@ public sealed class RepositoryVerificationTests
             RuntimeAllowlisted: true,
             LastVerifiedAt: Now,
             AllowedCapabilities: new[] { "analysis" },
-            DeniedCapabilities: Array.Empty<string>());
+            DeniedCapabilities: Array.Empty<string>())
+        {
+            GovernanceAuthority = RepositoryGovernanceAuthority.AuditedManifest,
+            ManifestRuntimeApproval = "Approved"
+        };
         var observed = Observation(
             expected.FullName,
             expected.CanonicalUrl,
