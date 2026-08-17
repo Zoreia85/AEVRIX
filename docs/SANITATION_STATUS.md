@@ -51,6 +51,10 @@ A candidate may enter `main` only with:
 
 Any required FAIL, stale evidence, missing mandatory evidence, mandatory SKIP, unknown provenance or IP-boundary violation => QUARANTINE.
 
+## Administrative main-write incident
+
+Commit `9c9f4c950dbda456741b5a2b3130f54aa97c1ddb` created this sanitation ledger directly on `main` through the connected Contents API. This is an administrative documentation-only write, not a functional implementation promotion. It must be post-validated by public CI/policy checks before the resulting main SHA is called fully trusted. No functional code may use this direct-main path.
+
 ## Deletion limitation
 
 The connected GitHub interface currently exposes branch inspection/ref movement but not branch-ref deletion. Therefore branch refs cannot be physically purged from this session. Sanitation work must first classify and close obsolete PR authority, preserve hashes/evidence, and prepare a deletion ledger. Physical branch deletion can then be performed when a deletion-capable GitHub interface is available. This limitation must never be reported as completed deletion.
