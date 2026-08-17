@@ -1,0 +1,31 @@
+name: mobile-lab
+
+on:
+  push:
+    paths:
+      - "tools/mobile_lab/**"
+      - "docs/mobile/**"
+      - ".github/workflows/mobile-lab.yml"
+  pull_request:
+    paths:
+      - "tools/mobile_lab/**"
+      - "docs/mobile/**"
+      - ".github/workflows/mobile-lab.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tools/mobile_lab/tests -v
+      - name: Empty scorecard must remain unmeasured
+        run: |
+          python -m tools.mobile_lab.cli scorecard-empty | grep -q '"homologation_status": "NOT_MEASURED"'
