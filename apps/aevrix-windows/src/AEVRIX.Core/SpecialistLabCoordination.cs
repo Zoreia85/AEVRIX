@@ -10,7 +10,16 @@ public enum SpecialistLab
 public enum TargetKind
 {
     Unknown = 0,
+    HttpWebApplication,
     HttpsWebApplication,
+    WebSocketEndpoint,
+    SecureWebSocketEndpoint,
+    GrpcEndpoint,
+    SecureGrpcEndpoint,
+    FileTransferEndpoint,
+    MessageBrokerEndpoint,
+    ContentAddressedResource,
+    BlockchainRpcEndpoint,
     WindowsExecutable,
     WindowsInstaller,
     WindowsLibrary,
@@ -19,6 +28,18 @@ public enum TargetKind
     MacInstallerPackage,
     LinuxAppImage,
     LinuxPackage,
+    ArchiveContainer,
+    DiskImage,
+    VirtualMachineImage,
+    NativeOrBytecodeArtifact,
+    WebAssemblyModule,
+    DatabaseArtifact,
+    DocumentArtifact,
+    StructuredDataArtifact,
+    NetworkCapture,
+    SmartContractSource,
+    BlockchainArtifact,
+    FirmwareArtifact,
     AndroidApk,
     AndroidAppBundle,
     AndroidXapk,
@@ -29,7 +50,17 @@ public enum RoutingEvidenceStrength
 {
     Unknown = 0,
     ExtensionHint,
-    TransportVerified
+    TransportVerified,
+    ExplicitProtocolDeclaration
+}
+
+public enum TransportSecurity
+{
+    Unknown = 0,
+    LocalArtifact,
+    Cleartext,
+    EncryptedTransport,
+    ContentAddressed
 }
 
 public enum DelegatedLabAuthority
@@ -41,18 +72,22 @@ public sealed record TargetRoute(
     SpecialistLab? Lab,
     TargetKind Kind,
     RoutingEvidenceStrength EvidenceStrength,
+    TransportSecurity TransportSecurity,
     string NormalizedTarget,
     bool RequiresContentVerification,
     string Reason)
 {
     public bool IsRoutable => Lab is not null && Kind is not TargetKind.Unknown;
+
+    public bool RequiresTransportRiskAcknowledgement =>
+        TransportSecurity is TransportSecurity.Cleartext;
 }
 
 /// <summary>
 /// Performs fail-closed preflight routing into the three specialist AEVRIX labs.
-/// Artifact extensions are routing hints only; they never prove file format, safety,
-/// provenance, licence, or execution eligibility. The receiving lab must verify content
-/// before parsing or executing the artifact.
+/// Routing is not execution authorization. URI schemes and artifact extensions are hints
+/// only; they never prove application identity, file format, safety, provenance, licence,
+/// or execution eligibility. The receiving lab must verify content before use.
 /// </summary>
 public static class TargetIntakeRouter
 {
@@ -70,38 +105,149 @@ public static class TargetIntakeRouter
             [".appimage"] = (TargetKind.LinuxAppImage, SpecialistLab.DesktopOffline),
             [".deb"] = (TargetKind.LinuxPackage, SpecialistLab.DesktopOffline),
             [".rpm"] = (TargetKind.LinuxPackage, SpecialistLab.DesktopOffline),
+
+            [".zip"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".7z"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".rar"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".tar"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".tgz"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".gz"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".bz2"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".xz"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+            [".zst"] = (TargetKind.ArchiveContainer, SpecialistLab.DesktopOffline),
+
+            [".iso"] = (TargetKind.DiskImage, SpecialistLab.DesktopOffline),
+            [".img"] = (TargetKind.DiskImage, SpecialistLab.DesktopOffline),
+            [".vhd"] = (TargetKind.VirtualMachineImage, SpecialistLab.DesktopOffline),
+            [".vhdx"] = (TargetKind.VirtualMachineImage, SpecialistLab.DesktopOffline),
+            [".qcow"] = (TargetKind.VirtualMachineImage, SpecialistLab.DesktopOffline),
+            [".qcow2"] = (TargetKind.VirtualMachineImage, SpecialistLab.DesktopOffline),
+            [".ova"] = (TargetKind.VirtualMachineImage, SpecialistLab.DesktopOffline),
+            [".ovf"] = (TargetKind.VirtualMachineImage, SpecialistLab.DesktopOffline),
+
+            [".elf"] = (TargetKind.NativeOrBytecodeArtifact, SpecialistLab.DesktopOffline),
+            [".so"] = (TargetKind.NativeOrBytecodeArtifact, SpecialistLab.DesktopOffline),
+            [".dylib"] = (TargetKind.NativeOrBytecodeArtifact, SpecialistLab.DesktopOffline),
+            [".class"] = (TargetKind.NativeOrBytecodeArtifact, SpecialistLab.DesktopOffline),
+            [".dex"] = (TargetKind.NativeOrBytecodeArtifact, SpecialistLab.DesktopOffline),
+            [".wasm"] = (TargetKind.WebAssemblyModule, SpecialistLab.DesktopOffline),
+
+            [".sqlite"] = (TargetKind.DatabaseArtifact, SpecialistLab.DesktopOffline),
+            [".sqlite3"] = (TargetKind.DatabaseArtifact, SpecialistLab.DesktopOffline),
+            [".db"] = (TargetKind.DatabaseArtifact, SpecialistLab.DesktopOffline),
+            [".mdb"] = (TargetKind.DatabaseArtifact, SpecialistLab.DesktopOffline),
+            [".accdb"] = (TargetKind.DatabaseArtifact, SpecialistLab.DesktopOffline),
+
+            [".pdf"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".doc"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".docx"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".rtf"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".odt"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".xls"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".xlsx"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".ods"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".ppt"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".pptx"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+            [".odp"] = (TargetKind.DocumentArtifact, SpecialistLab.DesktopOffline),
+
+            [".csv"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".tsv"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".json"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".xml"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".yaml"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".yml"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".toml"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".ini"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+            [".proto"] = (TargetKind.StructuredDataArtifact, SpecialistLab.DesktopOffline),
+
+            [".pcap"] = (TargetKind.NetworkCapture, SpecialistLab.DesktopOffline),
+            [".pcapng"] = (TargetKind.NetworkCapture, SpecialistLab.DesktopOffline),
+
+            [".sol"] = (TargetKind.SmartContractSource, SpecialistLab.DesktopOffline),
+            [".vy"] = (TargetKind.SmartContractSource, SpecialistLab.DesktopOffline),
+            [".move"] = (TargetKind.SmartContractSource, SpecialistLab.DesktopOffline),
+            [".teal"] = (TargetKind.SmartContractSource, SpecialistLab.DesktopOffline),
+            [".tact"] = (TargetKind.SmartContractSource, SpecialistLab.DesktopOffline),
+            [".abi"] = (TargetKind.BlockchainArtifact, SpecialistLab.DesktopOffline),
+            [".rlp"] = (TargetKind.BlockchainArtifact, SpecialistLab.DesktopOffline),
+            [".boc"] = (TargetKind.BlockchainArtifact, SpecialistLab.DesktopOffline),
+
+            [".hex"] = (TargetKind.FirmwareArtifact, SpecialistLab.DesktopOffline),
+            [".srec"] = (TargetKind.FirmwareArtifact, SpecialistLab.DesktopOffline),
+            [".uf2"] = (TargetKind.FirmwareArtifact, SpecialistLab.DesktopOffline),
+
             [".apk"] = (TargetKind.AndroidApk, SpecialistLab.Mobile),
             [".aab"] = (TargetKind.AndroidAppBundle, SpecialistLab.Mobile),
             [".xapk"] = (TargetKind.AndroidXapk, SpecialistLab.Mobile),
             [".ipa"] = (TargetKind.AppleIpa, SpecialistLab.Mobile)
         };
 
-    public static TargetRoute ClassifyWeb(Uri entryPoint)
+    private static readonly Dictionary<string, (TargetKind Kind, TransportSecurity Security)> OnlineRoutes =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["http"] = (TargetKind.HttpWebApplication, TransportSecurity.Cleartext),
+            ["https"] = (TargetKind.HttpsWebApplication, TransportSecurity.EncryptedTransport),
+            ["ws"] = (TargetKind.WebSocketEndpoint, TransportSecurity.Cleartext),
+            ["wss"] = (TargetKind.SecureWebSocketEndpoint, TransportSecurity.EncryptedTransport),
+            ["grpc"] = (TargetKind.GrpcEndpoint, TransportSecurity.Cleartext),
+            ["grpcs"] = (TargetKind.SecureGrpcEndpoint, TransportSecurity.EncryptedTransport),
+            ["ftp"] = (TargetKind.FileTransferEndpoint, TransportSecurity.Cleartext),
+            ["ftps"] = (TargetKind.FileTransferEndpoint, TransportSecurity.EncryptedTransport),
+            ["sftp"] = (TargetKind.FileTransferEndpoint, TransportSecurity.EncryptedTransport),
+            ["mqtt"] = (TargetKind.MessageBrokerEndpoint, TransportSecurity.Cleartext),
+            ["mqtts"] = (TargetKind.MessageBrokerEndpoint, TransportSecurity.EncryptedTransport),
+            ["amqp"] = (TargetKind.MessageBrokerEndpoint, TransportSecurity.Cleartext),
+            ["amqps"] = (TargetKind.MessageBrokerEndpoint, TransportSecurity.EncryptedTransport),
+            ["ipfs"] = (TargetKind.ContentAddressedResource, TransportSecurity.ContentAddressed),
+            ["ipns"] = (TargetKind.ContentAddressedResource, TransportSecurity.ContentAddressed)
+        };
+
+    public static TargetRoute ClassifyWeb(Uri entryPoint) => ClassifyOnline(entryPoint);
+
+    public static TargetRoute ClassifyOnline(Uri entryPoint)
     {
-        ArgumentNullException.ThrowIfNull(entryPoint);
+        ValidateOnlineUri(entryPoint);
 
-        if (!entryPoint.IsAbsoluteUri || entryPoint.Scheme != Uri.UriSchemeHttps)
+        if (!OnlineRoutes.TryGetValue(entryPoint.Scheme, out var route))
         {
-            throw new ArgumentException("Online AEVRIX targets require an absolute HTTPS entry point.", nameof(entryPoint));
-        }
-
-        if (string.IsNullOrWhiteSpace(entryPoint.Host))
-        {
-            throw new ArgumentException("Online AEVRIX targets require a host.", nameof(entryPoint));
-        }
-
-        if (!string.IsNullOrEmpty(entryPoint.UserInfo))
-        {
-            throw new ArgumentException("Online AEVRIX targets must not embed credentials in the URL.", nameof(entryPoint));
+            throw new ArgumentException(
+                $"Unsupported online scheme '{entryPoint.Scheme}'. AEVRIX must classify it before any connection is attempted.",
+                nameof(entryPoint));
         }
 
         return new TargetRoute(
             SpecialistLab.WebOnline,
-            TargetKind.HttpsWebApplication,
+            route.Kind,
             RoutingEvidenceStrength.TransportVerified,
+            route.Security,
             entryPoint.AbsoluteUri,
             RequiresContentVerification: true,
-            "HTTPS transport identifies the Web/Online lab. Application identity and behaviour still require evidence.");
+            route.Security is TransportSecurity.Cleartext
+                ? $"The {entryPoint.Scheme} scheme routes to Web/Online but uses cleartext transport. Connection requires an explicit transport-risk gate and must not carry credentials or sensitive payloads."
+                : $"The {entryPoint.Scheme} scheme routes to Web/Online. Endpoint identity, authorization and observed behaviour still require evidence.");
+    }
+
+    public static TargetRoute ClassifyBlockchainEndpoint(Uri endpoint, string network)
+    {
+        ValidateOnlineUri(endpoint);
+        ArgumentException.ThrowIfNullOrWhiteSpace(network);
+
+        if (!OnlineRoutes.TryGetValue(endpoint.Scheme, out var transport) ||
+            transport.Kind is not (TargetKind.HttpWebApplication or TargetKind.HttpsWebApplication or TargetKind.WebSocketEndpoint or TargetKind.SecureWebSocketEndpoint))
+        {
+            throw new ArgumentException(
+                "Blockchain RPC endpoints must use HTTP(S) or WebSocket(S) transport.",
+                nameof(endpoint));
+        }
+
+        return new TargetRoute(
+            SpecialistLab.WebOnline,
+            TargetKind.BlockchainRpcEndpoint,
+            RoutingEvidenceStrength.ExplicitProtocolDeclaration,
+            transport.Security,
+            endpoint.AbsoluteUri,
+            RequiresContentVerification: true,
+            $"Declared blockchain RPC endpoint for network '{network.Trim()}'. Chain identity, method surface and authorization must be verified before collection. Routing never authorizes transaction signing or broadcast.");
     }
 
     public static TargetRoute ClassifyArtifact(string artifactPath)
@@ -117,18 +263,41 @@ public static class TargetIntakeRouter
                 Lab: null,
                 TargetKind.Unknown,
                 RoutingEvidenceStrength.Unknown,
+                TransportSecurity.LocalArtifact,
                 normalizedPath,
                 RequiresContentVerification: true,
-                "Artifact type is not safely routable from its filename. No specialist may execute it until classification is resolved.");
+                "Artifact type is not safely routable from its filename. No specialist may execute or transform it until content classification is resolved.");
         }
 
         return new TargetRoute(
             route.Lab,
             route.Kind,
             RoutingEvidenceStrength.ExtensionHint,
+            TransportSecurity.LocalArtifact,
             normalizedPath,
             RequiresContentVerification: true,
-            $"The {extension.ToLowerInvariant()} suffix is only a routing hint. The receiving lab must verify magic/structure before use.");
+            $"The {extension.ToLowerInvariant()} suffix is only a routing hint. The receiving lab must verify magic/structure before parsing, conversion, extraction or execution.");
+    }
+
+    private static void ValidateOnlineUri(Uri entryPoint)
+    {
+        ArgumentNullException.ThrowIfNull(entryPoint);
+
+        if (!entryPoint.IsAbsoluteUri || string.IsNullOrWhiteSpace(entryPoint.Scheme))
+        {
+            throw new ArgumentException("Online AEVRIX targets require an absolute URI.", nameof(entryPoint));
+        }
+
+        if (string.IsNullOrWhiteSpace(entryPoint.Host) &&
+            entryPoint.Scheme is not ("ipfs" or "ipns"))
+        {
+            throw new ArgumentException("Online AEVRIX targets require a host.", nameof(entryPoint));
+        }
+
+        if (!string.IsNullOrEmpty(entryPoint.UserInfo))
+        {
+            throw new ArgumentException("Online AEVRIX targets must not embed credentials in the URI.", nameof(entryPoint));
+        }
     }
 }
 
