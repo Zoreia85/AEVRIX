@@ -39,7 +39,7 @@ public sealed class ProjectLoginSecretPacketTests
         var password = "very-sensitive-password".ToCharArray();
         var packet = ProjectLoginSecretPacket.Create(user, password);
         var captured = packet.Data;
-        Assert.IsTrue(captured.Span.Any(value => value != 0));
+        Assert.IsTrue(captured.Span.ToArray().Any(value => value != 0));
 
         packet.Dispose();
 
