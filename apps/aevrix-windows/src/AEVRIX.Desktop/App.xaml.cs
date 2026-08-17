@@ -36,6 +36,7 @@ public partial class App : Application
     {
         var mainWindow = new MainWindow();
         mainWindow.InitializeProjectCredentialsSurface();
+        mainWindow.InitializeResearchBrowserSurface();
         _window = mainWindow;
         _window.Activate();
     }
