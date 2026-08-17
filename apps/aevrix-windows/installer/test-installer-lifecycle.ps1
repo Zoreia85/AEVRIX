@@ -135,11 +135,13 @@ $preservationMarker = Join-Path $userDataRoot 'installer-lifecycle-preserve.txt'
 $markerContent = "preserve-$([Guid]::NewGuid().ToString('N'))"
 Set-Content -LiteralPath $preservationMarker -Value $markerContent -Encoding utf8NoBOM -NoNewline
 
-Write-Host "[1/6] Interrupt clean install $OldVersion after product-owned surface appears"
-$interrupted = Start-Process -FilePath $OldInstaller -ArgumentList @('/S') -PassThru
+Write-Host "[1/6] Interrupt clean install $OldVersion at deterministic post-prerequisite/pre-payload AVA hold"
+$interrupted = Start-Process -FilePath $OldInstaller -ArgumentList @('/S', '/AVAINTERRUPTHOLD=15000') -PassThru
 $interruptionObserved = $false
 try {
-    for ($i = 0; $i -lt 1000; $i++) {
+    # Runtime prerequisite deployment can legitimately precede AEVRIX-owned surface creation.
+    # Wait up to 90 seconds for the exact test-only hold to create $installDir, then terminate.
+    for ($i = 0; $i -lt 9000; $i++) {
         $interrupted.Refresh()
         if ($interrupted.HasExited) { break }
         if (Test-Path -LiteralPath $installDir -PathType Container) {
@@ -150,7 +152,10 @@ try {
         Start-Sleep -Milliseconds 10
     }
     if (-not $interruptionObserved) {
-        throw 'Installer completed or exited before a controlled partial-install interruption could be observed; interruption recovery is not proven.'
+        $interrupted.Refresh()
+        $exitDetail = if ($interrupted.HasExited) { "exitCode=$($interrupted.ExitCode)" } else { 'processStillRunning=true' }
+        $runtimePackages = @(Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'WindowsAppRuntime' } | ForEach-Object { "$($_.Name)@$($_.Version)/$($_.Architecture)" })
+        throw "Installer did not expose the deterministic partial-install surface within the AVA window; interruption recovery is not proven. $exitDetail; runtimePackages=$($runtimePackages -join ',')"
     }
     $interrupted.WaitForExit()
     $phaseExitCodes.interruptedInstall = [int]$interrupted.ExitCode
@@ -230,6 +235,7 @@ New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
         observed = $interruptionObserved
         partialSurfacePresent = $afterInterruption.installDirExists
         recoverySucceeded = $true
+        mechanism = 'AVA_POST_PREREQUISITE_PRE_PAYLOAD_HOLD_15000MS'
     }
     installedExecutableHashes = [pscustomobject]@{
         desktopSha256 = $installedDesktop.sha256
