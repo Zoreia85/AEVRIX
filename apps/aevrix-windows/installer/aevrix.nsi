@@ -74,11 +74,25 @@ Var ExistingVersion
 Var InstallMode
 Var Params
 Var OptionValue
+Var AvaInterruptHoldMs
 
 Function .onInit
   StrCpy $InstallMode "install"
+  StrCpy $AvaInterruptHoldMs ""
   ${GetParameters} $Params
 
+  ; AVA-only deterministic interruption hook. Production installs never pass this switch.
+  ; Accept exactly the harness value so arbitrary delays cannot be injected accidentally.
+  ClearErrors
+  ${GetOptions} $Params "/AVAINTERRUPTHOLD=" $AvaInterruptHoldMs
+  IfErrors ava_hold_done 0
+  StrCmp $AvaInterruptHoldMs "15000" ava_hold_done ava_hold_invalid
+
+ava_hold_invalid:
+  SetErrorLevel 87
+  Abort "Parâmetro AVA de interrupção inválido."
+
+ava_hold_done:
   ClearErrors
   ${GetOptions} $Params "/REPAIR" $OptionValue
   IfErrors +2 0
@@ -129,8 +143,16 @@ Section "AEVRIX" SEC_MAIN
 
 runtime_ready:
   DetailPrint "Microsoft Windows App Runtime validado."
-  SetOutPath "$INSTDIR"
 
+  ; SetOutPath creates the first AEVRIX-owned installation surface. The AVA harness may request
+  ; one exact 15-second hold here so it can terminate the installer deterministically and then
+  ; prove recovery. Normal production invocation has no hold and follows immediately to payload.
+  SetOutPath "$INSTDIR"
+  StrCmp $AvaInterruptHoldMs "" payload_begin 0
+    DetailPrint "AVA: janela determinística de interrupção iniciada ($AvaInterruptHoldMs ms)."
+    Sleep $AvaInterruptHoldMs
+
+payload_begin:
   ; Product payload is pre-published and validated by build-installer.ps1.
   File /r "${PUBLISH_DIR}\*.*"
 
