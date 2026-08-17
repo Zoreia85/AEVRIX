@@ -30,7 +30,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +44,75 @@ jobs:
 
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Acquire official Windows App Runtime 2.3.1 x64
+        id: wasdk_runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://aka.ms/windowsappsdk/2.3/2.3.1/windowsappruntimeinstall-x64.exe'
+          $path = Join-Path $env:RUNNER_TEMP 'WindowsAppRuntimeInstall-2.3.1-x64.exe'
+          Invoke-WebRequest -Uri $url -OutFile $path -MaximumRedirection 10
+          if ((Get-Item -LiteralPath $path).Length -lt 1MB) { throw 'Windows App Runtime installer download is unexpectedly small.' }
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sig = Get-AuthenticodeSignature -LiteralPath $path
+          $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
+          $thumbprint = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { '' }
+          Write-Host "Windows App Runtime 2.3.1 x64: sha256=$hash signature=$($sig.Status) subject=$subject thumbprint=$thumbprint"
+          if ($sig.Status -ne 'Valid') { throw "Official Windows App Runtime installer signature is not valid: $($sig.Status)" }
+          if ($subject -notmatch 'Microsoft') { throw "Unexpected Windows App Runtime signer subject: $subject" }
+          "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signer_subject=$subject" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signer_thumbprint=$thumbprint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install official Windows App Runtime 2.3.1 before any Desktop launch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = Start-Process -FilePath '${{ steps.wasdk_runtime.outputs.path }}' -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Windows App Runtime installer exited with $($p.ExitCode)" }
+
+      - name: Publish .NET self-contained plus Windows App SDK framework-dependent
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-hybrid'
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:Platform=x64 `
+            -p:WindowsAppSDKSelfContained=false `
+            -p:ContinuousIntegrationBuild=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
+            -o $out
+          if ($LASTEXITCODE -ne 0) { throw "Hybrid Desktop publish failed: $LASTEXITCODE" }
+          Write-Host "Hybrid publish files=$((Get-ChildItem -LiteralPath $out -File -Recurse).Count) bytes=$((Get-ChildItem -LiteralPath $out -File -Recurse | Measure-Object Length -Sum).Sum)"
+
+      - name: Prove hybrid Desktop startup before installer packaging
+        shell: pwsh
+        run: |
+          ./tools/release/Test-DesktopStartup.ps1 `
+            -DesktopPath (Join-Path $env:RUNNER_TEMP 'desktop-hybrid\AEVRIX.Desktop.exe') `
+            -OutputPath (Join-Path $env:RUNNER_TEMP 'hybrid-startup.json') `
+            -AliveSeconds 5 `
+            -ExitTimeoutSeconds 5
+          Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'hybrid-startup.json') -Raw | Write-Host
+
+      - name: Assert Windows App SDK binaries are not privately bundled
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-hybrid'
+          $privateXaml = Join-Path $out 'Microsoft.UI.Xaml.dll'
+          if (Test-Path -LiteralPath $privateXaml) {
+            throw "Hybrid publish unexpectedly bundles Microsoft.UI.Xaml.dll; Windows App SDK framework-dependent boundary was not preserved."
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $out 'coreclr.dll'))) {
+            throw 'Hybrid publish did not retain self-contained .NET runtime (coreclr.dll missing).'
+          }
+          Write-Host 'PASS: .NET runtime is self-contained while Windows App SDK runtime remains external/governed.'
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
