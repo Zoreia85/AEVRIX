@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .algorithm_inference import NumericObservation, infer_numeric_rule
 from .artifact_intelligence import inspect_artifact
 from .scorecard import build_scorecard
 
@@ -18,9 +19,27 @@ def main() -> int:
 
     sub.add_parser("scorecard-empty", help="Emit an explicitly unmeasured reconstruction scorecard")
 
+    infer = sub.add_parser("infer-numeric", help="Evaluate narrow numeric rule families against black-box observations")
+    infer.add_argument("dataset", type=Path, help="JSON array of {inputs: {name: number}, output: number}")
+    infer.add_argument("--abs-tolerance", type=float, default=1e-9)
+    infer.add_argument("--rel-tolerance", type=float, default=1e-9)
+    infer.add_argument("--exhaustive-declared-domain", action="store_true")
+    infer.add_argument("--out", type=Path)
+
     args = parser.parse_args()
     if args.command == "inspect":
         payload = inspect_artifact(args.artifact).to_dict()
+    elif args.command == "infer-numeric":
+        raw = json.loads(args.dataset.read_text(encoding="utf-8"))
+        if not isinstance(raw, list):
+            raise ValueError("dataset root must be a JSON array")
+        observations = [NumericObservation(dict(item["inputs"]), item["output"]) for item in raw]
+        payload = infer_numeric_rule(
+            observations,
+            abs_tolerance=args.abs_tolerance,
+            rel_tolerance=args.rel_tolerance,
+            exhaustive_declared_domain=args.exhaustive_declared_domain,
+        ).to_dict()
     else:
         payload = build_scorecard().to_dict()
 
