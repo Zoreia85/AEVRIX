@@ -148,6 +148,54 @@
       "hard_gates": "PENDING",
       "task_families": ["hybrid-quantum-classical-experiment"],
       "recommendation": "research-only-until-measured"
+    },
+    {
+      "id": "jadx",
+      "name": "JADX",
+      "family": "android-static-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["dex-code-comprehension", "android-static-reconstruction"],
+      "recommendation": "sandbox-and-benchmark-before-lab-promotion"
+    },
+    {
+      "id": "apktool",
+      "name": "Apktool",
+      "family": "android-resource-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["android-manifest-resources", "resource-reconstruction"],
+      "recommendation": "sandbox-and-benchmark-before-lab-promotion"
+    },
+    {
+      "id": "android-sdk-dynamic-lab",
+      "name": "Android SDK Emulator + ADB + UIAutomator",
+      "family": "android-dynamic-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["disposable-avd", "ui-observation", "runtime-evidence-capture"],
+      "recommendation": "pin-components-and-benchmark-isolation-first"
+    },
+    {
+      "id": "apple-simctl-mobile-lab",
+      "name": "Apple xcrun/simctl Simulator Toolchain",
+      "family": "ios-dynamic-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["ios-simulator-orchestration", "ui-observation", "runtime-evidence-capture"],
+      "recommendation": "authorized-apple-host-lab-only-until-measured"
     }
   ]
 }
