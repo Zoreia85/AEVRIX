@@ -28,69 +28,129 @@ class FirstRunTermsAuditTests(unittest.TestCase):
         body = "if (!firstRunAcceptanceStore.IsAccepted()) { return; } ShowSection(\"home\", \"Command Center\");"
         self.assertTrue(MODULE.contains_terms_guard(body))
 
-    def test_current_unwired_fixture_is_blocked(self) -> None:
+    def _write_common(self, root: Path) -> dict[str, Path]:
+        paths = {
+            "store": root / "apps/aevrix-windows/src/AEVRIX.Core/FirstRunAcceptanceStore.cs",
+            "tests": root / "apps/aevrix-windows/tests/AEVRIX.Core.Tests/FirstRunAcceptanceStoreTests.cs",
+            "app": root / "apps/aevrix-windows/src/AEVRIX.Desktop/App.xaml.cs",
+            "first_cs": root / "apps/aevrix-windows/src/AEVRIX.Desktop/FirstRunWindow.xaml.cs",
+            "first_xaml": root / "apps/aevrix-windows/src/AEVRIX.Desktop/FirstRunWindow.xaml",
+            "main_cs": root / "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml.cs",
+            "main_xaml": root / "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml",
+        }
+        for path in paths.values():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        paths["store"].write_text(
+            "CurrentSchemaVersion CurrentTermsRevision return false JsonException File.Move overwrite: true",
+            encoding="utf-8",
+        )
+        paths["tests"].write_text(
+            "StaleRevision_IsRejected MissingOrMalformedAcceptance_IsFailClosed",
+            encoding="utf-8",
+        )
+        paths["main_cs"].write_text(
+            'private void RootNavigation_SelectionChanged(object x) { ShowSection("home", "Command Center"); }\n'
+            'private void BackToHomeButton_Click(object x) { ShowSection("home", "Command Center"); }\n'
+            'private void StartAnalysisButton_Click(object x) { ShowSection("new", "Nova"); }\n'
+            'private void OpenMissionControlButton_Click(object x) { ShowSection("mission", "Mission"); }\n'
+            'private void OpenActivityButton_Click(object x) { ShowSection("activity", "Activity"); }',
+            encoding="utf-8",
+        )
+        paths["main_xaml"].write_text('Content="Ir ao Command Center sem concluir"', encoding="utf-8")
+        return paths
+
+    def test_missing_launch_gate_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            store = root / "apps/aevrix-windows/src/AEVRIX.Core/FirstRunAcceptanceStore.cs"
-            tests = root / "apps/aevrix-windows/tests/AEVRIX.Core.Tests/FirstRunAcceptanceStoreTests.cs"
-            cs = root / "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml.cs"
-            xaml = root / "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml"
-            for path in (store, tests, cs, xaml):
-                path.parent.mkdir(parents=True, exist_ok=True)
-            store.write_text(
-                "CurrentSchemaVersion CurrentTermsRevision return false JsonException File.Move overwrite: true",
-                encoding="utf-8",
-            )
-            tests.write_text(
-                "StaleRevision_IsRejected MissingOrMalformedAcceptance_IsFailClosed",
-                encoding="utf-8",
-            )
-            cs.write_text(
-                'private void RootNavigation_SelectionChanged(object x) { ShowSection("home", "Command Center"); }\n'
-                'private void BackToHomeButton_Click(object x) { ShowSection("home", "Command Center"); }\n'
-                'private void StartAnalysisButton_Click(object x) { ShowSection("new", "Nova"); }\n'
-                'private void OpenMissionControlButton_Click(object x) { ShowSection("mission", "Mission"); }\n'
-                'private void OpenActivityButton_Click(object x) { ShowSection("activity", "Activity"); }',
-                encoding="utf-8",
-            )
-            xaml.write_text('Content="Ir ao Command Center sem concluir"', encoding="utf-8")
+            paths = self._write_common(root)
+            paths["app"].write_text("OpenMainWindow();", encoding="utf-8")
+            paths["first_cs"].write_text("", encoding="utf-8")
+            paths["first_xaml"].write_text("", encoding="utf-8")
 
             payload = MODULE.audit(root, "1" * 40)
             self.assertEqual(payload["store"]["status"], MODULE.PASS)
+            self.assertFalse(payload["launchGateBinding"])
             self.assertEqual(payload["sourcePreconditionStatus"], MODULE.BLOCKED)
             self.assertTrue(payload["unconditionalBypassLabelDetected"])
             self.assertEqual(payload["finalAvaStatus"], "NOT_RUN")
 
-    def test_fully_wired_source_is_only_partial_not_final_ava_pass(self) -> None:
+    def test_launch_bound_gate_is_partial_even_when_main_handlers_do_not_repeat_terms_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            store = root / "apps/aevrix-windows/src/AEVRIX.Core/FirstRunAcceptanceStore.cs"
-            tests = root / "apps/aevrix-windows/tests/AEVRIX.Core.Tests/FirstRunAcceptanceStoreTests.cs"
-            cs = root / "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml.cs"
-            xaml = root / "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml"
-            for path in (store, tests, cs, xaml):
-                path.parent.mkdir(parents=True, exist_ok=True)
-            store.write_text(
-                "CurrentSchemaVersion CurrentTermsRevision return false JsonException File.Move overwrite: true",
+            paths = self._write_common(root)
+            paths["app"].write_text(
+                "var firstRunStore = new FirstRunAcceptanceStore(root);\n"
+                "if (firstRunStore.IsAccepted()) { OpenMainWindow(); return; }\n"
+                "_window = new FirstRunWindow(firstRunStore, OpenMainWindow);",
                 encoding="utf-8",
             )
-            tests.write_text(
-                "StaleRevision_IsRejected MissingOrMalformedAcceptance_IsFailClosed",
+            paths["first_cs"].write_text(
+                "private void FirstRunWindow_Activated(object s, object e) { _store.RecordPresentation(); }\n"
+                "private void AcceptFirstRunButton_Click(object s, object e) { _store.Accept(); if (!_store.IsAccepted()) { return; } _continueToProduct(); Close(); }\n"
+                "private void DeclineFirstRunButton_Click(object s, object e) { Close(); }",
                 encoding="utf-8",
             )
-            guarded = "if (!FirstRunAcceptanceStore.IsAccepted()) { return; }"
-            cs.write_text(
-                "FirstRunAcceptanceStore store; bool ok = store.IsAccepted();\n"
-                f'private void RootNavigation_SelectionChanged(object x) {{ {guarded} ShowSection("home", "Command Center"); }}\n'
-                f'private void BackToHomeButton_Click(object x) {{ {guarded} ShowSection("home", "Command Center"); }}\n'
-                f'private void StartAnalysisButton_Click(object x) {{ {guarded} ShowSection("new", "Nova"); }}\n'
-                f'private void OpenMissionControlButton_Click(object x) {{ {guarded} ShowSection("mission", "Mission"); }}\n'
-                f'private void OpenActivityButton_Click(object x) {{ {guarded} ShowSection("activity", "Activity"); }}',
+            paths["first_xaml"].write_text(
+                'Text="Termos e condições" AutomationProperties.AutomationId="AevrixFirstRunConfirm" '
+                'AutomationProperties.AutomationId="AevrixFirstRunAccept" '
+                'AutomationProperties.AutomationId="AevrixFirstRunDecline"',
                 encoding="utf-8",
             )
-            xaml.write_text('Text="Termos" Content="Aceitar" Content="Recusar e sair"', encoding="utf-8")
 
             payload = MODULE.audit(root, "2" * 40)
+            self.assertTrue(payload["launchGateBinding"])
+            self.assertEqual(payload["sourcePreconditionStatus"], MODULE.PARTIAL)
+            self.assertFalse(payload["unconditionalBypassLabelDetected"])
+            self.assertTrue(payload["mainWindowPostTermsBypassLabelDetected"])
+            self.assertEqual(payload["finalAvaStatus"], "NOT_RUN")
+
+    def test_decline_that_continues_to_product_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = self._write_common(root)
+            paths["app"].write_text(
+                "var firstRunStore = new FirstRunAcceptanceStore(root); if (firstRunStore.IsAccepted()) { OpenMainWindow(); return; } _window = new FirstRunWindow(firstRunStore, OpenMainWindow);",
+                encoding="utf-8",
+            )
+            paths["first_cs"].write_text(
+                "private void FirstRunWindow_Activated(object s, object e) { _store.RecordPresentation(); }\n"
+                "private void AcceptFirstRunButton_Click(object s, object e) { _store.Accept(); if (!_store.IsAccepted()) { return; } _continueToProduct(); Close(); }\n"
+                "private void DeclineFirstRunButton_Click(object s, object e) { _continueToProduct(); Close(); }",
+                encoding="utf-8",
+            )
+            paths["first_xaml"].write_text(
+                'Text="Termos" AutomationProperties.AutomationId="AevrixFirstRunConfirm" '
+                'AutomationProperties.AutomationId="AevrixFirstRunAccept" '
+                'AutomationProperties.AutomationId="AevrixFirstRunDecline"',
+                encoding="utf-8",
+            )
+
+            payload = MODULE.audit(root, "3" * 40)
+            self.assertFalse(payload["firstRunLogic"]["declineDoesNotContinue"])
+            self.assertEqual(payload["sourcePreconditionStatus"], MODULE.BLOCKED)
+
+    def test_static_source_can_never_claim_final_ava_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = self._write_common(root)
+            paths["app"].write_text(
+                "var firstRunStore = new FirstRunAcceptanceStore(root); if (firstRunStore.IsAccepted()) { OpenMainWindow(); return; } _window = new FirstRunWindow(firstRunStore, OpenMainWindow);",
+                encoding="utf-8",
+            )
+            paths["first_cs"].write_text(
+                "private void FirstRunWindow_Activated(object s, object e) { _store.RecordPresentation(); }\n"
+                "private void AcceptFirstRunButton_Click(object s, object e) { _store.Accept(); if (!_store.IsAccepted()) { return; } _continueToProduct(); Close(); }\n"
+                "private void DeclineFirstRunButton_Click(object s, object e) { Close(); }",
+                encoding="utf-8",
+            )
+            paths["first_xaml"].write_text(
+                'Text="Termos" AutomationProperties.AutomationId="AevrixFirstRunConfirm" '
+                'AutomationProperties.AutomationId="AevrixFirstRunAccept" '
+                'AutomationProperties.AutomationId="AevrixFirstRunDecline"',
+                encoding="utf-8",
+            )
+
+            payload = MODULE.audit(root, "4" * 40)
             self.assertEqual(payload["sourcePreconditionStatus"], MODULE.PARTIAL)
             self.assertEqual(payload["finalAvaStatus"], "NOT_RUN")
 
