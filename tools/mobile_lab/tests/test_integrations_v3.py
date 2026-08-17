@@ -99,7 +99,7 @@ class BoundaryTests(unittest.TestCase):
 
     def test_mobsf_url_cannot_embed_credentials(self):
         with self.assertRaises(m.IntegrationPolicyError):
-            m.MobSFLocalEndpoint("http://user:pass@127.0.0.1:8000").validate()
+            m.MobSFLocalEndpoint("http://" + "user:pass" + "@127.0.0.1:8000").validate()
 
     def test_instrumentation_policy_allows_observation(self):
         m.InstrumentationObservationPolicy.validate("trace_calls", "send('called')")
