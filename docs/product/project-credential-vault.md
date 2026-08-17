@@ -22,7 +22,7 @@ Credentials are local-only by design:
 - the secret payload is stored through Windows Credential Manager as a generic credential with `LOCAL_MACHINE` persistence;
 - the Windows Credential Manager target name contains only opaque project/credential identifiers, not the login URL, username or password;
 - missing local secret material is a fail-closed condition;
-- deleting a project must also delete its project-scoped credential records and persistent browser-session directory as part of the project lifecycle cleanup gate.
+- project browser-session state is isolated by project + target rather than target alone.
 
 ## URL binding
 
@@ -37,30 +37,33 @@ A project can contain multiple credentials for the same canonical login URL.
 - if exactly one credential matches, it can be selected;
 - if several match and exactly one is marked default, the default can be selected automatically;
 - if several match and no unique default exists, resolution returns `Ambiguous` and automation must not guess;
-- setting a new default automatically revokes the previous default for that same canonical login URL only.
+- setting a new default automatically revokes the previous default for that same canonical login URL only;
+- the Desktop shows a human account label and never needs to re-display the stored password.
 
 ## Runtime authorization
 
-Saving a credential does not grant unconditional access to it. Automatic login goes through `ProjectCredentialAutofillBroker` and requires both:
+Saving a credential does not grant unconditional access to it. Automatic login requires both:
 
 1. the project execution/scan is currently authorized; and
 2. credential autofill is authorized for that project execution.
 
-If either gate is false, the broker returns `BlockedByPolicy` without reading the secret store at all. Only after both gates pass does the broker resolve the canonical login URL and request a matching project credential.
+`ProjectCredentialAutofillBroker` blocks before reading the secret store when either gate is false. `ProjectResearchBrowserLoginCoordinator` then adds the Research Browser constraints: validated `LoginRecipe`, matching target, explicit host allowlist, `RememberCredentials=true` and, for automatic relogin, `AutomaticRelogin=true`.
 
 ## Browser-session isolation
 
-Local-only credential storage is not sufficient by itself because an authenticated browser also persists cookies, localStorage, IndexedDB and other session state. Persistent browser state for an authenticated project must therefore be isolated by both project and target.
+Local-only credential storage is not sufficient by itself because an authenticated browser also persists cookies, localStorage, IndexedDB and other session state. Persistent browser state for an authenticated project is therefore isolated by both project and target.
 
 The canonical project profile path is:
 
 `BrowserProfiles/<ProjectId>/<TargetId>`
 
-Two projects pointing to the same portal must not share a browser profile merely because they have the same target identifier. `AevrixDataPaths.ProjectBrowserProfile(projectId, targetId)` provides that project-scoped path. The older target-only helper remains only for compatibility and must not be selected for new persistent authenticated project sessions.
+Two projects pointing to the same portal do not share a browser profile merely because they have the same target identifier. `AevrixDataPaths.ProjectBrowserProfile(projectId, targetId)` provides that boundary.
 
 ## Runtime handling
 
 Secret material is retrieved only when a matching authorized login operation needs it. The Core exposes it through a disposable credential lease and clears the lease's managed character buffers on disposal.
+
+The login coordinator keeps the secret lease only through navigation/fill/submit. Tests also force a browser-submit exception after the password memory has been handed to the adapter and verify that the same captured memory is zeroed after failure.
 
 Browser adapters must never log field values, passwords, raw credential payloads or screenshots that expose secrets without the existing evidence/privacy policy explicitly permitting a protected capture.
 
@@ -68,31 +71,57 @@ Browser adapters must never log field values, passwords, raw credential payloads
 
 Password autofill does not imply bypassing MFA. One-time codes, hardware-key prompts, passkeys, biometric approvals and other second-factor challenges remain independent authentication gates. A workflow encountering such a gate must pause, request the permitted human/device interaction, or use a future separately governed MFA capability.
 
-## Current implementation
+## Accepted implementation
 
-Core:
+### Secure local foundation — PR #405
 
 - `ProjectCredentialVault.cs` — project-scoped metadata, canonical URL resolution, default-account arbitration and disposable secret lease;
 - `WindowsCredentialManagerProjectSecretStore.cs` — Windows Credential Manager backend with local-machine persistence and opaque target names;
-- `ProjectCredentialAutofillBroker.cs` — fail-closed bridge that prevents automatic secret retrieval outside an authorized project execution;
-- `AevrixDataPaths.ProjectBrowserProfile` — project + target browser profile boundary for cookies and authenticated browser state.
+- `ProjectCredentialAutofillBroker.cs` — fail-closed bridge preventing automatic secret retrieval outside an authorized execution;
+- `AevrixDataPaths.ProjectBrowserProfile` — project + target browser-profile boundary.
 
-Tests cover:
+Exact tested head: `18334ad900c44fe99711195fa903ecdd6b595f0f`.
 
-- URL canonicalization;
-- absence of username/password from local metadata;
-- strict project isolation;
-- multiple accounts and default selection;
-- stable matching across transient query/fragment changes;
-- fail-closed missing secret behavior;
-- corrupt registry handling;
-- disposed lease access rejection;
-- policy-blocked autofill performs zero secret reads;
-- authorized autofill returns a disposable matching credential;
-- ambiguous accounts never trigger secret retrieval;
-- browser-profile separation between projects using the same target;
-- real Windows Credential Manager save/read/delete round trip on Windows CI.
+Windows gates passed: Source Policy, Desktop Release build, Windows Core, Remote Security and Orchestrator Judge. The Windows Core suite included a real Credential Manager write/read/delete round trip.
 
-## Integration status
+### Project credential-management UX — PR #421
 
-This increment establishes and tests the secure local foundation. The project-facing credential-management UI and the concrete Research Browser form-fill adapter remain separate integration gates and must not be represented as already operational by this Core increment.
+The `Projetos` route now provides a real credential-management surface:
+
+- project selector;
+- account label;
+- HTTPS login URL;
+- login/user field;
+- password field;
+- multiple accounts per URL;
+- explicit default account;
+- local deletion confirmation;
+- credential list exposes only label, URL and default/alternative state;
+- username/password fields are cleared after save or failure;
+- UI states that secrets remain on the current PC and MFA remains separate.
+
+Exact tested head: `3a1925d61b7333dc5e01e45043e83bb4edaca5ea`.
+
+Windows gates passed: Source Policy, Desktop Release build, Windows Core, Remote Security and Orchestrator Judge.
+
+### Governed login coordinator — PR #423
+
+`ProjectResearchBrowserLoginCoordinator` now defines the operational bridge from an authorized project credential to a Research Browser form adapter:
+
+- blocks before secret access when execution/autofill policy is not authorized;
+- validates Research Browser policy, recipe target and login host;
+- resolves one/default account or returns explicit selection-required state;
+- navigates to the validated login URL when necessary;
+- passes user/password through `ReadOnlyMemory<char>` to the adapter;
+- submits using the recipe selector;
+- disposes and zeroes the lease on success or browser failure.
+
+Exact tested head: `f29fd837ad23c9b2c59b4139dbb4a8c83ce3b8ab`.
+
+Windows gates passed: Source Policy, Desktop Release build, Windows Core, Remote Security and Orchestrator Judge.
+
+## Remaining integration gate
+
+The repository still does **not** contain a concrete Chromium/Playwright/WebView host implementing `IResearchBrowserLoginFormAdapter`. Therefore the coordinator and UI are accepted, but real browser E2E autofill is **not yet homologated**. The next gate is a concrete browser adapter plus authorized-page tests, including MFA detection, logout/relogin and secret-redaction evidence.
+
+Project-local auth cleanup is being developed separately so future project deletion can remove the project's Credential Manager entries and browser-session directory without touching another project.
