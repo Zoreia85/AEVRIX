@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Aevrix.Core;
 
-namespace AEVRIX.Core.Tests;
+namespace Aevrix.Core.Tests;
 
 [TestClass]
 public sealed class FirstRunAcceptanceStoreTests
