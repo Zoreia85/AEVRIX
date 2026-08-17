@@ -30,7 +30,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +44,75 @@ jobs:
 
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Publish baseline exactly like Windows Readiness
+        shell: pwsh
+        run: |
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -o "$env:RUNNER_TEMP\desktop-baseline"
+          if ($LASTEXITCODE -ne 0) { throw "baseline publish failed: $LASTEXITCODE" }
+
+      - name: Smoke baseline
+        id: baseline
+        continue-on-error: true
+        shell: pwsh
+        run: ./tools/release/Test-DesktopStartup.ps1 -DesktopPath "$env:RUNNER_TEMP\desktop-baseline\AEVRIX.Desktop.exe" -OutputPath "$env:RUNNER_TEMP\baseline.json" -AliveSeconds 5 -ExitTimeoutSeconds 5
+
+      - name: Publish with ContinuousIntegrationBuild only
+        shell: pwsh
+        run: |
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -p:ContinuousIntegrationBuild=true -o "$env:RUNNER_TEMP\desktop-ci"
+          if ($LASTEXITCODE -ne 0) { throw "CI publish failed: $LASTEXITCODE" }
+
+      - name: Smoke ContinuousIntegrationBuild only
+        id: ci_only
+        continue-on-error: true
+        shell: pwsh
+        run: ./tools/release/Test-DesktopStartup.ps1 -DesktopPath "$env:RUNNER_TEMP\desktop-ci\AEVRIX.Desktop.exe" -OutputPath "$env:RUNNER_TEMP\ci.json" -AliveSeconds 5 -ExitTimeoutSeconds 5
+
+      - name: Publish with symbol suppression only
+        shell: pwsh
+        run: |
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -p:DebugType=none -p:DebugSymbols=false -o "$env:RUNNER_TEMP\desktop-nosymbols"
+          if ($LASTEXITCODE -ne 0) { throw "no-symbols publish failed: $LASTEXITCODE" }
+
+      - name: Smoke symbol suppression only
+        id: symbols_only
+        continue-on-error: true
+        shell: pwsh
+        run: ./tools/release/Test-DesktopStartup.ps1 -DesktopPath "$env:RUNNER_TEMP\desktop-nosymbols\AEVRIX.Desktop.exe" -OutputPath "$env:RUNNER_TEMP\symbols.json" -AliveSeconds 5 -ExitTimeoutSeconds 5
+
+      - name: Publish with installer flags combined
+        shell: pwsh
+        run: |
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -p:ContinuousIntegrationBuild=true -p:DebugType=none -p:DebugSymbols=false -o "$env:RUNNER_TEMP\desktop-combined"
+          if ($LASTEXITCODE -ne 0) { throw "combined publish failed: $LASTEXITCODE" }
+
+      - name: Smoke installer flags combined
+        id: combined
+        continue-on-error: true
+        shell: pwsh
+        run: ./tools/release/Test-DesktopStartup.ps1 -DesktopPath "$env:RUNNER_TEMP\desktop-combined\AEVRIX.Desktop.exe" -OutputPath "$env:RUNNER_TEMP\combined.json" -AliveSeconds 5 -ExitTimeoutSeconds 5
+
+      - name: Report publish flag matrix
+        if: always()
+        shell: pwsh
+        env:
+          BASELINE: ${{ steps.baseline.outcome }}
+          CI_ONLY: ${{ steps.ci_only.outcome }}
+          SYMBOLS_ONLY: ${{ steps.symbols_only.outcome }}
+          COMBINED: ${{ steps.combined.outcome }}
+        run: |
+          Write-Host "baseline=$env:BASELINE ciOnly=$env:CI_ONLY symbolsOnly=$env:SYMBOLS_ONLY combined=$env:COMBINED"
+          foreach ($name in @('baseline.json','ci.json','symbols.json','combined.json')) {
+            $path = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path -LiteralPath $path) {
+              Write-Host "=== $name ==="
+              Get-Content -LiteralPath $path -Raw | Write-Host
+            }
+          }
+          if ($env:BASELINE -ne 'success') {
+            throw 'Baseline identical to Windows Readiness failed; matrix is infrastructure/product inconclusive and no installer fix may be inferred.'
+          }
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
