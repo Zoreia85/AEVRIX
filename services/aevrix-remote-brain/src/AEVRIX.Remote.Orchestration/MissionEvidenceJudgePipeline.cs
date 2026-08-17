@@ -3,16 +3,20 @@ namespace Aevrix.Remote.Orchestration;
 public sealed record MissionKnowledgeRequest(
     MissionPlan Mission,
     IReadOnlyList<string> ClaimKeys,
-    bool ValidateConvergentKnowledge = true)
+    bool ValidateConvergentKnowledge = true,
+    IReadOnlyList<ExecutionProofRecord>? ProofRecords = null,
+    ExecutionProofHead? ExpectedProofHead = null)
 {
     public MissionKnowledgeRequest Validate()
     {
         Mission.Validate();
         if (ClaimKeys is null || ClaimKeys.Count is < 1 or > 256
             || ClaimKeys.Any(key => !MissionTaskSpec.IsSafeId(key, 3, 160)))
-        {
             throw new ArgumentException("Mission knowledge claim keys are invalid.", nameof(ClaimKeys));
-        }
+        if ((ProofRecords is null) != (ExpectedProofHead is null))
+            throw new ArgumentException("Mission knowledge proof snapshot and head must be supplied together.");
+        if (ProofRecords is not null && ExpectedProofHead is not null)
+            ExecutionProofLedger.VerifySnapshot(ProofRecords, ExpectedProofHead);
         return this;
     }
 }
@@ -33,6 +37,7 @@ public sealed class MissionEvidenceJudgePipeline
     private readonly EvidenceFusionEngine _fusion;
     private readonly ICandidateKnowledgeRepository _repository;
     private readonly IEvidenceValidationService _validator;
+    private readonly IExecutionProofHeadAnchor? _proofHeadAnchor;
     private readonly TimeProvider _time;
 
     public MissionEvidenceJudgePipeline(
@@ -41,6 +46,7 @@ public sealed class MissionEvidenceJudgePipeline
         EvidenceFusionEngine fusion,
         ICandidateKnowledgeRepository repository,
         IEvidenceValidationService validator,
+        IExecutionProofHeadAnchor? proofHeadAnchor = null,
         TimeProvider? timeProvider = null)
     {
         _director = director ?? throw new ArgumentNullException(nameof(director));
@@ -48,6 +54,7 @@ public sealed class MissionEvidenceJudgePipeline
         _fusion = fusion ?? throw new ArgumentNullException(nameof(fusion));
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
+        _proofHeadAnchor = proofHeadAnchor;
         _time = timeProvider ?? TimeProvider.System;
     }
 
@@ -56,18 +63,17 @@ public sealed class MissionEvidenceJudgePipeline
         CancellationToken cancellationToken = default)
     {
         request.Validate();
-        var mission = await _director.ExecuteAsync(request.Mission, cancellationToken);
+        var mission = await _director.ExecuteAsync(request.Mission, cancellationToken).ConfigureAwait(false);
         if (!mission.RequiredTasksSucceeded)
-        {
             return new MissionKnowledgeResult(mission, Array.Empty<MissionKnowledgeItem>());
-        }
 
         var snapshot = _bus.Snapshot(mission.ProjectId, mission.TargetId);
         var judge = new OrchestratorJudge(
             new EvidenceFusionModelProvider(_bus, _fusion),
             _repository,
             _validator,
-            timeProvider: _time);
+            timeProvider: _time,
+            proofHeadAnchor: _proofHeadAnchor);
         var items = new List<MissionKnowledgeItem>();
 
         foreach (var claimKey in request.ClaimKeys.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -75,10 +81,7 @@ public sealed class MissionEvidenceJudgePipeline
             var observations = snapshot
                 .Where(item => string.Equals(item.ClaimKey, claimKey, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
-            if (observations.Length == 0)
-            {
-                continue;
-            }
+            if (observations.Length == 0) continue;
 
             var fused = _fusion.Fuse(mission.ProjectId, mission.TargetId, claimKey, observations);
             var task = new AnalysisTask(
@@ -93,10 +96,24 @@ public sealed class MissionEvidenceJudgePipeline
                     ["fusion-state"] = fused.State.ToString()
                 });
 
-            var knowledge = await judge.AnalyzeToCandidateAsync(task, cancellationToken);
+            var knowledge = await judge.AnalyzeToCandidateAsync(task, cancellationToken).ConfigureAwait(false);
             if (request.ValidateConvergentKnowledge && fused.State == EvidenceFusionState.Convergent)
             {
-                knowledge = await judge.ValidateAndPromoteAsync(knowledge.KnowledgeId, cancellationToken);
+                if (request.ProofRecords is null || request.ExpectedProofHead is null)
+                {
+                    knowledge = await judge.ValidateAndPromoteAsync(knowledge.KnowledgeId, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    knowledge = await judge.ValidateAndPromoteAsync(
+                        knowledge.KnowledgeId,
+                        new MemoryAdmissionContext(
+                            mission.MissionId,
+                            observations,
+                            request.ProofRecords,
+                            request.ExpectedProofHead),
+                        cancellationToken).ConfigureAwait(false);
+                }
             }
 
             items.Add(new MissionKnowledgeItem(claimKey, fused.State, knowledge));
@@ -108,11 +125,7 @@ public sealed class MissionEvidenceJudgePipeline
     private static string BuildTaskId(string missionId, string claimKey)
     {
         var value = $"fusion:{missionId}:{claimKey}";
-        if (value.Length <= 128)
-        {
-            return value;
-        }
-
+        if (value.Length <= 128) return value;
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value));
         return "fusion:" + Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant();
     }

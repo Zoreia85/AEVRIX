@@ -46,9 +46,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             {
                 EnsureCandidateProjectBinding(existingRecord);
                 if (!SerializedEquivalent(existingRecord.Value, candidate))
-                {
                     throw new InvalidOperationException("Knowledge id is immutable and cannot be rebound to different candidate content.");
-                }
                 return;
             }
 
@@ -64,10 +62,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
     {
         ValidateId(knowledgeId, nameof(knowledgeId));
         var record = await TryReadRecordAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken);
-        if (record is null)
-        {
-            return null;
-        }
+        if (record is null) return null;
         EnsureCandidateProjectBinding(record);
         return record.Value;
     }
@@ -82,9 +77,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         var candidate = await LoadAsync(validation.KnowledgeId, cancellationToken)
             ?? throw new KeyNotFoundException("Validation cannot be stored because its candidate knowledge does not exist.");
         if (validation.ValidatedEvidenceIds.Except(candidate.EvidenceIds, StringComparer.Ordinal).Any())
-        {
             throw new InvalidDataException("Validation references evidence outside the authoritative candidate evidence set.");
-        }
 
         var gate = LockFor($"validation:{validation.ValidationRecordId}");
         await gate.WaitAsync(cancellationToken);
@@ -94,13 +87,9 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             if (existingRecord is not null)
             {
                 if (existingRecord.ProjectId != candidate.ProjectId)
-                {
                     throw new InvalidDataException("Validation record envelope is bound to a different project.");
-                }
                 if (!SerializedEquivalent(existingRecord.Value, validation))
-                {
                     throw new InvalidOperationException("Validation record id is immutable and cannot be rebound.");
-                }
                 return;
             }
 
@@ -112,75 +101,111 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         }
     }
 
-    public async Task PromoteAsync(
+    public async Task ApplyValidationOutcomeAsync(
         string knowledgeId,
         KnowledgeTrustState state,
         string validationRecordId,
-        DateTimeOffset promotedAt,
+        DateTimeOffset decidedAt,
         CancellationToken cancellationToken = default)
     {
         ValidateId(knowledgeId, nameof(knowledgeId));
         ValidateId(validationRecordId, nameof(validationRecordId));
-        if (promotedAt == default)
-        {
-            throw new ArgumentOutOfRangeException(nameof(promotedAt));
-        }
-        if (state == KnowledgeTrustState.Candidate)
-        {
-            throw new InvalidOperationException("Promotion cannot target Candidate state.");
-        }
+        if (decidedAt == default) throw new ArgumentOutOfRangeException(nameof(decidedAt));
+        if (state is KnowledgeTrustState.Candidate or KnowledgeTrustState.Trusted)
+            throw new InvalidOperationException("Generic validation outcome cannot create Candidate or Trusted knowledge.");
 
         var gate = LockFor(knowledgeId);
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var candidateRecord = await TryReadRecordAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken)
-                ?? throw new KeyNotFoundException("Candidate knowledge was not found for promotion.");
-            EnsureCandidateProjectBinding(candidateRecord);
-            var candidate = candidateRecord.Value;
-            if (candidate.TrustState != KnowledgeTrustState.Candidate)
-            {
-                throw new InvalidOperationException("Only Candidate knowledge may be promoted by this repository.");
-            }
+            var (candidate, validation) = await LoadPromotionInputsAsync(knowledgeId, validationRecordId, cancellationToken);
+            if (validation.EligibleForTrustedPromotion)
+                throw new InvalidOperationException("Trusted validation requires an opaque memory-admission authorization.");
 
-            var validationRecord = await TryReadRecordAsync<KnowledgeValidationRecord>(ValidationKind, validationRecordId, cancellationToken)
-                ?? throw new KeyNotFoundException("Promotion validation record was not found.");
-            if (validationRecord.ProjectId != candidate.ProjectId)
-            {
-                throw new InvalidDataException("Promotion validation record is bound to a different project.");
-            }
-            var validation = validationRecord.Value;
-            if (!string.Equals(validation.KnowledgeId, knowledgeId, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("Promotion validation record belongs to different knowledge.");
-            }
-            if (validation.ValidatedEvidenceIds.Except(candidate.EvidenceIds, StringComparer.Ordinal).Any())
-            {
-                throw new InvalidDataException("Promotion validation references evidence outside the candidate boundary.");
-            }
-
-            var expectedState = validation.EligibleForTrustedPromotion
-                ? KnowledgeTrustState.Trusted
-                : validation.EvidenceIntegrityPassed && validation.EvidenceSupportsStatement
-                    ? KnowledgeTrustState.Validated
-                    : KnowledgeTrustState.Rejected;
+            var expectedState = validation.EvidenceIntegrityPassed && validation.EvidenceSupportsStatement
+                ? KnowledgeTrustState.Validated
+                : KnowledgeTrustState.Rejected;
             if (state != expectedState)
-            {
-                throw new InvalidOperationException("Requested promotion state does not match the authoritative validation result.");
-            }
+                throw new InvalidOperationException("Requested validation state does not match the authoritative validation result.");
 
-            var promoted = candidate with
-            {
-                TrustState = state,
-                ValidationRecordId = validationRecordId,
-                UpdatedAt = promotedAt
-            };
-            await WriteAsync(CandidateKind, knowledgeId, candidate.ProjectId, promoted, cancellationToken, overwrite: true);
+            await WriteAsync(
+                CandidateKind,
+                knowledgeId,
+                candidate.ProjectId,
+                candidate with { TrustState = state, ValidationRecordId = validationRecordId, UpdatedAt = decidedAt },
+                cancellationToken,
+                overwrite: true);
         }
         finally
         {
             gate.Release();
         }
+    }
+
+    public async Task PromoteTrustedAsync(
+        TrustedKnowledgeAdmissionAuthorization authorization,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(authorization);
+        authorization.Validate();
+        var gate = LockFor(authorization.KnowledgeId);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var (candidate, validation) = await LoadPromotionInputsAsync(
+                authorization.KnowledgeId,
+                authorization.ValidationRecordId,
+                cancellationToken);
+
+            if (candidate.ProjectId != authorization.ProjectId
+                || !string.Equals(candidate.TargetId, authorization.TargetId, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Trusted admission authorization is bound to a different project or target.");
+            if (!validation.EligibleForTrustedPromotion)
+                throw new InvalidOperationException("Trusted admission authorization references validation that is not Trusted-eligible.");
+            if (authorization.AdmittedAt < validation.ValidatedAt)
+                throw new InvalidDataException("Trusted admission cannot predate its independent validation record.");
+
+            await WriteAsync(
+                CandidateKind,
+                candidate.KnowledgeId,
+                candidate.ProjectId,
+                candidate with
+                {
+                    TrustState = KnowledgeTrustState.Trusted,
+                    ValidationRecordId = validation.ValidationRecordId,
+                    UpdatedAt = authorization.AdmittedAt
+                },
+                cancellationToken,
+                overwrite: true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<(CandidateKnowledge Candidate, KnowledgeValidationRecord Validation)> LoadPromotionInputsAsync(
+        string knowledgeId,
+        string validationRecordId,
+        CancellationToken cancellationToken)
+    {
+        var candidateRecord = await TryReadRecordAsync<CandidateKnowledge>(CandidateKind, knowledgeId, cancellationToken)
+            ?? throw new KeyNotFoundException("Candidate knowledge was not found for promotion.");
+        EnsureCandidateProjectBinding(candidateRecord);
+        var candidate = candidateRecord.Value;
+        if (candidate.TrustState != KnowledgeTrustState.Candidate)
+            throw new InvalidOperationException("Only Candidate knowledge may be promoted by this repository.");
+
+        var validationRecord = await TryReadRecordAsync<KnowledgeValidationRecord>(ValidationKind, validationRecordId, cancellationToken)
+            ?? throw new KeyNotFoundException("Promotion validation record was not found.");
+        if (validationRecord.ProjectId != candidate.ProjectId)
+            throw new InvalidDataException("Promotion validation record is bound to a different project.");
+        var validation = validationRecord.Value;
+        if (!string.Equals(validation.KnowledgeId, knowledgeId, StringComparison.Ordinal))
+            throw new InvalidDataException("Promotion validation record belongs to different knowledge.");
+        if (validation.ValidatedEvidenceIds.Except(candidate.EvidenceIds, StringComparer.Ordinal).Any())
+            throw new InvalidDataException("Promotion validation references evidence outside the candidate boundary.");
+        return (candidate, validation);
     }
 
     private async Task WriteAsync<T>(
@@ -197,9 +222,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         {
             plaintext = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
             if (plaintext.Length > MaxEnvelopeBytes / 2)
-            {
                 throw new InvalidDataException("Knowledge vault payload exceeds the configured bound.");
-            }
 
             var nonce = RandomNumberGenerator.GetBytes(NonceBytes);
             var ciphertext = new byte[plaintext.Length];
@@ -212,15 +235,11 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             var envelope = new VaultEnvelope(CurrentEnvelopeVersion, projectId, nonce, ciphertext, tag);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOptions);
             if (bytes.Length > MaxEnvelopeBytes)
-            {
                 throw new InvalidDataException("Knowledge vault envelope exceeds the configured bound.");
-            }
 
             var path = RecordPath(kind, recordId);
             if (!overwrite && File.Exists(path))
-            {
                 throw new IOException("Knowledge vault record already exists.");
-            }
 
             var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
             try
@@ -230,19 +249,13 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             }
             finally
             {
-                if (File.Exists(temp))
-                {
-                    File.Delete(temp);
-                }
+                if (File.Exists(temp)) File.Delete(temp);
             }
         }
         finally
         {
             CryptographicOperations.ZeroMemory(key);
-            if (plaintext is not null)
-            {
-                CryptographicOperations.ZeroMemory(plaintext);
-            }
+            if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
         }
     }
 
@@ -254,14 +267,9 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
         ValidateId(recordId, nameof(recordId));
         var path = RecordPath(kind, recordId);
         var info = new FileInfo(path);
-        if (!info.Exists)
-        {
-            return null;
-        }
+        if (!info.Exists) return null;
         if (info.Length is <= 0 or > MaxEnvelopeBytes)
-        {
             throw new InvalidDataException("Knowledge vault envelope size is invalid.");
-        }
 
         var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
         VaultEnvelope envelope;
@@ -283,11 +291,7 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             try
             {
                 using var aes = new AesGcm(key, TagBytes);
-                aes.Decrypt(
-                    envelope.Nonce,
-                    envelope.Ciphertext,
-                    envelope.Tag,
-                    plaintext,
+                aes.Decrypt(envelope.Nonce, envelope.Ciphertext, envelope.Tag, plaintext,
                     AssociatedData(kind, recordId, envelope.ProjectId));
             }
             catch (AuthenticationTagMismatchException ex)
@@ -316,15 +320,10 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
     private async ValueTask<byte[]> GetKeyCopyAsync(Guid projectId, CancellationToken cancellationToken)
     {
         if (projectId == Guid.Empty)
-        {
             throw new InvalidDataException("Knowledge vault project id cannot be empty.");
-        }
-
         var material = await _keys.GetKeyAsync(projectId, cancellationToken);
         if (material.Length != KeyBytes)
-        {
             throw new InvalidDataException("Knowledge vault project key must be exactly 256 bits.");
-        }
         return material.ToArray();
     }
 
@@ -350,17 +349,13 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             || envelope.Ciphertext is null
             || envelope.Ciphertext.Length == 0
             || envelope.Ciphertext.Length > MaxEnvelopeBytes / 2)
-        {
             throw new InvalidDataException("Knowledge vault envelope failed structural validation.");
-        }
     }
 
     private static void EnsureCandidateProjectBinding(DecryptedRecord<CandidateKnowledge> record)
     {
         if (record.Value.ProjectId != record.ProjectId)
-        {
             throw new InvalidDataException("Candidate payload project id does not match its authenticated envelope.");
-        }
     }
 
     private static void ValidateCandidate(CandidateKnowledge candidate)
@@ -389,21 +384,15 @@ public sealed class EncryptedProjectKnowledgeRepository : ICandidateKnowledgeRep
             || candidate.CreatedAt == default
             || candidate.UpdatedAt == default
             || candidate.UpdatedAt < candidate.CreatedAt)
-        {
             throw new InvalidDataException("Candidate knowledge is invalid for vault storage.");
-        }
         if (candidate.ValidationRecordId is not null)
-        {
             throw new InvalidDataException("New Candidate knowledge cannot already contain a validation record id.");
-        }
     }
 
     private static void ValidateId(string value, string parameterName)
     {
         if (!MissionTaskSpec.IsSafeId(value, 3, 160))
-        {
             throw new ArgumentException("Knowledge vault record id is invalid.", parameterName);
-        }
     }
 
     private static bool SerializedEquivalent<T>(T left, T right)

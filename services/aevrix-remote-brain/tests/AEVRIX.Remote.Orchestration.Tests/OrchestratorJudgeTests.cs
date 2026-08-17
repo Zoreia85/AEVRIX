@@ -42,7 +42,7 @@ public sealed class OrchestratorJudgeTests
     }
 
     [TestMethod]
-    public async Task CandidateCannotBecomeTrustedWithoutIndependentValidationAndCounterexampleReview()
+    public async Task CandidateCannotBecomeTrustedWithoutIndependentValidationCounterexampleReviewAndAdmissionAuthority()
     {
         var task = TaskFixture();
         var repository = new MemoryRepository();
@@ -65,7 +65,6 @@ public sealed class OrchestratorJudgeTests
         Assert.AreEqual(KnowledgeTrustState.Validated, partial.TrustState);
         Assert.AreEqual(KnowledgeTrustState.Validated, repository.Promotions.Last().State);
 
-        // A separately created candidate can reach Trusted only when every validation gate passes.
         var repository2 = new MemoryRepository();
         var judgeCreate2 = new OrchestratorJudge(primary, repository2, new StubValidator(TrustedValidation("unused", "unused")), timeProvider: new FixedTimeProvider());
         var candidate2 = await judgeCreate2.AnalyzeToCandidateAsync(task with { TaskId = "task-fixture-0002" });
@@ -74,8 +73,9 @@ public sealed class OrchestratorJudgeTests
             repository2,
             new StubValidator(TrustedValidation("VAL-trusted", candidate2.KnowledgeId)),
             timeProvider: new FixedTimeProvider());
-        var trusted = await trustedJudge.ValidateAndPromoteAsync(candidate2.KnowledgeId);
-        Assert.AreEqual(KnowledgeTrustState.Trusted, trusted.TrustState);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () => await trustedJudge.ValidateAndPromoteAsync(candidate2.KnowledgeId));
+        Assert.AreEqual(0, repository2.TrustedPromotions);
     }
 
     [TestMethod]
@@ -104,14 +104,7 @@ public sealed class OrchestratorJudgeTests
         new Dictionary<string, string> { ["scope"] = "authorized-read-only" });
 
     private static ModelAnalysisCandidate Candidate(string statement, double confidence, ModelRiskLevel risk, IReadOnlyList<string> evidence) => new(
-        "provider",
-        "model-v1",
-        statement,
-        confidence,
-        risk,
-        evidence,
-        [],
-        []);
+        "provider", "model-v1", statement, confidence, risk, evidence, [], []);
 
     private static KnowledgeValidationRecord TrustedValidation(string id, string knowledgeId) => new(
         id,
@@ -128,6 +121,7 @@ public sealed class OrchestratorJudgeTests
     {
         public string ProviderId { get; } = id;
         public int CallCount { get; private set; }
+
         public Task<ModelAnalysisCandidate> AnalyzeAsync(AnalysisTask task, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -149,6 +143,7 @@ public sealed class OrchestratorJudgeTests
     {
         public Dictionary<string, CandidateKnowledge> Candidates { get; } = new(StringComparer.Ordinal);
         public List<(string Id, KnowledgeTrustState State)> Promotions { get; } = [];
+        public int TrustedPromotions { get; private set; }
 
         public Task StoreCandidateAsync(CandidateKnowledge candidate, CancellationToken cancellationToken = default)
         {
@@ -170,13 +165,36 @@ public sealed class OrchestratorJudgeTests
             return Task.CompletedTask;
         }
 
-        public Task PromoteAsync(string knowledgeId, KnowledgeTrustState state, string validationRecordId, DateTimeOffset promotedAt, CancellationToken cancellationToken = default)
+        public Task ApplyValidationOutcomeAsync(
+            string knowledgeId,
+            KnowledgeTrustState state,
+            string validationRecordId,
+            DateTimeOffset decidedAt,
+            CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (state is KnowledgeTrustState.Candidate or KnowledgeTrustState.Trusted)
+                throw new InvalidOperationException();
             Promotions.Add((knowledgeId, state));
             if (Candidates.TryGetValue(knowledgeId, out var value))
+                Candidates[knowledgeId] = value with { TrustState = state, ValidationRecordId = validationRecordId, UpdatedAt = decidedAt };
+            return Task.CompletedTask;
+        }
+
+        public Task PromoteTrustedAsync(
+            TrustedKnowledgeAdmissionAuthorization authorization,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TrustedPromotions++;
+            if (Candidates.TryGetValue(authorization.KnowledgeId, out var value))
             {
-                Candidates[knowledgeId] = value with { TrustState = state, ValidationRecordId = validationRecordId, UpdatedAt = promotedAt };
+                Candidates[authorization.KnowledgeId] = value with
+                {
+                    TrustState = KnowledgeTrustState.Trusted,
+                    ValidationRecordId = authorization.ValidationRecordId,
+                    UpdatedAt = authorization.AdmittedAt
+                };
             }
             return Task.CompletedTask;
         }
