@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "target": "Windows",
   "releaseDecision": "NOT_HOMOLOGATED",
-  "updatedDate": "2026-08-16",
-  "readinessPercent": 50,
+  "updatedDate": "2026-08-17",
+  "readinessPercent": 58,
   "rules": {
     "weightsMustTotal": 100,
     "homologatedRequiresReadinessPercent": 100,
@@ -18,7 +18,7 @@
       "weight": 15,
       "points": 13,
       "status": "PARCIAL",
-      "evidence": ["issue:#197", "workflow:.github/workflows/dotnet-core.yml", "workflow-run:31955371631", "workflow-run:31956157495", "workflow-run:31956694056"]
+      "evidence": ["issue:#197", "workflow:.github/workflows/dotnet-core.yml", "workflow-run:31955371631", "workflow-run:31956157495", "workflow-run:31956694056", "workflow-run:32024980229"]
     },
     {
       "id": "windows-secure-runtime",
@@ -26,7 +26,7 @@
       "weight": 20,
       "points": 17,
       "status": "PARCIAL",
-      "evidence": ["issue:#197", "issue:#284", "issue:#288", "workflow-run:31955371631", "workflow-run:31956157495", "workflow-run:31956694056"],
+      "evidence": ["issue:#197", "issue:#284", "issue:#288", "workflow-run:31955371631", "workflow-run:31956157495", "workflow-run:31956694056", "workflow-run:32024980229"],
       "blocker": "Filesystem read isolation for restrictive profiles is still fail-closed and lacks complete native hostile read/write proof."
     },
     {
@@ -40,8 +40,8 @@
         "issue:#289",
         "workflow-run:31955371631",
         "workflow-run:31956157495",
-        "candidate:30e5acce312feed7e9965994ba27299d857a5f04",
-        "evidence-sha256:6e1fd564db26f214a6b4269fe57dfb7a82e377c0ffbf5ee9732b35eeb035300f"
+        "workflow-run:32024980229",
+        "candidate:f53eaeb8388bb34aad45ebb2a4ef37598bdb76cb"
       ],
       "blocker": "Desktop/WinUI exists, exact Release builds and hash-bound Desktop startup/cleanup pass. Mandatory first-run/terms and Desktop -> EngineHost -> worker -> embedded Python -> private Chromium remain implementation/evidence blockers."
     },
@@ -49,9 +49,20 @@
       "id": "installer-lifecycle",
       "name": "Installer + lifecycle",
       "weight": 10,
-      "points": 0,
-      "status": "NOT_RUN",
-      "evidence": ["issue:#197", "issue:#315"]
+      "points": 8,
+      "status": "PARCIAL",
+      "evidence": [
+        "issue:#197",
+        "issue:#315",
+        "workflow-run:32024980230",
+        "candidate:f53eaeb8388bb34aad45ebb2a4ef37598bdb76cb",
+        "installer-old-sha256:08aa430cf6a0ecd124ac27f442b913d8deb1cc7fd360c0e3296dd1185a0c5e01",
+        "installer-new-sha256:f3d304db82e1e352cf34448621be5d974d28e4f1137835eddc7d08451cb54e67",
+        "evidence-sha256:128170a99961aa59eff325843c1cf7e6cb2f7ea15f10123403dbfcf5218c7c97",
+        "ava-artifact:9286912675",
+        "ava-artifact-digest:sha256:0b65bb8225ecf96859027d8b9f649932bd35c681190f6659a26ac94d46fad585"
+      ],
+      "blocker": "Exact-candidate Windows lifecycle passes interruption recovery, repair after controlled file loss, upgrade, downgrade rejection, uninstall, product-owned residue cleanup and user-data preservation. Mandatory terms/first-run behavior is not proven by this lifecycle run, so the gate remains PARCIAL. Authenticode is intentionally evaluated separately under distribution-security."
     },
     {
       "id": "distribution-security",
@@ -59,7 +70,8 @@
       "weight": 10,
       "points": 0,
       "status": "NOT_RUN",
-      "evidence": ["issue:#197", "issue:#317"]
+      "evidence": ["issue:#197", "issue:#317", "workflow-run:32024980230"],
+      "blocker": "The exact installer candidates are explicitly unsigned. Authenticode, Microsoft Defender evidence and signed update-manifest/tamper/downgrade controls remain mandatory before external distribution."
     },
     {
       "id": "execution-authority-db",
@@ -82,8 +94,8 @@
         "workflow-run:31955371631",
         "workflow-run:31956157495",
         "workflow-run:31956694056",
-        "candidate:1537688b0221b22d1afc9a4121540eed703d7392",
-        "evidence-sha256:34b2dc2de752604d0f0d9f5de5f7d25a9022327065b7f94e2cca59f91a2f6cfb"
+        "workflow-run:32024980229",
+        "candidate:f53eaeb8388bb34aad45ebb2a4ef37598bdb76cb"
       ],
       "blocker": "Authenticated soak plus forced-crash fail-closed recovery and cleanup pass for EngineHost. Full-product Desktop/downstream endurance, recovery and resource behavior remain required."
     },
@@ -103,20 +115,14 @@
       "status": "PARCIAL",
       "evidence": [
         "docs:VALIDATION.md",
-        "workflow-run:31955371631",
-        "candidate:2611920a3d289a25c079a25fdd52c33d97d6ed09",
-        "ava-artifact:9265832940",
-        "ava-artifact-digest:sha256:1a9ab6108da1fa63616fd8c84963304fee9a0cf592d9b8a979e76412635f9239",
-        "workflow-run:31956157495",
-        "candidate:30e5acce312feed7e9965994ba27299d857a5f04",
-        "evidence-sha256:6e1fd564db26f214a6b4269fe57dfb7a82e377c0ffbf5ee9732b35eeb035300f",
-        "workflow-run:31956694056",
-        "candidate:1537688b0221b22d1afc9a4121540eed703d7392",
-        "evidence-sha256:34b2dc2de752604d0f0d9f5de5f7d25a9022327065b7f94e2cca59f91a2f6cfb",
-        "ava-artifact:9266168521",
-        "ava-artifact-digest:sha256:de7f3a5cca8fa23c4d67ea0450472194e039dade06dc4dc74e09d43bd40c12fb"
+        "workflow-run:32024980229",
+        "workflow-run:32024980230",
+        "candidate:f53eaeb8388bb34aad45ebb2a4ef37598bdb76cb",
+        "installer-evidence-sha256:128170a99961aa59eff325843c1cf7e6cb2f7ea15f10123403dbfcf5218c7c97",
+        "installer-ava-artifact:9286912675",
+        "installer-ava-artifact-digest:sha256:0b65bb8225ecf96859027d8b9f649932bd35c681190f6659a26ac94d46fad585"
       ],
-      "blocker": "Durable exact-candidate summaries/packages exist, but the final AVA package still lacks all mandatory manual/product gates."
+      "blocker": "Durable exact-candidate Windows readiness and installer packages exist, but the final AVA package still lacks all mandatory product, distribution, database, accessibility and full-runtime gates."
     }
   ]
 }
