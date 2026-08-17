@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aevrix.Core;
 
 namespace Aevrix.Core.Tests;
@@ -86,18 +87,22 @@ public sealed class ProjectLoginRecipeStoreTests
     }
 
     [TestMethod]
-    public async Task RegistryContainsSelectorsButNoCredentialValues()
+    public async Task RegistryContainsSelectorsButNoCredentialValueProperties()
     {
         using var fixture = new Fixture();
         var project = await fixture.CreateProjectAsync("A", "target-web", "example.com");
         await fixture.Store.UpsertAsync(project.Project.Id, Recipe("target-web", "https://example.com/login"));
 
         var json = await File.ReadAllTextAsync(fixture.RegistryPath(project.Project.Id));
+        using var document = JsonDocument.Parse(json);
+        var propertyNames = EnumeratePropertyNames(document.RootElement)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        StringAssert.Contains(json, "usernameSelector");
-        StringAssert.Contains(json, "passwordSelector");
-        Assert.IsFalse(json.Contains("userName\"", StringComparison.OrdinalIgnoreCase));
-        Assert.IsFalse(json.Contains("credentialSecret", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(propertyNames.Contains("usernameSelector"));
+        Assert.IsTrue(propertyNames.Contains("passwordSelector"));
+        Assert.IsFalse(propertyNames.Contains("userName"));
+        Assert.IsFalse(propertyNames.Contains("password"));
+        Assert.IsFalse(propertyNames.Contains("credentialSecret"));
     }
 
     [TestMethod]
@@ -175,6 +180,31 @@ public sealed class ProjectLoginRecipeStoreTests
 
         Assert.AreEqual(1, items.Count);
         Assert.AreEqual("https://example.com/admin/login", items[0].CanonicalLoginUri);
+    }
+
+    private static IEnumerable<string> EnumeratePropertyNames(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                yield return property.Name;
+                foreach (var nested in EnumeratePropertyNames(property.Value))
+                {
+                    yield return nested;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                foreach (var nested in EnumeratePropertyNames(item))
+                {
+                    yield return nested;
+                }
+            }
+        }
     }
 
     private static LoginRecipe Recipe(string targetId, string uri) => new(
