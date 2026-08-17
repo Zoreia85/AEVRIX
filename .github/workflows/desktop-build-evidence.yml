@@ -30,9 +30,20 @@ jobs:
       - name: Checkout exact evidence candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || 'main' }}
+          ref: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Assert exact evidence candidate identity
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if (-not [string]::Equals($actual, $env:EXPECTED_SHA, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Desktop evidence checkout mismatch. Expected $env:EXPECTED_SHA, got $actual."
+          }
+          Write-Host "Exact desktop evidence candidate confirmed: $actual"
 
       - name: Setup .NET 10.0.400
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
