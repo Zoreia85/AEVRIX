@@ -11,9 +11,13 @@ ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "docs" / "manifests" / "repository-intelligence.json"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REVISION_RE = re.compile(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})")
+SHA256_RE = re.compile(r"[0-9A-Fa-f]{64}")
 ALLOWED_MODES = {"Reference", "DiscoverySeed", "Adapter", "OptionalTool", "Vendored", "Blocked"}
 EXECUTABLE_MODES = {"Adapter", "OptionalTool", "Vendored"}
 APPROVED_RUNTIME = "Approved"
+ARTIFACT_CONSUMPTION = {"None", "SourceSnapshot", "ReleaseArtifact", "VendoredSubset"}
+PROVENANCE_STATUSES = {"ObservedRevisionOnly", "VerifiedArtifact", "VendoredProvenance"}
+DOCUMENT_STATUSES = {"NotApplicable", "RequiredPending", "Verified"}
 
 REQUIRED_REPOSITORIES = {
     "ollama/ollama",
@@ -114,6 +118,29 @@ def audit_registry(data: dict) -> list[str]:
             if not isinstance(pinned_revision, str) or re.fullmatch(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})", pinned_revision) is None:
                 failures.append(f"{name}: pinnedRevision must be a full 40- or 64-character hexadecimal revision")
 
+        # Artifact provenance fields are optional during schema-v2 migration, but once any
+        # artifact consumption is declared the record becomes fail-closed: exact SHA-256,
+        # artifact-level provenance and explicit SBOM/NOTICE disposition are mandatory.
+        consumption = record.get("artifactConsumption", "None")
+        consumed_sha = record.get("consumedArtifactSha256")
+        provenance = record.get("provenanceStatus", "ObservedRevisionOnly")
+        sbom = record.get("sbomStatus", "NotApplicable")
+        notice = record.get("noticeStatus", "NotApplicable")
+        if consumption not in ARTIFACT_CONSUMPTION:
+            failures.append(f"{name}: invalid artifactConsumption")
+        elif consumption == "None":
+            if consumed_sha is not None:
+                failures.append(f"{name}: consumedArtifactSha256 must be null when no artifact is consumed")
+        else:
+            if not isinstance(consumed_sha, str) or SHA256_RE.fullmatch(consumed_sha) is None:
+                failures.append(f"{name}: consumed artifacts require an exact SHA-256")
+            if provenance not in PROVENANCE_STATUSES or provenance == "ObservedRevisionOnly":
+                failures.append(f"{name}: consumed artifacts require artifact-level provenance")
+            if sbom not in DOCUMENT_STATUSES or sbom == "NotApplicable":
+                failures.append(f"{name}: consumed artifacts require explicit SBOM disposition")
+            if notice not in DOCUMENT_STATUSES or notice == "NotApplicable":
+                failures.append(f"{name}: consumed artifacts require explicit NOTICE disposition")
+
         if name in DISCOVERY_ONLY:
             if modes != ["DiscoverySeed"]:
                 failures.append(f"{name}: discovery catalogs must remain DiscoverySeed-only")
@@ -160,8 +187,12 @@ def audit_registry(data: dict) -> list[str]:
                 failures.append(f"{name}: Approved runtime requires an executable integration mode")
             if not record.get("pinnedRevision"):
                 failures.append(f"{name}: Approved runtime requires pinnedRevision")
-            if not record.get("securityReview"):
-                failures.append(f"{name}: Approved runtime requires securityReview")
+            if record.get("securityReview") != "Approved":
+                failures.append(f"{name}: Approved runtime requires Approved independent security review")
+            if consumption == "None" or not isinstance(consumed_sha, str) or SHA256_RE.fullmatch(consumed_sha) is None:
+                failures.append(f"{name}: Approved runtime requires a SHA-256-bound consumed artifact")
+            if license_spdx == "NOASSERTION":
+                failures.append(f"{name}: Approved runtime requires verified licensing")
 
     missing = sorted(REQUIRED_REPOSITORIES - seen)
     if missing:
