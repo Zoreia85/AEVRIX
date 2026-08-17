@@ -7,7 +7,7 @@ It does not grant runtime capability. It consumes reproducible evidence from imp
 ## Current state
 
 - Target: **Windows**.
-- Global readiness: **58%**.
+- Global readiness: **60%**.
 - Release decision: **NOT_HOMOLOGATED / NOT_READY_FOR_GENERAL_USE**.
 - Canonical blocker tracker: **#197**.
 - Product/E2E handoff: **#289**.
@@ -22,15 +22,15 @@ It does not grant runtime capability. It consumes reproducible evidence from imp
 - Exact-candidate evaluator: `tools/release/ava-readiness.py`.
 - Windows probe: `.github/workflows/windows-readiness-v2.yml`.
 
-## Latest exact-candidate evidence
+## Latest strong exact-candidate evidence
 
-Candidate `f53eaeb8388bb34aad45ebb2a4ef37598bdb76cb` was exercised by Windows readiness run **32024980229** and Windows Installer Candidate run **32024980230**.
+Candidate `3b9193efbac8a4a2daedb88d7eb5368ee647a3b5` was exercised by Windows Readiness V2 run **32030353362** and Windows Installer Candidate run **32030353192**.
 
 The Windows readiness probe reported **60.0% exact-candidate PASS coverage** and remained `NOT_HOMOLOGATED`.
 
-Readiness evidence SHA-256: `f72c9fcba9e2cf60bd6c30a8e55665e715607afa6e700de038d8d5ea921becbd`.
+Readiness evidence SHA-256: `49323f043757ccd34d1f8a9c0508f6736f2c86f5382a76be851cd8d8864a1e84`.
 
-Readiness AVA artifact: **9286850521**, digest `sha256:ab20dd8906d6149229ca6f11c2498cbe27ff137eba23ef51c5bc203cd2e8a573`.
+Readiness AVA artifact: **9288742018**, digest `sha256:4cc43a11da36b119846f4166367e731d3f29599bd0e890afa32aeaaf3271bfb2`.
 
 Exact automatic PASS gates included:
 
@@ -44,18 +44,18 @@ Exact automatic PASS gates included:
 - forced EngineHost crash -> fail-closed post-crash authority -> authenticated restart -> cleanup;
 - physical Desktop/WinUI product surface.
 
-The exact installer candidate was exercised by run **32024980230** on Windows Server 2025 using .NET SDK 10.0.400 and pinned NSIS 3.12. The lifecycle successfully exercised interrupted installation, recovery with the same installer, repair after controlled payload loss, `0.0.1 -> 0.0.2` upgrade, downgrade rejection, uninstall, product-owned residue cleanup and user-data preservation.
+The same exact candidate was packaged and exercised by Windows Installer Candidate run **32030353192** on Windows Server 2025 using .NET SDK 10.0.400 and pinned NSIS 3.12. The lifecycle successfully exercised interrupted installation, recovery with the same installer, repair after controlled payload loss, `0.0.1 -> 0.0.2` upgrade, downgrade rejection, uninstall, product-owned residue cleanup and user-data preservation.
 
 Installer hashes:
 
-- `0.0.1`: `08aa430cf6a0ecd124ac27f442b913d8deb1cc7fd360c0e3296dd1185a0c5e01`;
-- `0.0.2`: `f3d304db82e1e352cf34448621be5d974d28e4f1137835eddc7d08451cb54e67`.
+- `0.0.1`: `2269fc7707bcb29a651d6a863ac6f9ac48f78de789a10f35c6bd39d0e08d538a`;
+- `0.0.2`: `fff02088ad8bb0b7d72b679f45f60283f85199839789cba3e0f02360b500c46f`.
 
-Installer candidate evidence SHA-256: `128170a99961aa59eff325843c1cf7e6cb2f7ea15f10123403dbfcf5218c7c97`.
+Installer candidate evidence SHA-256: `e4bcf66ed23cab0d18b1e1af5c9590be4d92ad370a507c20056e414a2f03b206`.
 
-Installer AVA artifact: **9286912675**, digest `sha256:0b65bb8225ecf96859027d8b9f649932bd35c681190f6659a26ac94d46fad585`.
+Installer AVA artifact: **9288900859**, digest `sha256:0cfeaee3ee54fadee96a03e6a662c39cb1333d2187facbf574c2359180e28c96`.
 
-The exact installer candidates are explicitly **unsigned**. That is a distribution-security blocker, not an installer lifecycle failure.
+Microsoft Defender scanned **both exact installer executables** in that run. The scan completed with no path-bound detections and the installer SHA-256 values were unchanged after scanning. This is credited as a partial distribution-security result. The AEVRIX installers remain explicitly **unsigned**, so Authenticode and signed update controls remain blockers.
 
 ## Two percentages, deliberately separated
 
@@ -63,15 +63,15 @@ The exact installer candidates are explicitly **unsigned**. That is a distributi
 
 `readinessPercent` measures how much of the release/homologation program has technically matured with credible evidence. It can retain proven engineering progress from earlier exact candidates, but that evidence does **not** automatically validate a different release candidate.
 
-Current value: **58%**.
+Current value: **60%**.
 
 ### Exact-candidate PASS coverage
 
 Every candidate probe calculates what percentage of its exact probe gates are `PASS` for the commit actually checked out and tested. A new commit must earn its own release evidence.
 
-Latest Windows readiness value: **60.0%** on candidate `f53eaeb8388bb34aad45ebb2a4ef37598bdb76cb`.
+Latest strong Windows readiness value: **60.0%** on candidate `3b9193efbac8a4a2daedb88d7eb5368ee647a3b5`.
 
-The installer lifecycle is tracked separately because it is produced by a dedicated exact-candidate workflow. Its newly proven lifecycle evidence is credited in the global weighted readiness model while mandatory first-run/terms remains outstanding.
+The installer lifecycle and Defender evidence are produced by the dedicated exact-candidate installer workflow and credited in the global weighted model only after exact hash binding. Mandatory versioned terms acceptance remains outstanding until independently proven on a releasable candidate.
 
 ## Fail-closed rules
 
@@ -94,25 +94,26 @@ The installer lifecycle is tracked separately because it is produced by a dedica
 | Windows secure runtime primitives | 20 | 17 | PARCIAL |
 | End-to-end Windows product runtime | 15 | 8 | BLOQUEADO |
 | Installer + lifecycle | 10 | 8 | PARCIAL |
-| Distribution security | 10 | 0 | NOT_RUN |
+| Distribution security | 10 | 2 | PARCIAL |
 | Execution Authority + PostgreSQL | 10 | 4 | PARCIAL |
 | Regression + performance + stability | 10 | 5 | PARCIAL |
 | Minimum UX + accessibility | 5 | 1 | NOT_RUN |
 | Exact-hash AVA evidence package | 5 | 2 | PARCIAL |
-| **Total** | **100** | **58** | **NOT_HOMOLOGATED** |
+| **Total** | **100** | **60** | **NOT_HOMOLOGATED** |
 
-## Why the score moved from 50% to 58%
+## Why the score moved from 50% to 60%
 
-- **+8 points — installer lifecycle maturity:** exact-candidate Windows evidence now proves interrupted installation recovery, repair after controlled product payload loss, upgrade, downgrade rejection, uninstall, no product-owned residue and user-data preservation.
-- The installer gate remains **PARCIAL**, not PASS, because mandatory terms/first-run behavior has not been proven by the lifecycle run.
-- No distribution-security credit was granted: the exact installers are explicitly unsigned and Defender/AuthentiCode/signed update evidence remains outstanding.
+- **+8 points — installer lifecycle maturity:** exact-candidate Windows evidence proves interrupted-install recovery, repair after controlled product payload loss, upgrade, downgrade rejection, uninstall, no product-owned residue and user-data preservation.
+- **+2 points — exact-artifact Defender evidence:** both exact installer executables were scanned successfully with no path-bound detections and unchanged hashes.
+- Installer remains **PARCIAL**, not PASS, because mandatory versioned terms acceptance has not yet been independently proven for the releasable candidate.
+- Distribution security remains **PARCIAL**, not PASS, because the exact AEVRIX installers are unsigned and signed update/tamper controls remain outstanding.
 - No other gate was promoted by inference.
 
 ## Confirmed remaining blockers
 
-### Full Windows E2E / first-run — #289
+### Full Windows E2E / versioned terms acceptance — #289
 
-Mandatory terms/first-run and the complete Desktop -> EngineHost -> worker -> embedded Python -> private Chromium / Research Browser path remain unproven end-to-end.
+Secure first-run/profile work exists in the Product/UX stream, but mandatory versioned terms acceptance still requires independent exact-candidate evidence. The complete Desktop -> EngineHost -> worker -> embedded Python -> private Chromium / Research Browser path remains unproven end-to-end.
 
 ### Restrictive filesystem isolation — #284 / #288
 
@@ -120,7 +121,7 @@ The runtime fails closed when restrictive filesystem authority is not fully prov
 
 ### Installer lifecycle remainder — #315
 
-The physical lifecycle is now proven on an exact canonical NSIS candidate. The remaining installer-side acceptance item is exact-candidate mandatory terms/first-run behavior. The AVA specification now accepts the explicitly approved Windows package format rather than hard-coding MSI, without waiving any lifecycle test.
+The physical lifecycle is proven on an exact canonical NSIS candidate. Remaining acceptance is the mandatory versioned terms gate on the exact releasable install. `docs/VALIDATION.md` accepts the explicitly approved Windows package format without waiving any lifecycle requirement.
 
 ### PostgreSQL Execution Authority — #316
 
@@ -128,7 +129,7 @@ The concrete PostgreSQL-backed implementation and real database AVA remain requi
 
 ### Distribution security — #317
 
-Exact-artifact Defender, Authenticode, signed-update manifest, tamper and rollback/downgrade evidence remain outstanding.
+Defender exact-artifact evidence is now proven. Authenticode, signed-update manifest, tamper resistance and update rollback/downgrade evidence remain outstanding.
 
 ### Full-product stability — #318
 
@@ -140,10 +141,10 @@ Real Windows visual, DPI, keyboard/navigation and minimum accessibility smoke re
 
 ## Current priority order
 
-1. Prove mandatory terms/first-run on the exact installed candidate and continue the full downstream E2E path (#289/#315).
+1. Independently validate mandatory versioned terms acceptance as soon as the queued Stage 9 acceptance implementation is promoted, then continue the full downstream E2E path (#289/#315).
 2. Close restrictive filesystem read/write isolation with native hostile Windows proof (#284/#288).
 3. Materialize and validate PostgreSQL-backed Execution Authority (#316).
-4. Bind Defender, Authenticode, signed update and rollback/tamper evidence to exact distributed artifacts (#317).
+4. Add Authenticode plus signed update/tamper/rollback evidence to the exact distributed artifacts (#317).
 5. Execute full-product endurance/resource/recovery campaign (#318).
 6. Execute real Windows high-DPI/keyboard/accessibility/visual smoke (#319).
 7. Freeze final hashes and assemble the complete release evidence package.
