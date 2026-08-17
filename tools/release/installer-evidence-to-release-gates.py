@@ -152,9 +152,17 @@ def main() -> int:
         }
     }
 
+    defender_path: Path | None = None
     if args.defender_evidence:
         defender_path = Path(args.defender_evidence)
-        require(defender_path.is_file(), "Defender evidence path was supplied but file is missing")
+    else:
+        declared_defender_hash = str(candidate.get("defenderEvidenceSha256") or "").lower()
+        defender_file = str(candidate.get("defenderEvidenceFile") or "").strip()
+        if declared_defender_hash and defender_file:
+            defender_path = candidate_path.parent / defender_file
+
+    if defender_path is not None:
+        require(defender_path.is_file(), "Defender evidence was declared/supplied but file is missing")
         actual_defender_hash = sha256_file(defender_path)
         declared_defender_hash = str(candidate.get("defenderEvidenceSha256") or "").lower()
         require(declared_defender_hash == actual_defender_hash, "Defender evidence SHA-256 does not match candidate declaration")
