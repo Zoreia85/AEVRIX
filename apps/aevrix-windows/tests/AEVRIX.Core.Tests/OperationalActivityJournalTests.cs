@@ -28,7 +28,7 @@ public sealed class OperationalActivityJournalTests
 
         var entries = journal.Snapshot();
 
-        Assert.HasCount(2, entries);
+        Assert.AreEqual(2, entries.Count);
         Assert.AreEqual(secondTimestamp, entries[0].TimestampUtc);
         Assert.AreEqual("Ping confirmado", entries[0].Title);
         Assert.AreEqual("Desktop", entries[1].Source);
@@ -47,7 +47,7 @@ public sealed class OperationalActivityJournalTests
 
         var entries = journal.Snapshot();
 
-        Assert.HasCount(2, entries);
+        Assert.AreEqual(2, entries.Count);
         Assert.AreEqual("Três", entries[0].Title);
         Assert.AreEqual("Dois", entries[1].Title);
     }
