@@ -28,10 +28,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10.0.400
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: "10.0.400"
+      - name: Verify runner has repository-pinned .NET SDK
+        shell: pwsh
+        run: |
+          dotnet --info
+          $required = '10.0.400'
+          $sdks = @(dotnet --list-sdks)
+          if (-not ($sdks | Where-Object { $_ -match "^$([regex]::Escape($required))\s" })) {
+            throw "Runner image does not contain required SDK $required; diagnostic is infrastructure-inconclusive."
+          }
 
       - name: Build Windows Desktop and restore exact Windows App SDK runtime package
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
@@ -41,21 +46,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1'
-          if (-not (Test-Path -LiteralPath $root -PathType Container)) {
-            throw "Exact Windows App SDK runtime NuGet package is missing: $root"
-          }
+          if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Exact runtime package is missing: $root" }
           Write-Host "runtimePackageRoot=$root"
           $nupkg = Get-ChildItem -LiteralPath $root -File -Filter '*.nupkg' | Select-Object -First 1
           if ($null -ne $nupkg) {
-            $nupkgHash = (Get-FileHash -LiteralPath $nupkg.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            Write-Host "nupkg=$($nupkg.Name) sha256=$nupkgHash bytes=$($nupkg.Length)"
-          } else {
-            Write-Warning 'NuGet cache does not retain the .nupkg file; package contents remain version-bound by exact restore.'
+            Write-Host "nupkg=$($nupkg.Name) sha256=$((Get-FileHash -LiteralPath $nupkg.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) bytes=$($nupkg.Length)"
           }
-
-          $candidates = Get-ChildItem -LiteralPath $root -Recurse -File |
-            Where-Object { $_.Extension -in @('.msix','.msixbundle','.appx','.appxbundle','.exe') } |
-            Sort-Object FullName
+          $candidates = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in @('.msix','.msixbundle','.appx','.appxbundle','.exe') } | Sort-Object FullName)
           if ($candidates.Count -eq 0) { throw 'Runtime package contains no deployable MSIX/EXE candidates.' }
           foreach ($file in $candidates) {
             $relative = [System.IO.Path]::GetRelativePath($root, $file.FullName)
@@ -64,14 +61,11 @@ jobs:
             $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
             Write-Host "deployable=$relative bytes=$($file.Length) sha256=$hash signature=$($sig.Status) signer=$subject"
           }
-
-          Write-Host '=== package top-level / architecture layout ==='
+          Write-Host '=== package architecture layout ==='
           Get-ChildItem -LiteralPath $root -Recurse -File |
             Where-Object { $_.FullName -match '(?i)(x64|msix|appx|installer|runtime)' } |
             ForEach-Object { [System.IO.Path]::GetRelativePath($root, $_.FullName) } |
-            Sort-Object |
-            Select-Object -First 260 |
-            ForEach-Object { Write-Host $_ }
+            Sort-Object | Select-Object -First 300 | ForEach-Object { Write-Host $_ }
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
