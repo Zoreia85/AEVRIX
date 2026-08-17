@@ -268,6 +268,54 @@
       "hard_gates": "PENDING",
       "task_families": ["authorized-call-tracing", "module-observation", "execution-trace"],
       "recommendation": "observation-only-no-evasion-benchmark-only-for-evidence-gaps"
+    },
+    {
+      "id": "ghidra-headless",
+      "name": "Ghidra Headless Native Analysis",
+      "family": "native-binary-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["elf-analysis", "macho-analysis", "jni-native-code-analysis"],
+      "recommendation": "read-only-ephemeral-offline-benchmark-before-promotion"
+    },
+    {
+      "id": "apkid",
+      "name": "APKiD",
+      "family": "android-protection-fingerprinting",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["compiler-fingerprint", "packer-detection", "obfuscator-detection", "rasp-fingerprint"],
+      "recommendation": "signal-only-no-bypass-benchmark-false-positive-rate"
+    },
+    {
+      "id": "lief",
+      "name": "LIEF",
+      "family": "binary-format-parsing",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["elf-parser", "macho-parser", "dex-oat-vdex-parser", "binary-metadata-cross-check"],
+      "recommendation": "local-parser-benchmark-against-native-vendor-and-ghidra-evidence"
+    },
+    {
+      "id": "appium-webdriver-lab",
+      "name": "Appium WebDriver Lab",
+      "family": "cross-platform-ui-automation",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["android-ui-automation-comparison", "ios-ui-automation-comparison", "hybrid-app-observation"],
+      "recommendation": "comparison-only-until-incremental-value-over-native-drivers-is-measured"
     }
   ]
 }
