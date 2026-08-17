@@ -10,15 +10,6 @@ on:
       - "services/aevrix-remote-brain/**"
       - "global.json"
       - ".github/workflows/dotnet-core.yml"
-  pull_request:
-    paths:
-      - "apps/aevrix-windows/src/AEVRIX.Core/**"
-      - "apps/aevrix-windows/src/AEVRIX.EngineHost/**"
-      - "apps/aevrix-windows/src/AEVRIX.Desktop/**"
-      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/**"
-      - "services/aevrix-remote-brain/**"
-      - "global.json"
-      - ".github/workflows/dotnet-core.yml"
 
 permissions:
   contents: read
@@ -30,7 +21,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +35,63 @@ jobs:
 
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Publish framework-dependent Desktop
+        shell: pwsh
+        run: |
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -o "$env:RUNNER_TEMP\desktop"
+          if ($LASTEXITCODE -ne 0) { throw "Desktop publish failed: $LASTEXITCODE" }
+
+      - name: Prove post-first-run MainWindow starts without eager WebView2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+
+          $stateRoot = Join-Path $env:LOCALAPPDATA 'AEVRIX\UserData'
+          New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+          @{
+            SchemaVersion = 1
+            TermsRevision = 'preview-authorized-use-v1'
+            AcceptedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot 'first-run-acceptance.json') -Encoding utf8NoBOM
+
+          $before = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+          $exe = Join-Path $env:RUNNER_TEMP 'desktop\AEVRIX.Desktop.exe'
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+            $mainFound = $false
+            while ([DateTimeOffset]::UtcNow -lt $deadline) {
+              $process.Refresh()
+              if ($process.HasExited) {
+                throw "Desktop exited before MainWindow could be proven. ExitCode=$($process.ExitCode)"
+              }
+              $root = [System.Windows.Automation.AutomationElement]::RootElement
+              $pidCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
+              $window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCondition)
+              if ($null -ne $window) {
+                $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Navegação principal do AEVRIX')
+                $nav = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCondition)
+                if ($null -ne $nav) { $mainFound = $true; break }
+              }
+              Start-Sleep -Milliseconds 200
+            }
+            if (-not $mainFound) { throw 'MainWindow navigation was not observed after persisted first-run acceptance.' }
+
+            Start-Sleep -Seconds 2
+            $after = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+            $newWebViewPids = @($after | Where-Object { $_ -notin $before })
+            if ($newWebViewPids.Count -gt 0) {
+              throw "MainWindow startup eagerly created WebView2 processes without a selected Research Browser project: $($newWebViewPids -join ',')"
+            }
+
+            Write-Host "PASS: MainWindow observed; no new msedgewebview2 process was created. desktopPid=$($process.Id)"
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+          }
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
