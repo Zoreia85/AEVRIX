@@ -2,23 +2,6 @@ name: .NET core
 
 on:
   push:
-    paths:
-      - "apps/aevrix-windows/src/AEVRIX.Core/**"
-      - "apps/aevrix-windows/src/AEVRIX.EngineHost/**"
-      - "apps/aevrix-windows/src/AEVRIX.Desktop/**"
-      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/**"
-      - "services/aevrix-remote-brain/**"
-      - "global.json"
-      - ".github/workflows/dotnet-core.yml"
-  pull_request:
-    paths:
-      - "apps/aevrix-windows/src/AEVRIX.Core/**"
-      - "apps/aevrix-windows/src/AEVRIX.EngineHost/**"
-      - "apps/aevrix-windows/src/AEVRIX.Desktop/**"
-      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/**"
-      - "services/aevrix-remote-brain/**"
-      - "global.json"
-      - ".github/workflows/dotnet-core.yml"
 
 permissions:
   contents: read
@@ -30,7 +13,13 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 55
+    env:
+      NSIS_SETUP_SHA256: "3BC2B06253A7E4957111BE152AC6A536E0C7478A706E19DA814038DB5D706495"
+      NSIS_PACKAGE_URL: "https://community.chocolatey.org/api/v2/package/nsis.install/3.12.0"
+      OLD_VERSION: "0.0.1"
+      NEW_VERSION: "0.0.2"
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +33,109 @@ jobs:
 
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Acquire pinned NSIS 3.12
+        id: nsis
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = Join-Path $env:RUNNER_TEMP 'nsis.install.3.12.0.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'nsis.install.3.12.0'
+          Invoke-WebRequest -Uri $env:NSIS_PACKAGE_URL -OutFile $package -MaximumRedirection 10
+          Expand-Archive -LiteralPath $package -DestinationPath $extract -Force
+          $setup = Join-Path $extract 'tools\nsis-3.12-setup.exe'
+          $actual = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $env:NSIS_SETUP_SHA256) { throw "NSIS setup hash mismatch: $actual" }
+          "setup=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install verified NSIS toolchain
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath '${{ steps.nsis.outputs.setup }}' -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "NSIS setup failed: $($p.ExitCode)" }
+          $makensis = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'),
+            (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
+          ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $makensis) { throw 'makensis.exe not found after verified NSIS install.' }
+          $version = (& $makensis /VERSION) -join ' '
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '3\.12') { throw "Unexpected makensis version: $version" }
+          "MAKENSIS_EXE=$makensis" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build old corrected installer
+        shell: pwsh
+        run: |
+          ./apps/aevrix-windows/installer/build-installer.ps1 `
+            -ProductVersion $env:OLD_VERSION `
+            -FileVersion '0.0.1.0' `
+            -RuntimeIdentifier win-x64 `
+            -OutputDirectory "$env:RUNNER_TEMP\installer-old" `
+            -MakensisPath $env:MAKENSIS_EXE
+
+      - name: Build new corrected installer
+        shell: pwsh
+        run: |
+          ./apps/aevrix-windows/installer/build-installer.ps1 `
+            -ProductVersion $env:NEW_VERSION `
+            -FileVersion '0.0.2.0' `
+            -RuntimeIdentifier win-x64 `
+            -OutputDirectory "$env:RUNNER_TEMP\installer-new" `
+            -MakensisPath $env:MAKENSIS_EXE
+
+      - name: Assert corrected deployment manifests
+        shell: pwsh
+        run: |
+          foreach ($tuple in @(
+            @($env:OLD_VERSION, "$env:RUNNER_TEMP\installer-old"),
+            @($env:NEW_VERSION, "$env:RUNNER_TEMP\installer-new")
+          )) {
+            $version = $tuple[0]
+            $root = $tuple[1]
+            $manifest = Get-Content -LiteralPath (Join-Path $root "AEVRIX-$version-win-x64-payload.json") -Raw | ConvertFrom-Json
+            if ($manifest.schemaVersion -ne 2) { throw "Unexpected payload schema for $version" }
+            if ($manifest.dotnetSelfContained -ne $true) { throw ".NET runtime must remain self-contained for $version" }
+            if ($manifest.windowsAppSdkSelfContained -ne $false) { throw "Windows App SDK must remain external for $version" }
+            if ($manifest.windowsAppSdkRuntime.version -ne '2.3.1') { throw "Unexpected Windows App SDK runtime version for $version" }
+            if ($manifest.windowsAppSdkRuntime.nupkgSha256 -ne 'f15c6c682a81a019e13beaee512de9fb83ffd5a1f3e83b99209b6860a7aebba2') { throw "Runtime nupkg hash mismatch in manifest for $version" }
+            if (@($manifest.windowsAppSdkRuntime.packages).Count -ne 4) { throw "Expected four runtime packages for $version" }
+            if (@($manifest.files | Where-Object { $_.path -ieq 'Microsoft.UI.Xaml.dll' }).Count -ne 0) { throw "Private Microsoft.UI.Xaml.dll returned in $version payload" }
+            if (@($manifest.files | Where-Object { $_.path -ieq 'coreclr.dll' }).Count -ne 1) { throw "Self-contained coreclr.dll missing in $version payload" }
+          }
+
+      - name: Exercise install interruption recovery repair upgrade downgrade and uninstall
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP 'evidence'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          ./apps/aevrix-windows/installer/test-installer-lifecycle.ps1 `
+            -OldInstaller "$env:RUNNER_TEMP\installer-old\AEVRIX-$env:OLD_VERSION-win-x64-Setup.exe" `
+            -NewInstaller "$env:RUNNER_TEMP\installer-new\AEVRIX-$env:NEW_VERSION-win-x64-Setup.exe" `
+            -OldVersion $env:OLD_VERSION `
+            -NewVersion $env:NEW_VERSION `
+            -EvidencePath (Join-Path $evidence 'lifecycle.json')
+
+      - name: Prove installed first-run and terms on corrected installer
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP 'evidence'
+          ./apps/aevrix-windows/installer/test-first-run-terms.ps1 `
+            -Installer "$env:RUNNER_TEMP\installer-new\AEVRIX-$env:NEW_VERSION-win-x64-Setup.exe" `
+            -ProductVersion $env:NEW_VERSION `
+            -CandidateSha '${{ github.sha }}' `
+            -EvidencePath (Join-Path $evidence 'first-run.json')
+          Get-Content -LiteralPath (Join-Path $evidence 'first-run.json') -Raw | Write-Host
+
+      - name: Verify Microsoft runtime survives AEVRIX uninstall and helper is idempotent in Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
+          $powershell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+          $helper = (Resolve-Path './apps/aevrix-windows/installer/install-windows-app-runtime.ps1').Path
+          $p = Start-Process -FilePath $powershell -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',"`"$helper`"",'-RuntimeRoot',"`"$packageRoot`"") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Windows PowerShell 5.1 idempotence probe failed: $($p.ExitCode)" }
+          $framework = @(Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.2' -ErrorAction SilentlyContinue | Where-Object { [version]$_.Version -ge [version]'2.3.1.0' })
+          if ($framework.Count -eq 0) { throw 'Shared Windows App Runtime did not survive AEVRIX uninstall.' }
+          Write-Host 'PASS: shared runtime survives product uninstall and helper is idempotent under Windows PowerShell 5.1.'
 
       - name: Test Windows Core
         run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
