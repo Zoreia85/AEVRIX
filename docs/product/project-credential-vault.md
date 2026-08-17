@@ -93,6 +93,6 @@ Tests cover:
 - browser-profile separation between projects using the same target;
 - real Windows Credential Manager save/read/delete round trip on Windows CI.
 
-## Next integration gate
+## Integration status
 
-The next product step is to connect this vault to the project detail UX and Research Browser login adapter. Automatic fill must only occur inside an authorized project execution and only for a URL that resolves through this vault. No generic global-password-manager behavior is permitted.
+This increment establishes and tests the secure local foundation. The project-facing credential-management UI and the concrete Research Browser form-fill adapter remain separate integration gates and must not be represented as already operational by this Core increment.
