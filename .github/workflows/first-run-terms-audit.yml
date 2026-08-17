@@ -1,0 +1,106 @@
+name: First-run terms source audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/aevrix-windows/src/AEVRIX.Core/FirstRunAcceptanceStore.cs"
+      - "apps/aevrix-windows/tests/AEVRIX.Core.Tests/FirstRunAcceptanceStoreTests.cs"
+      - "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml"
+      - "apps/aevrix-windows/src/AEVRIX.Desktop/MainWindow.xaml.cs"
+      - "tools/release/audit-first-run-terms.py"
+      - "tools/release/tests/test_first_run_terms_audit.py"
+      - ".github/workflows/first-run-terms-audit.yml"
+  repository_dispatch:
+    types: [aevrix-candidate-promoted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: first-run-terms-source-${{ github.event.client_payload.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CANDIDATE_SHA: ${{ github.event.client_payload.sha || github.sha }}
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          if [[ "$actual" != "$CANDIDATE_SHA" ]]; then
+            echo "candidate mismatch: expected $CANDIDATE_SHA got $actual" >&2
+            exit 1
+          fi
+
+      - name: Test QA source probe
+        shell: bash
+        run: python -m unittest tools.release.tests.test_first_run_terms_audit -v
+
+      - name: Generate fail-closed first-run terms evidence
+        id: audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/aevrix-first-run-terms"
+          python tools/release/audit-first-run-terms.py \
+            --repo-root . \
+            --source-commit "$CANDIDATE_SHA" \
+            --output "$RUNNER_TEMP/aevrix-first-run-terms/first-run-terms-source-evidence.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'aevrix-first-run-terms' / 'first-run-terms-source-evidence.json'
+          data = json.loads(p.read_text(encoding='utf-8'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"source_status={data['sourcePreconditionStatus']}\n")
+              out.write(f"store_status={data['store']['status']}\n")
+              out.write(f"desktop_binding={str(data['desktopBinding']).lower()}\n")
+          PY
+
+      - name: Hash evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/aevrix-first-run-terms"
+          sha256sum first-run-terms-source-evidence.json > first-run-terms-source-evidence.json.sha256
+          cat first-run-terms-source-evidence.json.sha256
+
+      - name: Upload first-run terms evidence
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aevrix-first-run-terms-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/aevrix-first-run-terms
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Publish audit summary
+        shell: bash
+        run: |
+          {
+            echo '## AEVRIX first-run / terms source precondition audit'
+            echo
+            echo "- Candidate: \`$CANDIDATE_SHA\`"
+            echo "- Acceptance store: **${{ steps.audit.outputs.store_status }}**"
+            echo "- Desktop binding detected: **${{ steps.audit.outputs.desktop_binding }}**"
+            echo "- Source precondition: **${{ steps.audit.outputs.source_status }}**"
+            echo '- Final Windows AVA: **NOT_RUN**'
+            echo
+            echo 'Static source analysis can prove a missing mandatory precondition, but it never substitutes for exact-candidate Windows launch/accept/decline/relaunch evidence.'
+          } >> "$GITHUB_STEP_SUMMARY"
