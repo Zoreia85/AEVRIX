@@ -9,7 +9,7 @@ Passing CI unit/integration tests proves only the exercised test scope; it does 
 For the **exact hashes that will be released**:
 
 - build on real Windows;
-- clean MSI installation;
+- clean installation using the explicitly approved Windows installation package for the candidate (MSI or another package format approved by the product/packaging architecture); the exact installer hash must be recorded;
 - mandatory terms/first-run behavior;
 - application launch and visual inspection;
 - backend connection and fail-closed offline behavior;
@@ -26,6 +26,8 @@ For the **exact hashes that will be released**:
 - Authenticode verification for external Windows distribution;
 - signed update manifest / downgrade rejection;
 - regression suite.
+
+The package format itself does not waive any AVA requirement. A successful package build is not an installer lifecycle PASS; install, recovery, repair, upgrade, uninstall, residue and all other applicable release gates must still be exercised against the exact releasable hashes.
 
 ## Android gate
 
