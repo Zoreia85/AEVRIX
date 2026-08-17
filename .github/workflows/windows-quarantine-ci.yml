@@ -47,7 +47,7 @@ jobs:
 
       - name: Run Windows core tests
         shell: pwsh
-        run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release --no-restore:$false
+        run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release
 
       - name: Build WinUI Desktop
         shell: pwsh
