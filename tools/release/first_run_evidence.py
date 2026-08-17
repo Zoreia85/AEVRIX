@@ -36,6 +36,8 @@ def validate_first_run_evidence(first_run: dict, expected_commit: str, expected_
 
     required_true = (
         "presentationObserved",
+        "preAcceptanceNavigationAbsent",
+        "declineExitedWithoutAcceptance",
         "initialAcceptDisabled",
         "explicitConfirmationRequired",
         "acceptancePersisted",
