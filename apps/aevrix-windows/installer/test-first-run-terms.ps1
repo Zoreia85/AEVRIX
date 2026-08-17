@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)] [string]$Installer,
     [Parameter(Mandatory)] [string]$ProductVersion,
+    [Parameter(Mandatory)] [string]$CandidateSha,
     [Parameter(Mandatory)] [string]$EvidencePath
 )
 
@@ -11,6 +12,10 @@ Set-StrictMode -Version Latest
 if (-not $IsWindows) {
     throw 'First-run AVA requires Windows.'
 }
+if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') {
+    throw "First-run AVA requires an exact 40-character candidate SHA; got '$CandidateSha'."
+}
+$CandidateSha = $CandidateSha.ToLowerInvariant()
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -207,7 +212,8 @@ $evidenceDirectory = Split-Path -Parent ([IO.Path]::GetFullPath($EvidencePath))
 New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
 
 [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
+    candidateSha = $CandidateSha
     productVersion = $ProductVersion
     termsRevision = $expectedRevision
     installExitCode = $installExit
@@ -223,4 +229,4 @@ New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
     acceptanceSurvivedUninstall = $true
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $EvidencePath -Encoding utf8NoBOM
 
-Write-Host 'PASS: installed first-run terms were presented, explicit confirmation was required, acceptance transitioned to Command Center, persisted across relaunch, and survived uninstall.'
+Write-Host "PASS: exact-candidate $CandidateSha installed first-run terms were presented, explicit confirmation was required, acceptance transitioned to Command Center, persisted across relaunch, and survived uninstall."
