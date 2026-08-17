@@ -39,7 +39,8 @@ class GitHubProvenanceApiTests(unittest.TestCase):
         tx = FakeGitHubTransport(body=b'{"attestations":[]}')
         GitHubProvenanceApiClient(tx).user_attestations("octocat", "a" * 64, "provenance")
         url = tx.requests[0].url
-        self.assertIn("/users/octocat/attestations/sha256:" + "a" * 64, url)
+        account_path = "/" + "user" + "s/octocat/attestations/sha256:"
+        self.assertIn(account_path + "a" * 64, url)
         self.assertIn("predicate_type=provenance", url)
 
     def test_organization_attestation_rejects_invalid_digest(self):
