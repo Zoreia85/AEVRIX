@@ -22,6 +22,8 @@ class FirstRunEvidenceTests(unittest.TestCase):
             "uninstallExitCode": 0,
             "presentationObserved": True,
             "presentedAtUtc": "2026-08-17T12:00:00+00:00",
+            "preAcceptanceNavigationAbsent": True,
+            "declineExitedWithoutAcceptance": True,
             "initialAcceptDisabled": True,
             "explicitConfirmationRequired": True,
             "acceptancePersisted": True,
@@ -49,6 +51,16 @@ class FirstRunEvidenceTests(unittest.TestCase):
     def test_missing_physical_observation_is_rejected(self):
         value = dict(self.valid, initialAcceptDisabled=False)
         with self.assertRaisesRegex(ValueError, "initialAcceptDisabled"):
+            MODULE.validate_first_run_evidence(value, self.commit, self.version)
+
+    def test_pre_acceptance_navigation_exposure_is_rejected(self):
+        value = dict(self.valid, preAcceptanceNavigationAbsent=False)
+        with self.assertRaisesRegex(ValueError, "preAcceptanceNavigationAbsent"):
+            MODULE.validate_first_run_evidence(value, self.commit, self.version)
+
+    def test_decline_must_exit_without_acceptance(self):
+        value = dict(self.valid, declineExitedWithoutAcceptance=False)
+        with self.assertRaisesRegex(ValueError, "declineExitedWithoutAcceptance"):
             MODULE.validate_first_run_evidence(value, self.commit, self.version)
 
     def test_naive_timestamp_is_rejected(self):
