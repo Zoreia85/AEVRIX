@@ -101,7 +101,7 @@ public sealed class WindowsCredentialManagerProjectSecretStore : IProjectCredent
                 throw new InvalidDataException("Stored AEVRIX project credential has an invalid payload size.");
             }
 
-            payload = new byte[credential.CredentialBlobSize];
+            payload = new byte[checked((int)credential.CredentialBlobSize)];
             Marshal.Copy(credential.CredentialBlob, payload, 0, payload.Length);
             var envelope = JsonSerializer.Deserialize<SecretEnvelope>(payload, JsonOptions)
                 ?? throw new InvalidDataException("Stored AEVRIX project credential is invalid.");
