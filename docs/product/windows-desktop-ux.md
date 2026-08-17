@@ -13,7 +13,7 @@ It does **not** redefine the security/runtime authority implemented by the Windo
 ## Evidence rules
 
 1. Chat claims are not implementation evidence.
-2. A UI capability is implemented only when code exists in the repository and the exact candidate builds.
+2. A UI capability is accepted only when code exists in the repository and the exact candidate builds.
 3. Runtime/security states shown to users must originate from a real probe or remain explicitly `not verified`/`blocked`.
 4. Session activity is not the canonical Proof Ledger. Product-facing logs must be privacy-safe summaries and may not expose raw payloads, secrets or sensitive evidence.
 5. `100%` requires all scorecard domains below to reach their acceptance criteria on the exact release candidate.
@@ -22,28 +22,30 @@ It does **not** redefine the security/runtime authority implemented by the Windo
 
 The score is intentionally conservative. Each domain is worth 10 points; partial points require repository evidence.
 
-| Domain | Points | Evidence / remaining gap |
+| Domain | Candidate points | Evidence / remaining gap |
 |---|---:|---|
 | Shell, navigation and responsive layout | 7/10 | WinUI shell and primary navigation exist; several routes remain planned placeholders. |
 | Command Center and verified local state | 7/10 | EngineHost start/restart/stop, authenticated ping and health revocation are surfaced; remote state is not yet integrated. |
 | First-run onboarding and initial configuration | 2/10 | Authorized-analysis form exists, but there is no complete first-run enrollment/configuration journey. |
-| Mission Control | 5/10 | Dedicated surface now mirrors verified local EngineHost state and preserves fail-closed remote/queue states; real orchestrator mission feed is pending. |
-| Activity and user-facing logs | 5/10 | Bounded privacy-safe operational session journal exists; persistent canonical Proof Ledger integration is pending. |
+| Mission Control | 5/10 | Dedicated surface in PR #350 mirrors verified local EngineHost state and preserves fail-closed remote/queue states; real orchestrator mission feed is pending. |
+| Activity and user-facing logs | 5/10 | PR #350 adds a bounded privacy-safe operational session journal; persistent canonical Proof Ledger integration is pending. |
 | Permissions, settings and security UX | 1/10 | Navigation contract exists; dedicated implemented settings/permission workflows are pending. |
 | Local/remote mode UX | 2/10 | Local supervised EngineHost is represented; authenticated remote mode selection/status/recovery is pending. |
 | Installer lifecycle experience | 7/10 | NSIS package plus interruption recovery, repair, upgrade, downgrade resistance and uninstall test harness exist; polished interactive UX/evidence promotion remains. |
 | Update and recovery UX | 3/10 | Installer recovery/repair mechanics exist; in-app update channel, progress, rollback and user recovery surfaces are pending. |
 | Accessibility, packaging and release evidence | 4/10 | Automation names and Windows build/readiness workflows exist; accessibility regression suite, signed release evidence and final homologation remain. |
 
-**Current desktop/product score: 43/100 (43%).**
+**Accepted desktop/product score: 33/100 (33%) until the exact PR #350 candidate passes its required Windows CI.**  
+**Candidate desktop/product score after PR #350: 43/100 (43%), pending CI acceptance.**
 
-This percentage measures only this Desktop/Product/UX track. It must not be substituted for the global AEVRIX homologation percentage.
+The candidate delta is **+10 percentage points**, entirely from Mission Control and Activity. It becomes accepted progress only after the exact candidate build/tests pass. This percentage measures only this Desktop/Product/UX track and must not be substituted for the global AEVRIX homologation percentage.
 
 ## Current increment — Mission Control + Activity
 
-Branch: `feature/desktop-ux-mission-activity`
+Branch: `feature/desktop-ux-mission-activity`  
+Pull request: `#350`
 
-Implemented in this increment:
+Implemented in the candidate:
 
 - `Mission Control` is a real routed surface rather than a generic placeholder.
 - Local EngineHost status is mirrored from the same authenticated state used by Command Center.
@@ -76,4 +78,4 @@ After promotion to `main`, `.github/workflows/desktop-build-evidence.yml` record
 
 ## Update protocol
 
-Every completed Desktop/Product action must update this scorecard only when new repository evidence justifies a point change. Every status report must end with the current Desktop/Product percentage, the delta from the previous score and the next highest-value blocker.
+Every completed Desktop/Product action must update this scorecard only when new repository evidence justifies a point change. Every status report must end with both the accepted Desktop/Product percentage and any higher candidate percentage still waiting for evidence, plus the next highest-value blocker.
