@@ -34,6 +34,41 @@ jobs:
       - name: Build Windows Desktop
         run: dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -p:RuntimeIdentifier=win-x64
 
+      - name: Diagnose exact runtime helper under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
+          Write-Host "PowerShell=$($PSVersionTable.PSVersion) RuntimeRoot=$packageRoot"
+          & ./apps/aevrix-windows/installer/install-windows-app-runtime.ps1 -RuntimeRoot $packageRoot
+          if ($LASTEXITCODE -ne 0) { throw "Runtime helper returned native exit code $LASTEXITCODE" }
+          Write-Host 'PASS: helper executes directly under Windows PowerShell 5.1.'
+
+      - name: Remove diagnostic runtime packages before NSIS fresh-install proof
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windowsappsdk.runtime\2.3.1\tools\MSIX\win10-x64'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.msix' -File) {
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($file.FullName)
+            try {
+              $entry = $archive.GetEntry('AppxManifest.xml')
+              $stream = $entry.Open()
+              try {
+                $reader = New-Object System.IO.StreamReader($stream)
+                try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+              } finally { $stream.Dispose() }
+            } finally { $archive.Dispose() }
+            $name = [string]$manifest.Package.Identity.Name
+            Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "Removing diagnostic package $($_.PackageFullName)"
+              Remove-AppxPackage -Package $_.PackageFullName -ErrorAction Stop
+            }
+          }
+          Write-Host 'Diagnostic 2.3.1 package roles removed; NSIS will prove fresh prerequisite deployment.'
+
       - name: Acquire pinned NSIS 3.12
         id: nsis
         shell: pwsh
