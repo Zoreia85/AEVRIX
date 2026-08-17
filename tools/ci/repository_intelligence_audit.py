@@ -63,6 +63,8 @@ def audit_registry(data: dict) -> list[str]:
     for flag in (
         "requireObservedRevision",
         "requirePinnedRevisionForExecution",
+        "requireArtifactSha256ForConsumption",
+        "requireProvenanceForConsumption",
         "requireLicenseVerificationForVendoring",
         "requireIndependentSecurityReviewForExecution",
         "discoveryNeverImpliesExecutionApproval",

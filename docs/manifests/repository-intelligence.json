@@ -5,6 +5,8 @@
     "defaultRuntimeApproval": "Denied",
     "requireObservedRevision": true,
     "requirePinnedRevisionForExecution": true,
+    "requireArtifactSha256ForConsumption": true,
+    "requireProvenanceForConsumption": true,
     "requireLicenseVerificationForVendoring": true,
     "requireIndependentSecurityReviewForExecution": true,
     "discoveryNeverImpliesExecutionApproval": true
