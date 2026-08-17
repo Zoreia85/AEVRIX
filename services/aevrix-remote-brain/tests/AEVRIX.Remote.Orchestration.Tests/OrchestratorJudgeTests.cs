@@ -42,7 +42,7 @@ public sealed class OrchestratorJudgeTests
     }
 
     [TestMethod]
-    public async Task CandidateCannotBecomeTrustedWithoutIndependentValidationAndCounterexampleReview()
+    public async Task CandidateCannotBecomeTrustedWithoutIndependentValidationCounterexampleReviewAndAdmissionContext()
     {
         var task = TaskFixture();
         var repository = new MemoryRepository();
@@ -65,7 +65,6 @@ public sealed class OrchestratorJudgeTests
         Assert.AreEqual(KnowledgeTrustState.Validated, partial.TrustState);
         Assert.AreEqual(KnowledgeTrustState.Validated, repository.Promotions.Last().State);
 
-        // A separately created candidate can reach Trusted only when every validation gate passes.
         var repository2 = new MemoryRepository();
         var judgeCreate2 = new OrchestratorJudge(primary, repository2, new StubValidator(TrustedValidation("unused", "unused")), timeProvider: new FixedTimeProvider());
         var candidate2 = await judgeCreate2.AnalyzeToCandidateAsync(task with { TaskId = "task-fixture-0002" });
@@ -74,8 +73,10 @@ public sealed class OrchestratorJudgeTests
             repository2,
             new StubValidator(TrustedValidation("VAL-trusted", candidate2.KnowledgeId)),
             timeProvider: new FixedTimeProvider());
-        var trusted = await trustedJudge.ValidateAndPromoteAsync(candidate2.KnowledgeId);
-        Assert.AreEqual(KnowledgeTrustState.Trusted, trusted.TrustState);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            async () => await trustedJudge.ValidateAndPromoteAsync(candidate2.KnowledgeId));
+        Assert.AreEqual(0, repository2.Promotions.Count);
     }
 
     [TestMethod]
@@ -104,25 +105,10 @@ public sealed class OrchestratorJudgeTests
         new Dictionary<string, string> { ["scope"] = "authorized-read-only" });
 
     private static ModelAnalysisCandidate Candidate(string statement, double confidence, ModelRiskLevel risk, IReadOnlyList<string> evidence) => new(
-        "provider",
-        "model-v1",
-        statement,
-        confidence,
-        risk,
-        evidence,
-        [],
-        []);
+        "provider", "model-v1", statement, confidence, risk, evidence, [], []);
 
     private static KnowledgeValidationRecord TrustedValidation(string id, string knowledgeId) => new(
-        id,
-        knowledgeId,
-        EvidenceIntegrityPassed: true,
-        EvidenceSupportsStatement: true,
-        IndependentValidationPassed: true,
-        CounterexampleReviewPassed: true,
-        ["EV-1"],
-        [],
-        DateTimeOffset.Parse("2026-08-14T04:01:00Z"));
+        id, knowledgeId, true, true, true, true, ["EV-1"], [], DateTimeOffset.Parse("2026-08-14T04:01:00Z"));
 
     private sealed class StubProvider(string id, ModelAnalysisCandidate candidate) : IAevrixModelProvider
     {
@@ -175,9 +161,7 @@ public sealed class OrchestratorJudgeTests
             cancellationToken.ThrowIfCancellationRequested();
             Promotions.Add((knowledgeId, state));
             if (Candidates.TryGetValue(knowledgeId, out var value))
-            {
                 Candidates[knowledgeId] = value with { TrustState = state, ValidationRecordId = validationRecordId, UpdatedAt = promotedAt };
-            }
             return Task.CompletedTask;
         }
     }
