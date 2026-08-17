@@ -17,12 +17,12 @@
                 <NavigationViewItem x:Name="HomeNavItem" Content="Command Center" Tag="home" IsSelected="True" />
                 <NavigationViewItem Content="Projetos" Tag="projects" />
                 <NavigationViewItem x:Name="NewInvestigationNavItem" Content="Nova investigação" Tag="new" />
-                <NavigationViewItem Content="Mission Control" Tag="mission" />
+                <NavigationViewItem x:Name="MissionControlNavItem" Content="Mission Control" Tag="mission" />
                 <NavigationViewItem Content="Evidências" Tag="evidence" />
                 <NavigationViewItem Content="Blueprint" Tag="blueprint" />
                 <NavigationViewItem Content="Research Browser" Tag="browser" />
                 <NavigationViewItem Content="Especialistas / Adapters" Tag="specialists" />
-                <NavigationViewItem Content="Activity / Proof Ledger" Tag="activity" />
+                <NavigationViewItem x:Name="ActivityNavItem" Content="Activity / Proof Ledger" Tag="activity" />
                 <NavigationViewItem Content="Integrações" Tag="integrations" />
                 <NavigationViewItem Content="Configurações / Segurança" Tag="settings" />
             </NavigationView.MenuItems>
@@ -83,7 +83,8 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Text="Missões" FontWeight="SemiBold" />
                                     <TextBlock Text="0 ativas" FontSize="22" />
-                                    <TextBlock Text="Fila local ainda não vinculada ao orquestrador." Opacity="0.65" TextWrapping="Wrap" />
+                                    <TextBlock Text="Nenhuma missão é inferida sem vínculo real com o orquestrador." Opacity="0.65" TextWrapping="Wrap" />
+                                    <Button Content="Abrir Mission Control" HorizontalAlignment="Left" Click="OpenMissionControlButton_Click" AutomationProperties.Name="Abrir Mission Control" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -153,6 +154,110 @@
                                 <TextBlock Text="Etapas seguintes quando a política estiver conectada: plano de especialistas/adapters → revisão → validação de autoridade → início governado." Opacity="0.7" TextWrapping="Wrap" />
                                 <Button Content="Validar escopo e autorização" HorizontalAlignment="Left" Click="ValidateScopeButton_Click" AutomationProperties.Name="Validar escopo e autorização" />
                                 <InfoBar x:Name="PolicyUnavailableNotice" IsOpen="False" IsClosable="True" Severity="Informational" Title="Validação ainda indisponível" Message="O motor real de políticas ainda não está conectado a esta superfície. Nenhuma autorização foi concedida e nenhuma missão foi criada." />
+                            </StackPanel>
+                        </Border>
+
+                        <Button Grid.Row="3" Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="MissionControlView" Visibility="Collapsed">
+                    <Grid Padding="32" RowSpacing="24" MaxWidth="1180" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Spacing="8">
+                            <TextBlock Text="MISSION CONTROL" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Estado operacional verificável" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Acompanhe somente estados que a aplicação consegue sustentar com evidência local. Capacidades remotas continuam bloqueadas até integração real." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Fail-closed" Message="Ausência de prova nunca é convertida em estado saudável. O painel distingue explicitamente não verificado, autenticado, interrompido e bloqueado." />
+
+                        <Grid Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="EngineHost local" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="MissionEngineStatusText" Text="Não iniciado" FontSize="26" />
+                                    <TextBlock x:Name="MissionEngineDetailText" Text="Nenhuma sessão autenticada foi comprovada." Opacity="0.68" TextWrapping="Wrap" />
+                                    <Button Content="Gerenciar no Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Gerenciar EngineHost no Command Center" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="Cérebro remoto" FontWeight="SemiBold" />
+                                    <TextBlock Text="Não verificado" FontSize="26" />
+                                    <TextBlock Text="Endpoint, identidade, sessão e política remota ainda não estão vinculados a esta superfície." Opacity="0.68" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="Fila de missões" FontWeight="SemiBold" />
+                                    <TextBlock Text="0 ativas" FontSize="26" />
+                                    <TextBlock Text="Nenhuma fila é simulada. A contagem permanecerá zero até existir vínculo real com o orquestrador." Opacity="0.68" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="Modo de execução" FontWeight="SemiBold" />
+                                    <TextBlock Text="Local supervisionado" FontSize="26" />
+                                    <TextBlock Text="O shell pode supervisionar o EngineHost local. O modo remoto permanece indisponível até autenticação e política serem comprovadas." Opacity="0.68" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Button Grid.Row="3" Content="Abrir Activity" HorizontalAlignment="Left" Click="OpenActivityButton_Click" AutomationProperties.Name="Abrir atividade operacional" />
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="ActivityView" Visibility="Collapsed">
+                    <Grid Padding="32" RowSpacing="20" MaxWidth="1080" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Spacing="8">
+                            <TextBlock Text="ACTIVITY" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Histórico operacional amigável" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Resumo local e limitado dos eventos desta sessão para diagnóstico do usuário, sem expor payloads, segredos ou dados brutos." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Não é o Proof Ledger canônico" Message="Esta visualização é efêmera e orientada ao usuário. Evidência auditável persistente deve vir do ledger governado quando ele estiver conectado." />
+
+                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                            <StackPanel Spacing="14">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Eventos desta sessão" FontSize="22" FontWeight="SemiBold" />
+                                        <TextBlock Text="Mais recente primeiro • retenção limitada em memória" Opacity="0.6" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Atualizar" Click="RefreshActivityButton_Click" AutomationProperties.Name="Atualizar atividade operacional" />
+                                </Grid>
+                                <TextBlock x:Name="ActivityEmptyStateText" Text="Nenhum evento registrado nesta sessão." Opacity="0.65" Visibility="Collapsed" />
+                                <ListView x:Name="ActivityListView" MaxHeight="520" AutomationProperties.Name="Eventos operacionais da sessão" />
                             </StackPanel>
                         </Border>
 
