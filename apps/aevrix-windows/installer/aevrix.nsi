@@ -132,7 +132,9 @@ Section "AEVRIX" SEC_MAIN
   File /oname=Microsoft.WindowsAppRuntime.DDLM.2.msix "${WASDK_RUNTIME_DIR}\Microsoft.WindowsAppRuntime.DDLM.2.msix"
 
   DetailPrint "Verificando pré-requisito Microsoft Windows App Runtime 2.3.1..."
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wasdk-runtime\install-windows-app-runtime.ps1" -RuntimeRoot "$PLUGINSDIR\wasdk-runtime"'
+  ; NSIS is an x86 process. On 64-bit Windows, System32 access from x86 is redirected to
+  ; SysWOW64. Sysnative is the documented WOW64 alias for invoking native 64-bit PowerShell.
+  nsExec::ExecToStack '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wasdk-runtime\install-windows-app-runtime.ps1" -RuntimeRoot "$PLUGINSDIR\wasdk-runtime"'
   Pop $0
   Pop $1
   StrCmp $0 "0" runtime_ready 0
