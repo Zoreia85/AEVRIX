@@ -12,24 +12,18 @@ public sealed record MemoryAdmissionContext(
     public MemoryAdmissionContext Validate()
     {
         if (!MissionTaskSpec.IsSafeId(MissionId, 3, 128))
-        {
             throw new InvalidDataException("Memory admission mission id is invalid.");
-        }
-
         ArgumentNullException.ThrowIfNull(Observations);
         ArgumentNullException.ThrowIfNull(ProofRecords);
         ArgumentNullException.ThrowIfNull(ExpectedHead);
         if (Observations.Count is < 1 or > 2_000)
-        {
             throw new InvalidDataException("Memory admission observation count is invalid.");
-        }
-
         ExecutionProofLedger.VerifySnapshot(ProofRecords, ExpectedHead);
         return this;
     }
 }
 
-public sealed record MemoryAdmissionEvidenceProof(
+internal sealed record MemoryAdmissionEvidenceProof(
     string EvidenceId,
     string SourceTaskId,
     MissionSpecialistKind Specialist,
@@ -37,7 +31,7 @@ public sealed record MemoryAdmissionEvidenceProof(
     string CompletedRecordHashSha256,
     string ResultDigestSha256);
 
-public sealed record MemoryAdmissionReceipt(
+internal sealed record MemoryAdmissionReceipt(
     string KnowledgeId,
     string ValidationRecordId,
     Guid ProjectId,
@@ -48,7 +42,7 @@ public sealed record MemoryAdmissionReceipt(
     string AdmissionDigestSha256,
     DateTimeOffset AdmittedAt);
 
-public interface IMemoryAdmissionGate
+internal interface IMemoryAdmissionGate
 {
     Task<MemoryAdmissionReceipt> AdmitTrustedAsync(
         CandidateKnowledge candidate,
@@ -58,30 +52,10 @@ public interface IMemoryAdmissionGate
         CancellationToken cancellationToken = default);
 }
 
-internal interface ITrustedKnowledgePromotionStore
+internal sealed class ProjectKnowledgeAdmissionGate(ICandidateKnowledgeRepository repository) : IMemoryAdmissionGate
 {
-    Task PromoteTrustedAsync(
-        string knowledgeId,
-        string validationRecordId,
-        DateTimeOffset promotedAt,
-        CancellationToken cancellationToken = default);
-}
-
-/// <summary>
-/// The only Judge-facing authority permitted to turn independently validated project knowledge
-/// into Trusted memory. It closes every admitted EvidenceId against the exact verified
-/// ExecutionProofLedger snapshot and persists no raw evidence in the admission receipt.
-/// </summary>
-public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
-{
-    private readonly ICandidateKnowledgeRepository _repository;
-    private readonly ITrustedKnowledgePromotionStore _promotionStore;
-
-    public ProjectKnowledgeAdmissionGate(ICandidateKnowledgeRepository repository)
-    {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _promotionStore = new RepositoryTrustedPromotionStore(repository);
-    }
+    private readonly ICandidateKnowledgeRepository _repository =
+        repository ?? throw new ArgumentNullException(nameof(repository));
 
     public async Task<MemoryAdmissionReceipt> AdmitTrustedAsync(
         CandidateKnowledge candidate,
@@ -94,26 +68,16 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
         ArgumentNullException.ThrowIfNull(validation);
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
-
-        if (admittedAt == default)
-        {
-            throw new ArgumentOutOfRangeException(nameof(admittedAt));
-        }
+        if (admittedAt == default) throw new ArgumentOutOfRangeException(nameof(admittedAt));
         if (candidate.TrustState != KnowledgeTrustState.Candidate)
-        {
             throw new InvalidOperationException("Only Candidate knowledge may enter trusted memory admission.");
-        }
 
         validation.Validate();
         context.Validate();
         if (!validation.EligibleForTrustedPromotion)
-        {
             throw new InvalidOperationException("Judge validation is not eligible for Trusted admission.");
-        }
         if (!string.Equals(validation.KnowledgeId, candidate.KnowledgeId, StringComparison.Ordinal))
-        {
             throw new InvalidDataException("Memory admission validation belongs to different knowledge.");
-        }
 
         var candidateEvidence = candidate.EvidenceIds
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -124,9 +88,7 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
             .OrderBy(static id => id, StringComparer.Ordinal)
             .ToArray();
         if (!candidateEvidence.SequenceEqual(validatedEvidence, StringComparer.OrdinalIgnoreCase))
-        {
             throw new InvalidDataException("Trusted memory requires independent validation of the exact candidate evidence set.");
-        }
 
         var observations = context.Observations
             .Select(static observation => observation?.Validate()
@@ -138,9 +100,7 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
         if (byEvidence.Count != candidateEvidence.Length
             || candidateEvidence.Any(id => !byEvidence.TryGetValue(id, out var matches) || matches.Length != 1)
             || byEvidence.Keys.Any(id => !candidateEvidence.Contains(id, StringComparer.OrdinalIgnoreCase)))
-        {
             throw new InvalidDataException("Trusted memory observations must exactly match candidate evidence one-to-one.");
-        }
 
         var proofs = new List<MemoryAdmissionEvidenceProof>(candidateEvidence.Length);
         foreach (var evidenceId in candidateEvidence)
@@ -148,30 +108,21 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
             var observation = byEvidence[evidenceId][0];
             if (observation.ProjectId != candidate.ProjectId
                 || !string.Equals(observation.TargetId, candidate.TargetId, StringComparison.OrdinalIgnoreCase))
-            {
                 throw new InvalidDataException("Trusted memory admission cannot cross project or target boundaries.");
-            }
             if (observation.ContainsPersonalData
                 || observation.Sensitivity == EvidenceSensitivity.PersonalData
                 || observation.ContainsRawSecretMaterial)
-            {
                 throw new InvalidOperationException("Personal data or raw secret material cannot enter Trusted project memory.");
-            }
 
             var executionId = MissionExecutionProofIdentity.CreateExecutionId(
-                candidate.ProjectId,
-                context.MissionId,
-                candidate.TargetId,
-                observation.SourceTaskId,
-                observation.Specialist);
+                candidate.ProjectId, context.MissionId, candidate.TargetId,
+                observation.SourceTaskId, observation.Specialist);
             var completed = context.ProofRecords.Where(record =>
                     string.Equals(record.Event.ExecutionId, executionId, StringComparison.Ordinal)
                     && record.Event.Stage == ExecutionProofStage.Completed)
                 .ToArray();
             if (completed.Length != 1)
-            {
                 throw new InvalidDataException("Trusted memory evidence must resolve to exactly one completed governed execution.");
-            }
 
             var proof = completed[0];
             if (proof.Event.ProjectId != candidate.ProjectId
@@ -180,25 +131,17 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
                 || !string.Equals(proof.Event.CapabilityId, observation.Specialist.ToString(), StringComparison.Ordinal)
                 || proof.Event.Outcome != ExecutionProofOutcome.Succeeded
                 || proof.Event.ResultDigestSha256 is null)
-            {
                 throw new InvalidDataException("Trusted memory evidence is not backed by a successful governed specialist execution.");
-            }
 
             proofs.Add(new MemoryAdmissionEvidenceProof(
-                evidenceId,
-                observation.SourceTaskId,
-                observation.Specialist,
-                executionId,
-                proof.RecordHashSha256,
-                proof.Event.ResultDigestSha256));
+                evidenceId, observation.SourceTaskId, observation.Specialist, executionId,
+                proof.RecordHashSha256, proof.Event.ResultDigestSha256));
         }
 
         var digest = ComputeDigest(candidate, validation, context, proofs);
-        await _promotionStore.PromoteTrustedAsync(
-            candidate.KnowledgeId,
-            validation.ValidationRecordId,
-            admittedAt,
-            cancellationToken).ConfigureAwait(false);
+        await _repository.PromoteAsync(
+            candidate.KnowledgeId, KnowledgeTrustState.Trusted,
+            validation.ValidationRecordId, admittedAt, cancellationToken).ConfigureAwait(false);
 
         var promoted = await _repository.LoadAsync(candidate.KnowledgeId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidDataException("Trusted memory promotion disappeared from the authoritative repository.");
@@ -206,23 +149,16 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
             || !string.Equals(promoted.ValidationRecordId, validation.ValidationRecordId, StringComparison.Ordinal)
             || promoted.ProjectId != candidate.ProjectId
             || !string.Equals(promoted.TargetId, candidate.TargetId, StringComparison.Ordinal))
-        {
             throw new InvalidDataException("Trusted memory repository state does not match the admission decision.");
-        }
 
         return new MemoryAdmissionReceipt(
-            candidate.KnowledgeId,
-            validation.ValidationRecordId,
-            candidate.ProjectId,
-            candidate.TargetId,
-            context.MissionId,
-            context.ExpectedHead,
+            candidate.KnowledgeId, validation.ValidationRecordId, candidate.ProjectId, candidate.TargetId,
+            context.MissionId, context.ExpectedHead,
             proofs.OrderBy(static proof => proof.EvidenceId, StringComparer.Ordinal).ToArray(),
-            digest,
-            admittedAt);
+            digest, admittedAt);
     }
 
-    internal static string ComputeDigest(
+    private static string ComputeDigest(
         CandidateKnowledge candidate,
         KnowledgeValidationRecord validation,
         MemoryAdmissionContext context,
@@ -248,24 +184,7 @@ public sealed class ProjectKnowledgeAdmissionGate : IMemoryAdmissionGate
             fields.Add(proof.CompletedRecordHashSha256.ToLowerInvariant());
             fields.Add(proof.ResultDigestSha256.ToLowerInvariant());
         }
-
         var canonical = string.Concat(fields.Select(value => $"{Encoding.UTF8.GetByteCount(value)}:{value}"));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
-    }
-
-    private sealed class RepositoryTrustedPromotionStore(ICandidateKnowledgeRepository repository)
-        : ITrustedKnowledgePromotionStore
-    {
-        public Task PromoteTrustedAsync(
-            string knowledgeId,
-            string validationRecordId,
-            DateTimeOffset promotedAt,
-            CancellationToken cancellationToken = default) =>
-            repository.PromoteAsync(
-                knowledgeId,
-                KnowledgeTrustState.Trusted,
-                validationRecordId,
-                promotedAt,
-                cancellationToken);
     }
 }
