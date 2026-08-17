@@ -11,6 +11,7 @@ It does not grant runtime capability. It consumes reproducible evidence from imp
 - Release decision: **NOT_HOMOLOGATED / NOT_READY_FOR_GENERAL_USE**.
 - Canonical blocker tracker: **#197**.
 - Product/E2E handoff: **#289**.
+- First-run/versioned-terms enforcement handoff: **#385**.
 - Filesystem hostile-proof handoffs: **#284 / #288**.
 - Installer handoff: **#315**.
 - PostgreSQL Authority handoff: **#316**.
@@ -21,6 +22,7 @@ It does not grant runtime capability. It consumes reproducible evidence from imp
 - Machine-readable score: `docs/qa/readiness-model.json`.
 - Exact-candidate evaluator: `tools/release/ava-readiness.py`.
 - Windows probe: `.github/workflows/windows-readiness-v2.yml`.
+- First-run/terms source precondition probe: `.github/workflows/first-run-terms-audit.yml` + `tools/release/audit-first-run-terms.py`.
 
 ## Latest strong exact-candidate evidence
 
@@ -56,6 +58,30 @@ Installer candidate evidence SHA-256: `e4bcf66ed23cab0d18b1e1af5c9590be4d92ad370
 Installer AVA artifact: **9288900859**, digest `sha256:0cfeaee3ee54fadee96a03e6a662c39cb1333d2187facbf574c2359180e28c96`.
 
 Microsoft Defender scanned **both exact installer executables** in that run. The scan completed with no path-bound detections and the installer SHA-256 values were unchanged after scanning. This is credited as a partial distribution-security result. The AEVRIX installers remain explicitly **unsigned**, so Authenticode and signed update controls remain blockers.
+
+## First-run/versioned-terms source evidence
+
+Patch #378 physically introduced a versioned `FirstRunAcceptanceStore` and fail-closed persistence tests. QA then added an independent exact-source precondition probe.
+
+On canonical candidate `33f3eaa2c9abc034bd411725efa5ee5b79df63b2`, First-run terms source audit run **32031748422** completed successfully as a **measurement** and reported:
+
+- acceptance store: **PASS**;
+- probe tests: **5/5 PASS**;
+- Desktop binding to the versioned acceptance authority: **false**;
+- guarded navigation selection: **false**;
+- guarded BackToHome: **false**;
+- guarded StartAnalysis: **false**;
+- guarded MissionControl: **false**;
+- guarded Activity: **false**;
+- unconditional `Ir ao Command Center sem concluir`: **detected**;
+- source precondition: **BLOQUEADO**;
+- final real-Windows terms AVA: **NOT_RUN**.
+
+Canonical first-run source evidence SHA-256: `da7b69d7c10f94a80c7a7bd40b200c81bd7b4ed6a6caa99ae6f56285fb97cb32`.
+
+First-run source artifact: **9289136928**, digest `sha256:bef1ed2f4611acf4d529d25360d8295d95476283679fd98e4a8d3a6142aa0708`.
+
+Static source analysis may prove a missing mandatory precondition, but it can never by itself satisfy the real-Windows terms/first-run gate. Accordingly, the global readiness score remains **60%**; no credit is granted merely for introducing an unwired persistence store.
 
 ## Two percentages, deliberately separated
 
@@ -111,9 +137,13 @@ The installer lifecycle and Defender evidence are produced by the dedicated exac
 
 ## Confirmed remaining blockers
 
-### Full Windows E2E / versioned terms acceptance — #289
+### Full Windows E2E — #289
 
-Secure first-run/profile work exists in the Product/UX stream, but mandatory versioned terms acceptance still requires independent exact-candidate evidence. The complete Desktop -> EngineHost -> worker -> embedded Python -> private Chromium / Research Browser path remains unproven end-to-end.
+The complete Desktop -> EngineHost -> worker -> embedded Python -> private Chromium / Research Browser path remains unproven end-to-end.
+
+### Mandatory versioned terms enforcement — #385
+
+The persistence store exists and passes its fail-closed subtests, but the Desktop is not yet bound to it as a mandatory route authority. Operational route guards and a complete accept/decline terms surface remain physically absent. After implementation, QA still requires exact-candidate Windows launch/accept/decline/relaunch evidence.
 
 ### Restrictive filesystem isolation — #284 / #288
 
@@ -141,13 +171,14 @@ Real Windows visual, DPI, keyboard/navigation and minimum accessibility smoke re
 
 ## Current priority order
 
-1. Independently validate mandatory versioned terms acceptance as soon as the queued Stage 9 acceptance implementation is promoted, then continue the full downstream E2E path (#289/#315).
-2. Close restrictive filesystem read/write isolation with native hostile Windows proof (#284/#288).
-3. Materialize and validate PostgreSQL-backed Execution Authority (#316).
-4. Add Authenticode plus signed update/tamper/rollback evidence to the exact distributed artifacts (#317).
-5. Execute full-product endurance/resource/recovery campaign (#318).
-6. Execute real Windows high-DPI/keyboard/accessibility/visual smoke (#319).
-7. Freeze final hashes and assemble the complete release evidence package.
+1. Close #385 by wiring one canonical versioned-terms authority into every operational route, then independently exercise launch/accept/decline/relaunch on Windows.
+2. Continue the full downstream E2E path (#289).
+3. Close restrictive filesystem read/write isolation with native hostile Windows proof (#284/#288).
+4. Materialize and validate PostgreSQL-backed Execution Authority (#316).
+5. Add Authenticode plus signed update/tamper/rollback evidence to the exact distributed artifacts (#317).
+6. Execute full-product endurance/resource/recovery campaign (#318).
+7. Execute real Windows high-DPI/keyboard/accessibility/visual smoke (#319).
+8. Freeze final hashes and assemble the complete release evidence package.
 
 ## Responsibility boundary
 
