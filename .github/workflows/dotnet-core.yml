@@ -21,7 +21,7 @@ concurrency:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,6 +42,23 @@ jobs:
           dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -o "$env:RUNNER_TEMP\desktop"
           if ($LASTEXITCODE -ne 0) { throw "Desktop publish failed: $LASTEXITCODE" }
 
+      - name: Install signed Windows App Runtime 2.3.1 for compatibility diagnostic
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://aka.ms/windowsappsdk/2.3/2.3.1/windowsappruntimeinstall-x64.exe'
+          $path = Join-Path $env:RUNNER_TEMP 'WindowsAppRuntimeInstall-2.3.1-x64.exe'
+          Invoke-WebRequest -Uri $url -OutFile $path -MaximumRedirection 10
+          $sig = Get-AuthenticodeSignature -LiteralPath $path
+          $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "diagnosticRuntimeSha256=$hash signature=$($sig.Status) signer=$subject"
+          if ($sig.Status -ne 'Valid' -or $subject -notmatch 'Microsoft') {
+            throw 'Diagnostic Windows App Runtime installer is not validly signed by Microsoft.'
+          }
+          $p = Start-Process -FilePath $path -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Windows App Runtime diagnostic installer exited with $($p.ExitCode)" }
+
       - name: Prove post-first-run MainWindow starts without eager WebView2
         shell: pwsh
         run: |
@@ -59,20 +76,17 @@ jobs:
             TermsRevision = 'preview-authorized-use-v1'
             AcceptedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
           } | ConvertTo-Json | Set-Content -LiteralPath $acceptancePath -Encoding utf8NoBOM
-          Write-Host "acceptanceFixture=$(Get-Content -LiteralPath $acceptancePath -Raw)"
 
           $before = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
           $exe = Join-Path $env:RUNNER_TEMP 'desktop\AEVRIX.Desktop.exe'
           $process = Start-Process -FilePath $exe -PassThru
           try {
-            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
             $mainFound = $false
             $window = $null
             while ([DateTimeOffset]::UtcNow -lt $deadline) {
               $process.Refresh()
-              if ($process.HasExited) {
-                throw "Desktop exited before MainWindow could be proven. ExitCode=$($process.ExitCode)"
-              }
+              if ($process.HasExited) { throw "Desktop exited before MainWindow could be proven. ExitCode=$($process.ExitCode)" }
               $root = [System.Windows.Automation.AutomationElement]::RootElement
               $pidCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
               $window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCondition)
@@ -83,35 +97,18 @@ jobs:
               }
               Start-Sleep -Milliseconds 200
             }
-
             if (-not $mainFound) {
-              Write-Host "presentationCreated=$(Test-Path -LiteralPath $presentationPath)"
-              if (Test-Path -LiteralPath $presentationPath) { Write-Host "presentation=$(Get-Content -LiteralPath $presentationPath -Raw)" }
-              Write-Host "acceptanceAfterLaunch=$(Get-Content -LiteralPath $acceptancePath -Raw)"
-              if ($null -ne $window) {
-                Write-Host "topWindowName=$($window.Current.Name) automationId=$($window.Current.AutomationId) class=$($window.Current.ClassName)"
-                $all = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-                for ($i = 0; $i -lt [Math]::Min($all.Count, 120); $i++) {
-                  $el = $all.Item($i)
-                  $name = [string]$el.Current.Name
-                  $id = [string]$el.Current.AutomationId
-                  $type = [string]$el.Current.ControlType.ProgrammaticName
-                  if ($name -or $id) { Write-Host "uia[$i] type=$type name='$name' id='$id'" }
-                }
-              } else {
-                Write-Host 'No top-level UIAutomation window was found for the Desktop PID.'
-              }
-              throw 'MainWindow navigation was not observed after persisted first-run acceptance.'
+              $windowName = if ($null -ne $window) { $window.Current.Name } else { '<none>' }
+              throw "MainWindow navigation was not observed after valid runtime + acceptance. topWindow=$windowName"
             }
 
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 3
             $after = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
             $newWebViewPids = @($after | Where-Object { $_ -notin $before })
             if ($newWebViewPids.Count -gt 0) {
-              throw "MainWindow startup eagerly created WebView2 processes without a selected Research Browser project: $($newWebViewPids -join ',')"
+              throw "Command Center startup eagerly created WebView2 processes without selecting/opening Research Browser: $($newWebViewPids -join ',')"
             }
-
-            Write-Host "PASS: MainWindow observed; no new msedgewebview2 process was created. desktopPid=$($process.Id)"
+            Write-Host "PASS: MainWindow observed after accepted first-run; no new msedgewebview2 process was created. desktopPid=$($process.Id)"
           }
           finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
