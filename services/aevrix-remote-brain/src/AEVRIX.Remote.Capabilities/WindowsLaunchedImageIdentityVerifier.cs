@@ -50,10 +50,15 @@ internal static class WindowsLaunchedImageIdentityVerifier
         return WindowsFileIdentity.FromHandle(image.SafeFileHandle);
     }
 
-    internal static void VerifyMatches(IntPtr processHandle, WindowsFileIdentity authenticatedIdentity)
+    internal static void VerifyMatches(IntPtr processHandle, WindowsFileIdentity? authenticatedIdentity)
     {
+        if (!authenticatedIdentity.HasValue)
+        {
+            throw new InvalidOperationException("A cryptographically authenticated executable file identity is required before the suspended process can be resumed.");
+        }
+
         var launchedIdentity = GetLaunchedImageIdentity(processHandle);
-        if (launchedIdentity != authenticatedIdentity)
+        if (launchedIdentity != authenticatedIdentity.Value)
         {
             throw new InvalidDataException("Suspended process image identity does not match the cryptographically authenticated executable object.");
         }
