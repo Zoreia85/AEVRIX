@@ -15,7 +15,7 @@ concurrency:
 jobs:
   lifecycle:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CANDIDATE_SHA: ${{ github.event.client_payload.sha || github.sha }}
       NSIS_VERSION: "3.12"
@@ -151,6 +151,21 @@ jobs:
             throw
           }
 
+      - name: Exercise mandatory installed first-run terms
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:RUNNER_TEMP 'aevrix-installer-evidence'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $log = Join-Path $evidence 'first-run-terms.log'
+          try {
+            & ./apps/aevrix-windows/installer/test-first-run-terms.ps1 -Installer "$env:RUNNER_TEMP\aevrix-installer-new\AEVRIX-$env:NEW_VERSION-win-x64-Setup.exe" -ProductVersion $env:NEW_VERSION -EvidencePath (Join-Path $evidence 'first-run-terms-evidence.json') *>&1 | Tee-Object -FilePath $log
+          }
+          catch {
+            $_ | Out-String | Add-Content -LiteralPath $log -Encoding utf8
+            throw
+          }
+
       - name: Collect AVA lifecycle evidence
         if: always()
         shell: pwsh
@@ -167,10 +182,12 @@ jobs:
           $newManifest = if (Test-Path -LiteralPath $newManifestPath) { Get-Content -LiteralPath $newManifestPath -Raw | ConvertFrom-Json } else { $null }
           $lifecyclePath = Join-Path $evidence 'lifecycle-evidence.json'
           $lifecycle = if (Test-Path -LiteralPath $lifecyclePath) { Get-Content -LiteralPath $lifecyclePath -Raw | ConvertFrom-Json } else { $null }
+          $firstRunPath = Join-Path $evidence 'first-run-terms-evidence.json'
+          $firstRun = if (Test-Path -LiteralPath $firstRunPath) { Get-Content -LiteralPath $firstRunPath -Raw | ConvertFrom-Json } else { $null }
           $os = Get-CimInstance Win32_OperatingSystem
           $candidatePath = Join-Path $evidence 'candidate-evidence.json'
           [pscustomobject]@{
-            schemaVersion = 6
+            schemaVersion = 7
             candidateSha = $env:CANDIDATE_SHA
             workflowRunId = '${{ github.run_id }}'
             trigger = '${{ github.event_name }}'
@@ -193,14 +210,19 @@ jobs:
             interruption = if ($lifecycle) { $lifecycle.interruption } else { $null }
             residueVerdict = if ($lifecycle) { [string]$lifecycle.residueVerdict } else { 'NOT_PROVEN' }
             userDataPreservation = if ($lifecycle) { [string]$lifecycle.userDataPreservation } else { 'NOT_PROVEN' }
+            firstRunTerms = $firstRun
             lifecycleEvidenceFile = 'lifecycle-evidence.json'
             lifecycleEvidenceSha256 = if (Test-Path -LiteralPath $lifecyclePath) { (Get-FileHash -LiteralPath $lifecyclePath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
             lifecycleLogFile = 'lifecycle.log'
             lifecycleLogSha256 = if (Test-Path -LiteralPath (Join-Path $evidence 'lifecycle.log')) { (Get-FileHash -LiteralPath (Join-Path $evidence 'lifecycle.log') -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            firstRunTermsEvidenceFile = 'first-run-terms-evidence.json'
+            firstRunTermsEvidenceSha256 = if (Test-Path -LiteralPath $firstRunPath) { (Get-FileHash -LiteralPath $firstRunPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            firstRunTermsLogFile = 'first-run-terms.log'
+            firstRunTermsLogSha256 = if (Test-Path -LiteralPath (Join-Path $evidence 'first-run-terms.log')) { (Get-FileHash -LiteralPath (Join-Path $evidence 'first-run-terms.log') -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
             aevrixAuthenticodeGate = 'BLOCKED_UNSIGNED_CANDIDATE'
             canonicalPromotion = 'BOT_AUTHORED_EXACT_CANDIDATE'
             generatedAt = [DateTimeOffset]::UtcNow.ToString('O')
-          } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $candidatePath -Encoding utf8NoBOM
+          } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $candidatePath -Encoding utf8NoBOM
           $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$candidateHash  candidate-evidence.json" | Set-Content -LiteralPath (Join-Path $evidence 'candidate-evidence.json.sha256') -Encoding ascii -NoNewline
           Write-Host "AVA candidate evidence SHA-256: $candidateHash"
