@@ -8,6 +8,7 @@ on:
       - "services/aevrix-remote-brain/**"
       - "docs/qa/**"
       - "tools/release/ava-readiness.py"
+      - "tools/release/installer-evidence-to-release-gates.py"
       - "tools/release/tests/**"
       - "tools/release/AEVRIX.ReadinessSoak/**"
       - "tools/release/AEVRIX.EngineHostRecoveryProbe/**"
@@ -16,18 +17,23 @@ on:
       - "global.json"
   repository_dispatch:
     types: [aevrix-candidate-promoted]
+  workflow_run:
+    workflows: ["Windows installer candidate"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   issues: write
 
 concurrency:
-  group: windows-readiness-v2-${{ github.event_name }}-${{ github.event.client_payload.sha || github.run_id }}
+  group: windows-readiness-v2-${{ github.event_name }}-${{ github.event.workflow_run.id || github.event.client_payload.sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   probe:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     name: exact-candidate-readiness
     runs-on: windows-latest
     timeout-minutes: 45
@@ -36,7 +42,7 @@ jobs:
       - name: Checkout exact evidence candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'repository_dispatch' && github.event.client_payload.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -74,6 +80,47 @@ jobs:
           "image=$image" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           dotnet --info | Out-File -FilePath (Join-Path $env:AVA_DIR "dotnet-info.txt") -Encoding utf8
           Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsBuildNumber,OsArchitecture | Format-List | Out-File -FilePath (Join-Path $env:AVA_DIR "windows-info.txt") -Encoding utf8
+
+      - name: Import exact installer lifecycle evidence
+        if: ${{ github.event_name == 'workflow_run' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_COMMIT: ${{ steps.identity.outputs.commit }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactName = "aevrix-windows-installer-candidate-$env:SOURCE_COMMIT"
+          $artifactRoot = Join-Path $env:RUNNER_TEMP "installer-evidence-import"
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+
+          $artifacts = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:INSTALLER_RUN_ID/artifacts" | ConvertFrom-Json
+          $artifact = @($artifacts.artifacts | Where-Object { $_.name -eq $artifactName })
+          if ($artifact.Count -ne 1) {
+            throw "Expected exactly one exact-candidate installer artifact '$artifactName' in run $env:INSTALLER_RUN_ID; found $($artifact.Count)."
+          }
+
+          gh run download $env:INSTALLER_RUN_ID --repo $env:GITHUB_REPOSITORY --name $artifactName --dir $artifactRoot
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download installer evidence from run $env:INSTALLER_RUN_ID" }
+
+          $candidateEvidence = Join-Path $artifactRoot "candidate-evidence.json"
+          $lifecycleEvidence = Join-Path $artifactRoot "lifecycle-evidence.json"
+          $releaseGates = Join-Path $env:AVA_DIR "release-gates.imported.json"
+          $artifactDigest = [string]$artifact[0].digest
+          $evidenceRef = "workflow-run:$env:INSTALLER_RUN_ID/artifact:$($artifact[0].id)/digest:$artifactDigest"
+
+          python tools/release/installer-evidence-to-release-gates.py `
+            --candidate-evidence $candidateEvidence `
+            --lifecycle-evidence $lifecycleEvidence `
+            --expected-source-commit $env:SOURCE_COMMIT `
+            --evidence-ref $evidenceRef `
+            --output $releaseGates
+          if ($LASTEXITCODE -ne 0) { throw "Installer evidence bridge rejected imported lifecycle evidence." }
+
+          "EXTERNAL_EVIDENCE=$releaseGates" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Copy-Item -LiteralPath $candidateEvidence -Destination (Join-Path $env:AVA_DIR "installer-candidate-evidence.json") -Force
+          Copy-Item -LiteralPath $lifecycleEvidence -Destination (Join-Path $env:AVA_DIR "installer-lifecycle-evidence.json") -Force
+          Write-Host "Imported exact installer evidence from run $env:INSTALLER_RUN_ID / artifact $($artifact[0].id) / digest $artifactDigest"
 
       - name: Build EngineHost Release candidate
         id: build
@@ -204,9 +251,14 @@ jobs:
             "--soak-json", (Join-Path $env:AVA_DIR "enginehost-soak.json"),
             "--recovery-json", (Join-Path $env:AVA_DIR "enginehost-recovery.json")
           )
-          $external = "docs/qa/evidence/release-gates.json"
-          if (Test-Path $external) {
-            $arguments += @("--external-evidence", $external)
+          if ($env:EXTERNAL_EVIDENCE -and (Test-Path $env:EXTERNAL_EVIDENCE)) {
+            $arguments += @("--external-evidence", $env:EXTERNAL_EVIDENCE)
+          }
+          else {
+            $staticExternal = "docs/qa/evidence/release-gates.json"
+            if (Test-Path $staticExternal) {
+              $arguments += @("--external-evidence", $staticExternal)
+            }
           }
           & python @arguments
 
