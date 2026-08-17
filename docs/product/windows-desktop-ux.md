@@ -13,7 +13,7 @@ It does **not** redefine the security/runtime authority implemented by the Windo
 ## Evidence rules
 
 1. Chat claims are not implementation evidence.
-2. A UI capability is accepted only when code exists in the repository and the exact candidate builds.
+2. A UI capability is accepted only when code exists in the repository and the exact candidate builds/tests.
 3. Runtime/security states shown to users must originate from a real probe or remain explicitly `not verified`/`blocked`.
 4. Session activity is not the canonical Proof Ledger. Product-facing logs must be privacy-safe summaries and may not expose raw payloads, secrets or sensitive evidence.
 5. `100%` requires all scorecard domains below to reach their acceptance criteria on the exact release candidate.
@@ -22,23 +22,22 @@ It does **not** redefine the security/runtime authority implemented by the Windo
 
 The score is intentionally conservative. Each domain is worth 10 points; partial points require repository evidence.
 
-| Domain | Accepted | Candidate | Evidence / remaining gap |
-|---|---:|---:|---|
-| Shell, navigation and responsive layout | 7/10 | 8/10 | First-run and Settings/Security become real routed surfaces; visual regression/responsive coverage remains. |
-| Command Center and verified local state | 7/10 | 7/10 | EngineHost start/restart/stop, authenticated ping and health revocation are surfaced; remote state is not yet integrated. |
-| First-run onboarding and initial configuration | 2/10 | 7/10 | Candidate adds persistent first-run profile, structural integrity probe, authenticated EngineHost gate, explicit TPM identity, operating mode, permission posture and fail-closed completion. Remote enrollment/session is still pending. |
-| Mission Control | 5/10 | 5/10 | Verified local EngineHost state is mirrored while remote/queue states remain fail-closed; real orchestrator mission feed is pending. |
-| Activity and user-facing logs | 5/10 | 5/10 | Bounded privacy-safe operational session journal exists; persistent canonical Proof Ledger integration is pending. |
-| Permissions, settings and security UX | 1/10 | 5/10 | Candidate adds a real Settings/Security surface, profile repair, identity/mode/EngineHost/remote state and no security-bypass toggles. OS/policy-backed permission details remain incomplete. |
-| Local/remote mode UX | 2/10 | 4/10 | Candidate adds explicit local/remote selection and blocks remote completion without endpoint, certificate and authenticated session. Capability negotiation and live remote session remain pending. |
-| Installer lifecycle experience | 7/10 | 7/10 | NSIS package plus interruption recovery, repair, upgrade, downgrade resistance and uninstall test harness exist; polished interactive UX/evidence promotion remains. |
-| Update and recovery UX | 3/10 | 3/10 | Installer recovery/repair mechanics exist; in-app update channel, progress, rollback and user recovery surfaces are pending. |
-| Accessibility, packaging and release evidence | 4/10 | 4/10 | Automation names and Windows build/readiness workflows exist; accessibility regression suite, signed release evidence and final homologation remain. |
+| Domain | Accepted points | Evidence / remaining gap |
+|---|---:|---|
+| Shell, navigation and responsive layout | 8/10 | Command Center, secure first-run, Mission Control, Activity and Settings/Security are real routed WinUI surfaces; visual regression and broader responsive coverage remain. |
+| Command Center and verified local state | 7/10 | EngineHost start/restart/stop, authenticated ping and health revocation are surfaced; live remote state is not yet integrated. |
+| First-run onboarding and initial configuration | 7/10 | Persistent privacy-safe profile, structural integrity probe, authenticated EngineHost gate, explicit TPM identity, mode, permission posture and fail-closed completion are implemented. Governed remote enrollment/session remains pending. |
+| Mission Control | 5/10 | Verified local EngineHost state is mirrored while remote/queue states remain fail-closed; real orchestrator mission feed is pending. |
+| Activity and user-facing logs | 5/10 | Bounded privacy-safe operational session journal exists; persistent canonical Proof Ledger projection is pending. |
+| Permissions, settings and security UX | 5/10 | Real Settings/Security surface, profile repair, identity/mode/EngineHost/remote state and no security-bypass toggles; OS/policy-backed permission detail remains incomplete. |
+| Local/remote mode UX | 4/10 | Explicit local/remote selection exists and remote completion blocks without endpoint, certificate and authenticated session. Capability negotiation and live remote session remain pending. |
+| Installer lifecycle experience | 7/10 | NSIS lifecycle harness covers interruption recovery, repair, upgrade, downgrade resistance and uninstall; polished interactive UX and release-distribution gates remain. |
+| Update and recovery UX | 3/10 | Installer recovery/repair mechanics exist; in-app signed update channel, progress, rollback and recovery surfaces are pending. |
+| Accessibility, packaging and release evidence | 4/10 | Automation names and exact-SHA Windows build/readiness workflows exist; accessibility regression, signed release evidence and final homologation remain. |
 
-**Accepted desktop/product score: 43/100 (43%).**  
-**Candidate score on `feature/desktop-first-run-security`: 55/100 (55%), pending exact Windows CI.**
+**Accepted desktop/product score: 55/100 (55%).**
 
-The candidate delta is **+12 percentage points**. It becomes accepted only after the exact branch candidate passes the required Windows build/tests and is promoted to `main`. This percentage measures only this Desktop/Product/UX track and must not be substituted for the global AEVRIX homologation percentage.
+The accepted delta from the previous score is **+12 percentage points**, promoted only after the exact PR candidate and the post-merge canonical commit passed the required Windows evidence gates. This percentage measures only this Desktop/Product/UX track and must not be substituted for the global AEVRIX homologation percentage.
 
 ## Accepted increment — Mission Control + Activity
 
@@ -47,35 +46,37 @@ Canonical merge commit: `b50d9d4190fa44849d276111442a40f630d67cf2`
 
 Implemented and accepted:
 
-- `Mission Control` is a real routed surface rather than a generic placeholder.
-- Local EngineHost status is mirrored from the same authenticated state used by Command Center.
-- Remote brain and mission queue remain explicitly unverified/unavailable instead of simulated.
-- `Activity` is a real routed surface backed by a bounded in-memory operational journal.
-- Journal entries are normalized, size-limited, newest-first and intended only for privacy-safe user summaries.
+- `Mission Control` is a real routed surface rather than a generic placeholder;
+- local EngineHost status is mirrored from the same authenticated state used by Command Center;
+- remote brain and mission queue remain explicitly unverified/unavailable instead of simulated;
+- `Activity` is backed by a bounded in-memory operational journal;
+- journal entries are normalized, size-limited, newest-first and intended only for privacy-safe user summaries;
 - EngineHost verification, restart, stop, unexpected termination, health-proof loss and unavailable policy validation generate friendly session events.
-- Core tests cover journal ordering, retention, normalization and input validation.
 
-## Current candidate — First-run + Settings/Security
+## Accepted increment — Secure first-run + Settings/Security
 
-Branch: `feature/desktop-first-run-security`
+Merged pull request: `#365`  
+Tested PR head: `589c63f36bcb805c786deb7c0cbf201a794df1ba`  
+Canonical merge commit: `db967d0a6870969e230cc9a96167adc31b422445`
 
-Implemented in the candidate:
+Implemented and accepted:
 
 - first launch routes to `Inicialização segura` until a valid local completion is persisted;
-- first-run state persists only privacy-safe configuration metadata, never access tokens or private-key material;
-- corrupt/invalid first-run state fails closed and requires explicit profile recreation;
-- structural local integrity probe requires Desktop/Core/EngineHost artifacts, rejects reparse points and computes SHA-256 for diagnostic evidence while explicitly not claiming Authenticode equivalence;
-- EngineHost gate consumes the existing authenticated Ping and is revoked when health proof is lost;
-- TPM-backed ECDSA P-256 non-exportable device identity can be created/reopened explicitly; software fallback is not automatic;
+- first-run persists only privacy-safe configuration metadata, never access tokens or private-key material;
+- corrupt/invalid persisted state fails closed and requires explicit profile recreation;
+- structural local integrity requires Desktop/Core/EngineHost artifacts, rejects reparse points and computes SHA-256 diagnostic evidence without claiming equivalence to Authenticode;
+- EngineHost gate consumes the real authenticated Ping and is revoked when health proof is lost;
+- TPM-backed ECDSA P-256 non-exportable identity can be created/reopened explicitly, with no automatic downgrade to software fallback;
 - local supervised and remote governed modes are explicit choices;
-- remote governed completion requires configured HTTPS endpoint, validated device certificate and authenticated remote session; missing proof blocks completion;
+- remote governed completion requires configured HTTPS endpoint, validated device certificate and authenticated remote session; absent proof blocks completion;
 - permission posture requires explicit acknowledgement that Desktop cannot elevate privileges, disable isolation or bypass runtime policy;
-- Settings/Security is a real surface showing installation id, first-run state, operating mode, local identity state, EngineHost proof and remote state without unsafe bypass toggles;
-- Core tests cover local/remote readiness, fail-closed EngineHost loss, profile persistence/corruption and structural integrity hashing.
+- Settings/Security exposes installation ID, first-run state, operating mode, local identity, EngineHost proof and remote state, without unsafe bypass toggles;
+- XAML initialization handlers are guarded until the first-run profile is loaded, preventing early event dispatch from consuming uninitialized state;
+- Core tests cover local/remote readiness, EngineHost proof loss, profile persistence/corruption and structural integrity hashing.
 
-## CI evidence
+## Exact Windows evidence
 
-PR #350 candidate `b37b2e05e381f848939f9f51ced1d57a61a898f1` passed on `windows-latest`:
+PR #365 exact head `589c63f36bcb805c786deb7c0cbf201a794df1ba` passed:
 
 - Source Policy: PASS;
 - Desktop Release build: PASS;
@@ -83,13 +84,16 @@ PR #350 candidate `b37b2e05e381f848939f9f51ced1d57a61a898f1` passed on `windows-
 - Remote Security tests: PASS;
 - Orchestrator Judge tests: PASS.
 
-The later Desktop evidence workflow was corrected by PR #354 so post-merge build evidence is pinned to the triggering immutable SHA and fails closed on identity mismatch.
+Post-merge canonical commit `db967d0a6870969e230cc9a96167adc31b422445` passed:
 
-The current first-run/security candidate must pass the same Windows CI before its 55% score can become accepted.
+- Desktop Build Evidence run `32030470603`: exact-candidate checkout PASS; immutable SHA identity assertion PASS; WinUI Release build PASS; exact binary evidence recording PASS;
+- Windows Readiness V2 run `32030470708`: candidate identity PASS; QA evaluator/model validation PASS; EngineHost build PASS; Desktop build PASS; Desktop startup/cleanup smoke PASS; authenticated soak PASS; forced-crash recovery PASS; Windows Core PASS; Remote Security PASS; Orchestrator Judge PASS; fail-closed evidence PASS; AVA package PASS; readiness summary PASS.
 
-## Next autonomous priorities after this candidate
+The installer-lifecycle import in that particular readiness run was `skipped` because no installer lifecycle artifact existed for that exact Desktop merge SHA. It was not converted into a false PASS and does not raise the Desktop/Product score.
 
-1. Connect device enrollment and authenticated remote session to the first-run flow through the existing secure transport, using signed/bootstrap configuration rather than free-form secret entry.
+## Next autonomous priorities
+
+1. Connect device enrollment and authenticated remote session to first-run through the existing secure transport, using governed/signed bootstrap configuration rather than free-form secret entry.
 2. Connect Mission Control to the real orchestrator feed using an explicit read model and bounded event stream.
 3. Connect Activity to the canonical Proof Ledger through a privacy-filtered projection while keeping raw evidence out of generic UI logs.
 4. Add policy-backed OS permission/capability status to Settings/Security without exposing bypass controls.
@@ -98,4 +102,4 @@ The current first-run/security candidate must pass the same Windows CI before it
 
 ## Update protocol
 
-Every completed Desktop/Product action must update this scorecard only when new repository evidence justifies a point change. Every status report must end with the accepted Desktop/Product percentage, any higher candidate percentage still waiting for evidence, the delta and the next highest-value blocker.
+Every completed Desktop/Product action must update this scorecard only when new repository evidence justifies a point change. Every status report must end with the accepted Desktop/Product percentage, the delta from the previous accepted score and the next highest-value blocker.
