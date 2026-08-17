@@ -17,6 +17,7 @@ public sealed partial class MainWindow : Window
     private DesktopLocalIntegrityResult? _localIntegrityResult;
     private DeviceKeySecurityTier? _deviceSecurityTier;
     private EngineHostSupervisor? _engineSupervisor;
+    private bool _firstRunReady;
     private bool _integrityAttempted;
     private bool _engineVerificationAttempted;
     private bool _deviceCertificateValidated;
@@ -47,6 +48,7 @@ public sealed partial class MainWindow : Window
         }
 
         InitializeFirstRunControls();
+        _firstRunReady = true;
         TryValidatePersistedDeviceCertificate();
 
         _engineHealthTimer = new DispatcherTimer
@@ -75,6 +77,11 @@ public sealed partial class MainWindow : Window
         NavigationView sender,
         NavigationViewSelectionChangedEventArgs args)
     {
+        if (!_firstRunReady)
+        {
+            return;
+        }
+
         if (args.SelectedItemContainer is not NavigationViewItem item)
         {
             ShowSection("home", "Command Center");
@@ -376,7 +383,7 @@ public sealed partial class MainWindow : Window
 
     private void OperatingModeInput_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressFirstRunPersistence)
+        if (!_firstRunReady || _suppressFirstRunPersistence)
         {
             return;
         }
@@ -408,7 +415,7 @@ public sealed partial class MainWindow : Window
 
     private void PermissionsAcknowledgementCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_suppressFirstRunPersistence)
+        if (!_firstRunReady || _suppressFirstRunPersistence)
         {
             return;
         }
@@ -576,6 +583,11 @@ public sealed partial class MainWindow : Window
 
     private void RefreshFirstRunView()
     {
+        if (!_firstRunReady)
+        {
+            return;
+        }
+
         var evaluation = GetFirstRunEvaluation();
         RenderGate(evaluation.Gate("integrity"), IntegrityGateStatusText, IntegrityGateDetailText);
         RenderGate(evaluation.Gate("enginehost"), EngineGateStatusText, EngineGateDetailText);
@@ -635,7 +647,7 @@ public sealed partial class MainWindow : Window
         {
             DeviceKeySecurityTier.TpmNonExportable => "TPM não exportável comprovado nesta sessão.",
             DeviceKeySecurityTier.SoftwareNonExportable => "Software não exportável comprovado nesta sessão.",
-            _ when _deviceCertificateValidated => "Certificado do dispositivo validado; tier da chave local ainda não foi reprovado nesta sessão.",
+            _ when _deviceCertificateValidated => "Certificado do dispositivo validado; tier da chave local ainda não foi comprovado nesta sessão.",
             _ => "Identidade local não comprovada nesta sessão."
         };
         SettingsEngineText.Text = _engineAuthenticated
@@ -782,7 +794,7 @@ public sealed partial class MainWindow : Window
         {
             RefreshActivityView();
         }
-        if (showOnboarding || showSettings || showHome)
+        if (_firstRunReady && (showOnboarding || showSettings || showHome))
         {
             RefreshFirstRunView();
         }
