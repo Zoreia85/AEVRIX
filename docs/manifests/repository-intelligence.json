@@ -1,11 +1,15 @@
 {
-  "schemaVersion": 1,
-  "verifiedAtUtc": "2026-08-15T17:30:00Z",
+  "schemaVersion": 2,
+  "verifiedAtUtc": "2026-08-17T11:06:30Z",
   "policy": {
     "defaultRuntimeApproval": "Denied",
+    "requireObservedRevision": true,
     "requirePinnedRevisionForExecution": true,
+    "requireArtifactSha256ForConsumption": true,
     "requireLicenseVerificationForVendoring": true,
     "requireIndependentSecurityReviewForExecution": true,
+    "requireExplicitResourceBoundaries": true,
+    "requireProvenanceForConsumption": true,
     "discoveryNeverImpliesExecutionApproval": true
   },
   "repositories": [
@@ -14,35 +18,54 @@
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "MIT",
-      "integrationModes": [
-        "OptionalTool",
-        "Adapter"
-      ],
+      "observedRevision": "d67ad83426633195089509347ffd4fe795120198",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["OptionalTool", "Adapter"],
       "runtimeApproval": "PendingPinnedAdapterReview",
+      "securityReview": "PendingIndependentReview",
       "purpose": "Optional loopback local-model runtime via REST; never the AEVRIX brain.",
-      "securityConstraints": [
-        "loopback-default",
-        "no-implicit-model-pull",
-        "model-allowlist",
-        "bounded-io",
-        "judge-before-trust"
-      ]
+      "allowedCapabilities": ["loopback-model-inference"],
+      "deniedCapabilities": ["brain-authority", "implicit-model-download", "unbounded-network", "host-secret-access"],
+      "resourceBoundaries": {
+        "network": "loopback-only unless a separately reviewed policy explicitly grants more",
+        "filesystem": "no host filesystem authority; model/runtime paths must be explicitly allowlisted",
+        "credentials": "no implicit host credentials or secret inheritance",
+        "workspace": "no workspace authority beyond explicitly mounted read/write paths"
+      },
+      "securityConstraints": ["loopback-default", "no-implicit-model-pull", "model-allowlist", "bounded-io", "judge-before-trust"]
     },
     {
       "repository": "sindresorhus/awesome",
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "CC0-1.0",
-      "integrationModes": [
-        "DiscoverySeed"
-      ],
+      "observedRevision": "7cb5c8371c0fe73e5444a42d5542f6280c38b1a6",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["DiscoverySeed"],
       "runtimeApproval": "Denied",
+      "securityReview": "DeniedExecution",
       "purpose": "Discovery index only.",
-      "securityConstraints": [
-        "never-auto-install",
-        "never-auto-execute",
-        "independent-license-review"
-      ]
+      "allowedCapabilities": ["repository-discovery"],
+      "deniedCapabilities": ["automatic-code-execution", "automatic-install", "runtime-authority"],
+      "resourceBoundaries": {
+        "network": "metadata discovery only; discovered targets require separate review",
+        "filesystem": "no runtime filesystem access",
+        "credentials": "no credentials",
+        "workspace": "no workspace mutation"
+      },
+      "securityConstraints": ["never-auto-install", "never-auto-execute", "independent-license-review"]
     },
     {
       "repository": "OpenHands/OpenHands",
@@ -50,70 +73,108 @@
       "archived": false,
       "licenseSpdx": "MIT",
       "licenseScopeNote": "MIT applies outside enterprise/; enterprise/ is governed by PolyForm Free Trial 1.0.0 and must remain excluded from any AEVRIX adapter/runtime ingestion unless separately approved.",
-      "integrationModes": [
-        "Reference",
-        "OptionalTool"
-      ],
+      "observedRevision": "6670b4726a81fc73e797a193dae86264857a663d",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference", "OptionalTool"],
       "runtimeApproval": "PendingSandboxReview",
+      "securityReview": "PendingIndependentReview",
       "purpose": "Coding-agent reference and optional sandboxed backend; never unrestricted host access.",
-      "securityConstraints": [
-        "sandbox-required",
-        "workspace-scope",
-        "network-policy",
-        "no-host-secrets",
-        "judge-before-trust"
-      ]
+      "allowedCapabilities": ["sandboxed-agent-execution", "workspace-scoped-coding"],
+      "deniedCapabilities": ["unrestricted-host-filesystem", "host-secret-access", "unbounded-network", "host-process-authority"],
+      "resourceBoundaries": {
+        "network": "deny by default; endpoint allowlist required for any optional runtime",
+        "filesystem": "sandbox only; no unrestricted host filesystem",
+        "credentials": "no host secrets; explicit scoped credentials only after review",
+        "workspace": "single governed workspace only"
+      },
+      "securityConstraints": ["sandbox-required", "workspace-scope", "network-policy", "no-host-secrets", "judge-before-trust"]
     },
     {
       "repository": "Shubhamsaboo/awesome-llm-apps",
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "Apache-2.0",
-      "integrationModes": [
-        "Reference"
-      ],
+      "observedRevision": "813a55e1a6a80d2329b55287b4f33cbf661538ea",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference"],
       "runtimeApproval": "Denied",
+      "securityReview": "DeniedExecution",
       "purpose": "Pattern and evaluation corpus for agents, RAG, self-improvement and multi-agent designs.",
-      "securityConstraints": [
-        "selective-benchmark-only",
-        "no-wholesale-copy",
-        "provenance-required"
-      ]
+      "allowedCapabilities": ["pattern-study", "benchmark-design"],
+      "deniedCapabilities": ["wholesale-code-import", "automatic-execution", "runtime-authority"],
+      "resourceBoundaries": {
+        "network": "reference lookup only",
+        "filesystem": "no runtime filesystem access",
+        "credentials": "no credentials",
+        "workspace": "no workspace mutation"
+      },
+      "securityConstraints": ["selective-benchmark-only", "no-wholesale-copy", "provenance-required"]
     },
     {
       "repository": "langflow-ai/langflow",
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "MIT",
-      "integrationModes": [
-        "Reference",
-        "Adapter"
-      ],
+      "observedRevision": "dc39e2a72409a14404b2baf9dcb6c25f01b0dd08",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference", "Adapter"],
       "runtimeApproval": "PendingPinnedAdapterReview",
+      "securityReview": "PendingIndependentReview",
       "purpose": "Visual workflow, API/MCP exposure and observability reference/optional adapter.",
-      "securityConstraints": [
-        "permission-scoped",
-        "sandbox-external-components",
-        "pin-before-execution"
-      ]
+      "allowedCapabilities": ["workflow-interchange", "mcp-adapter"],
+      "deniedCapabilities": ["implicit-plugin-execution", "host-secret-access", "unreviewed-component-execution"],
+      "resourceBoundaries": {
+        "network": "endpoint allowlist and per-component review required",
+        "filesystem": "adapter sandbox only",
+        "credentials": "explicit scoped credentials only",
+        "workspace": "governed workspace only"
+      },
+      "securityConstraints": ["permission-scoped", "sandbox-external-components", "pin-before-execution"]
     },
     {
       "repository": "punkpeye/awesome-mcp-servers",
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "MIT",
-      "integrationModes": [
-        "DiscoverySeed"
-      ],
+      "observedRevision": "cbcdf8f7700cfe4c0ef9aeb232f64aeebe8a184c",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["DiscoverySeed"],
       "runtimeApproval": "Denied",
+      "securityReview": "DeniedExecution",
       "purpose": "MCP discovery catalog only.",
-      "securityConstraints": [
-        "per-server-license-review",
-        "per-server-security-score",
-        "permission-scope",
-        "never-auto-install",
-        "never-auto-execute"
-      ]
+      "allowedCapabilities": ["mcp-discovery"],
+      "deniedCapabilities": ["automatic-server-install", "automatic-server-execution", "credential-forwarding"],
+      "resourceBoundaries": {
+        "network": "catalog discovery only; every discovered MCP server requires independent review",
+        "filesystem": "no runtime filesystem access",
+        "credentials": "no credentials",
+        "workspace": "no workspace mutation"
+      },
+      "securityConstraints": ["per-server-license-review", "per-server-security-score", "permission-scope", "never-auto-install", "never-auto-execute"]
     },
     {
       "repository": "nexu-io/open-design",
@@ -121,37 +182,54 @@
       "archived": false,
       "licenseSpdx": "Apache-2.0",
       "licenseScopeNote": "Repository is Apache-2.0, with bundled skill subtrees retaining upstream MIT licenses and attribution; preserve per-component provenance.",
-      "integrationModes": [
-        "Reference",
-        "Adapter"
-      ],
+      "observedRevision": "0cc1b9123adcf3951e438085fcb9dfb71b19703d",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference", "Adapter"],
       "runtimeApproval": "PendingPinnedAdapterReview",
+      "securityReview": "PendingIndependentReview",
       "purpose": "Local-first Reconstruction Studio/design reference with sandboxed previews and design-system adapters.",
-      "securityConstraints": [
-        "sandbox-preview",
-        "workspace-scope",
-        "pin-before-execution",
-        "provenance-required"
-      ]
+      "allowedCapabilities": ["sandboxed-preview", "agent-runtime-adapter"],
+      "deniedCapabilities": ["unreviewed-plugin-execution", "host-secret-access", "unbounded-workspace-access"],
+      "resourceBoundaries": {
+        "network": "deny by default for previews; explicit integration endpoints only",
+        "filesystem": "sandboxed preview filesystem only",
+        "credentials": "no implicit host credentials",
+        "workspace": "single governed workspace only"
+      },
+      "securityConstraints": ["sandbox-preview", "workspace-scope", "pin-before-execution", "provenance-required"]
     },
     {
       "repository": "public-apis/public-apis",
       "defaultBranch": "master",
       "archived": false,
       "licenseSpdx": "MIT",
-      "integrationModes": [
-        "DiscoverySeed"
-      ],
+      "observedRevision": "b2ad91b0784237ef8e7eebfa4d2310c65a0a7b97",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["DiscoverySeed"],
       "runtimeApproval": "Denied",
-      "purpose": "API discovery catalog only.",
-      "securityConstraints": [
-        "validate-api-terms",
-        "validate-auth",
-        "validate-quota",
-        "validate-privacy",
-        "validate-uptime",
-        "never-auto-call"
-      ]
+      "securityReview": "DeniedExecution",
+      "purpose": "API discovery catalog only; each listed API requires individual terms, security, privacy and availability review.",
+      "allowedCapabilities": ["api-discovery"],
+      "deniedCapabilities": ["automatic-api-call", "automatic-credential-use", "catalog-wide-approval"],
+      "resourceBoundaries": {
+        "network": "catalog metadata only; no discovered API is called automatically",
+        "filesystem": "no runtime filesystem access",
+        "credentials": "no credentials",
+        "workspace": "no workspace mutation"
+      },
+      "securityConstraints": ["validate-api-terms", "validate-auth", "validate-quota", "validate-privacy", "validate-uptime", "never-auto-call"]
     },
     {
       "repository": "D4Vinci/Scrapling",
@@ -160,62 +238,81 @@
       "licenseSpdx": "BSD-3-Clause",
       "upstreamUsageNote": "Upstream explicitly requires compliance with applicable scraping/privacy law, site terms and robots.txt; AEVRIX additionally forbids CAPTCHA, Cloudflare, anti-bot or access-control bypass/evasion.",
       "upstreamRiskNote": "Observed upstream revision 5d213a2d4764002bfc4fed33c32fe09fa8b0bf7f advertises stealth/anti-bot/Turnstile-oriented surfaces. AEVRIX excludes those surfaces and may consume only an independently reviewed authorized-fetch/parsing subset.",
-      "integrationModes": [
-        "Reference",
-        "Adapter"
-      ],
+      "observedRevision": "5d213a2d4764002bfc4fed33c32fe09fa8b0bf7f",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference", "Adapter"],
       "runtimeApproval": "PendingPinnedAdapterReview",
+      "securityReview": "PendingIndependentReview",
       "purpose": "Authorized web evidence collection and resilient parsing only.",
-      "securityConstraints": [
-        "authorization-required",
-        "respect-access-controls",
-        "no-captcha-bypass",
-        "no-cloudflare-bypass",
-        "no-anti-bot-evasion",
-        "no-turnstile-bypass",
-        "no-stealth-browser-mode",
-        "no-agent-skill-import",
-        "no-broad-extras-auto-install",
-        "bounded-network-scope"
-      ]
+      "allowedCapabilities": ["authorized-public-web-fetch", "resilient-parsing"],
+      "deniedCapabilities": ["anti-bot-bypass", "captcha-bypass", "cloudflare-bypass", "access-control-evasion", "turnstile-bypass", "stealth-browser-mode"],
+      "resourceBoundaries": {
+        "network": "only explicitly authorized targets; bounded request scope",
+        "filesystem": "governed evidence workspace only",
+        "credentials": "no credential harvesting or implicit browser/session secrets",
+        "workspace": "single governed evidence workspace only"
+      },
+      "securityConstraints": ["authorization-required", "respect-access-controls", "no-captcha-bypass", "no-cloudflare-bypass", "no-anti-bot-evasion", "no-turnstile-bypass", "no-stealth-browser-mode", "no-agent-skill-import", "no-broad-extras-auto-install", "bounded-network-scope"]
     },
     {
       "repository": "microsoft/mxc",
       "defaultBranch": "main",
       "archived": false,
       "licenseSpdx": "MIT",
+      "observedRevision": "692275b84eaa3f83cd8582dc774bc5f354f46ccf",
       "pinnedRevision": "692275b84eaa3f83cd8582dc774bc5f354f46ccf",
-      "verifiedAtUtc": "2026-08-16T14:28:00Z",
-      "integrationModes": [
-        "Reference"
-      ],
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference"],
       "runtimeApproval": "Denied",
+      "securityReview": "DeniedExecution",
       "purpose": "Policy-driven layered isolation and containment architecture reference; candidate concepts only, never a security boundary or runtime dependency without a later independent approval.",
-      "securityConstraints": [
-        "reference-only",
-        "no-runtime-dependency",
-        "no-automatic-build",
-        "no-automatic-execution",
-        "upstream-preview-not-security-boundary",
-        "independent-backend-verification-required",
-        "pin-before-any-code-consumption"
-      ]
+      "allowedCapabilities": ["sandbox-architecture-study", "isolation-policy-study", "containment-benchmark-design"],
+      "deniedCapabilities": ["automatic-code-execution", "automatic-build", "runtime-dependency", "security-boundary-claim"],
+      "resourceBoundaries": {
+        "network": "reference retrieval only",
+        "filesystem": "no runtime filesystem authority",
+        "credentials": "no credentials",
+        "workspace": "no workspace mutation"
+      },
+      "securityConstraints": ["reference-only", "no-runtime-dependency", "no-automatic-build", "no-automatic-execution", "upstream-preview-not-security-boundary", "independent-backend-verification-required", "pin-before-any-code-consumption"]
     },
     {
       "repository": "ripienaar/free-for-dev",
       "defaultBranch": "master",
       "archived": false,
       "licenseSpdx": "NOASSERTION",
-      "integrationModes": [
-        "Reference"
-      ],
+      "observedRevision": "a8f8fab2f4c8b73610a6d20beb34de4678f96605",
+      "pinnedRevision": null,
+      "artifactConsumption": "None",
+      "consumedArtifactSha256": null,
+      "provenanceStatus": "ObservedRevisionOnly",
+      "sbomStatus": "NotApplicable",
+      "noticeStatus": "NotApplicable",
+      "verifiedAtUtc": "2026-08-17T11:06:30Z",
+      "integrationModes": ["Reference"],
       "runtimeApproval": "Denied",
-      "purpose": "Cost/infrastructure discovery reference only; free-tier terms must be revalidated.",
-      "securityConstraints": [
-        "no-vendoring-without-license",
-        "revalidate-provider-terms",
-        "no-catalog-copy"
-      ]
+      "securityReview": "DeniedExecution",
+      "purpose": "Cost/infrastructure discovery reference only; free-tier terms must be revalidated and content must not be vendored without proven license.",
+      "allowedCapabilities": ["service-discovery"],
+      "deniedCapabilities": ["catalog-vendoring", "automatic-service-enrollment", "runtime-authority"],
+      "resourceBoundaries": {
+        "network": "reference lookup only; provider endpoints require independent review",
+        "filesystem": "no runtime filesystem access",
+        "credentials": "no credentials",
+        "workspace": "no workspace mutation"
+      },
+      "securityConstraints": ["no-vendoring-without-license", "revalidate-provider-terms", "no-catalog-copy"]
     }
   ]
 }
