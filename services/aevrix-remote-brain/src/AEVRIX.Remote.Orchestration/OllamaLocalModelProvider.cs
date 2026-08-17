@@ -14,7 +14,7 @@ public sealed record LocalModelProviderPolicy(
     public LocalModelProviderPolicy Validate()
     {
         if (AllowedModels is null || AllowedModels.Count == 0 || AllowedModels.Count > 128
-            || AllowedModels.Any(model => string.IsNullOrWhiteSpace(model) || model.Length > 160))
+            || AllowedModels.Any(model => !IsSafeModelName(model)))
         {
             throw new ArgumentException("A bounded local-model allowlist is required.", nameof(AllowedModels));
         }
@@ -33,6 +33,14 @@ public sealed record LocalModelProviderPolicy(
 
         return this with { RequestTimeout = timeout };
     }
+
+    public bool IsModelAllowed(string? model) =>
+        IsSafeModelName(model) && AllowedModels.Contains(model!);
+
+    private static bool IsSafeModelName(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Length <= 160
+        && value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/');
 }
 
 public sealed record LocalModelCapabilities(
@@ -88,7 +96,7 @@ public sealed class OllamaLocalModelProvider : ILocalModelProvider, IDisposable
         var payload = await JsonSerializer.DeserializeAsync<OllamaTagsResponse>(stream, JsonOptions, timeout.Token);
         var allowed = (payload?.Models ?? Array.Empty<OllamaModel>())
             .Select(model => model.Name)
-            .Where(name => !string.IsNullOrWhiteSpace(name) && _policy.AllowedModels.Contains(name))
+            .Where(name => !string.IsNullOrWhiteSpace(name) && _policy.IsModelAllowed(name))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
@@ -104,7 +112,7 @@ public sealed class OllamaLocalModelProvider : ILocalModelProvider, IDisposable
 
         if (!task.Context.TryGetValue(ModelContextKey, out var model)
             || string.IsNullOrWhiteSpace(model)
-            || !_policy.AllowedModels.Contains(model))
+            || !_policy.IsModelAllowed(model))
         {
             throw new InvalidOperationException("Requested local model is not explicitly allowlisted.");
         }
