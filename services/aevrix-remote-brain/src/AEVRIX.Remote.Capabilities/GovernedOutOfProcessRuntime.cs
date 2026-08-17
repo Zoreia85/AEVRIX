@@ -73,6 +73,42 @@ public sealed record IsolationAuthorityAttestation(
 }
 
 /// <summary>
+/// Provenance emitted only by the governed authority boundary after the selected backend has
+/// executed and its authority binding has been independently validated. These fields describe
+/// what was actually activated/attested, never merely what the request asked for.
+/// </summary>
+public sealed record ActivatedExecutionBackendProvenance(
+    string BackendId,
+    string AuthorityFingerprint,
+    bool NetworkIsolationEnforced,
+    bool FilesystemIsolationEnforced,
+    bool FilesystemWriteBoundaryEnforced,
+    bool FilesystemReadIsolationEnforced,
+    bool RestrictedTokenEnforced,
+    bool AppContainerEnforced,
+    bool LaunchedImageIdentityVerified)
+{
+    public ActivatedExecutionBackendProvenance Validate()
+    {
+        if (!GovernedOutOfProcessRuntime.IsSafeBackendId(BackendId))
+        {
+            throw new InvalidDataException("Activated backend provenance id is invalid.");
+        }
+        if (string.IsNullOrWhiteSpace(AuthorityFingerprint)
+            || AuthorityFingerprint.Length != 64
+            || !AuthorityFingerprint.All(Uri.IsHexDigit))
+        {
+            throw new InvalidDataException("Activated backend authority fingerprint is invalid.");
+        }
+        return this;
+    }
+}
+
+public sealed record GovernedOutOfProcessExecutionResult(
+    OutOfProcessExecutionResult Execution,
+    ActivatedExecutionBackendProvenance Provenance);
+
+/// <summary>
 /// Replaceable execution backend for one authority profile. Backends may be local-process,
 /// AppContainer/restricted-token, container or VM implementations. Claiming support is not
 /// sufficient: the returned execution attestation is rechecked by the authority boundary.
@@ -246,6 +282,11 @@ public sealed class GovernedOutOfProcessRuntime
 
     public async Task<OutOfProcessExecutionResult> ExecuteAsync(
         OutOfProcessExecutionRequest request,
+        CancellationToken cancellationToken = default) =>
+        (await ExecuteWithProvenanceAsync(request, cancellationToken).ConfigureAwait(false)).Execution;
+
+    public async Task<GovernedOutOfProcessExecutionResult> ExecuteWithProvenanceAsync(
+        OutOfProcessExecutionRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -264,11 +305,23 @@ public sealed class GovernedOutOfProcessRuntime
         var backend = _backends.Single(item =>
             string.Equals(item.BackendId, decision.SelectedBackendId, StringComparison.OrdinalIgnoreCase));
         var result = await backend.ExecuteAsync(_authority, request, cancellationToken).ConfigureAwait(false);
-        ValidateAttestation(backend, result);
-        return result;
+        var binding = ValidateAttestation(backend, result);
+        var attestation = result.Attestation
+            ?? throw new InvalidDataException("Execution backend returned no execution attestation.");
+        var provenance = new ActivatedExecutionBackendProvenance(
+            binding.BackendId,
+            binding.AuthorityFingerprint.ToLowerInvariant(),
+            attestation.NetworkIsolationEnforced,
+            attestation.FilesystemIsolationEnforced,
+            binding.FilesystemWriteBoundaryEnforced,
+            binding.FilesystemReadIsolationEnforced,
+            attestation.RestrictedTokenEnforced,
+            attestation.AppContainerEnforced,
+            attestation.LaunchedImageIdentityVerified).Validate();
+        return new GovernedOutOfProcessExecutionResult(result, provenance);
     }
 
-    private void ValidateAttestation(IOutOfProcessIsolationBackend backend, OutOfProcessExecutionResult result)
+    private IsolationAuthorityAttestation ValidateAttestation(IOutOfProcessIsolationBackend backend, OutOfProcessExecutionResult result)
     {
         ArgumentNullException.ThrowIfNull(backend);
         ArgumentNullException.ThrowIfNull(result);
@@ -319,6 +372,8 @@ public sealed class GovernedOutOfProcessRuntime
                 throw new InvalidDataException("Selected execution backend did not attest external-read filesystem isolation.");
             }
         }
+
+        return binding;
     }
 
     internal static bool IsSafeBackendId(string value) =>
