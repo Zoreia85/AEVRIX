@@ -24,7 +24,8 @@ public sealed record VersionedIsolationBackendRegistration(
 /// Governed runtime variant that refuses to execute any backend before an external monotonic floor
 /// proves both the backend security epoch and the authority-policy epoch are current enough.
 /// Every backend is wrapped internally; callers cannot accidentally mix guarded and unguarded
-/// registrations inside this runtime.
+/// registrations inside this runtime. Activated-backend provenance remains available through the
+/// same validated Gate 10 surface after the floor check succeeds.
 /// </summary>
 public sealed class DowngradeResistantGovernedOutOfProcessRuntime
 {
@@ -62,6 +63,11 @@ public sealed class DowngradeResistantGovernedOutOfProcessRuntime
         OutOfProcessExecutionRequest request,
         CancellationToken cancellationToken = default) =>
         _inner.ExecuteAsync(request, cancellationToken);
+
+    public Task<GovernedOutOfProcessExecutionResult> ExecuteWithProvenanceAsync(
+        OutOfProcessExecutionRequest request,
+        CancellationToken cancellationToken = default) =>
+        _inner.ExecuteWithProvenanceAsync(request, cancellationToken);
 
     private sealed class FloorGuardedBackend : IOutOfProcessIsolationBackend
     {
