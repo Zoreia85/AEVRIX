@@ -20,7 +20,6 @@ public sealed partial class ResearchBrowserView : UserControl
         InitializeComponent();
         _paths = AevrixDataPaths.ForCurrentUser().EnsureCreated();
         _projectRepository = new ProjectRepository(_paths);
-        Loaded += ResearchBrowserView_Loaded;
     }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
@@ -70,9 +69,6 @@ public sealed partial class ResearchBrowserView : UserControl
                 $"A leitura local falhou de forma fechada ({ex.GetType().Name}).");
         }
     }
-
-    private async void ResearchBrowserView_Loaded(object sender, RoutedEventArgs e)
-        => await RefreshAsync();
 
     private async void ProjectSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
