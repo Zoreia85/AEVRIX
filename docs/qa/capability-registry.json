@@ -196,6 +196,78 @@
       "hard_gates": "PENDING",
       "task_families": ["ios-simulator-orchestration", "ui-observation", "runtime-evidence-capture"],
       "recommendation": "authorized-apple-host-lab-only-until-measured"
+    },
+    {
+      "id": "github-public-intelligence-api",
+      "name": "GitHub Public REST Intelligence API",
+      "family": "repository-intelligence",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["repository-metadata", "release-discovery", "workflow-artifact-evidence", "global-advisories", "spdx-sbom"],
+      "recommendation": "read-only-metadata-first-benchmark-rate-and-evidence-quality"
+    },
+    {
+      "id": "osv-api",
+      "name": "OSV Vulnerability API",
+      "family": "vulnerability-intelligence",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["package-vulnerability-query", "commit-vulnerability-query", "batch-security-cross-check"],
+      "recommendation": "metadata-only-benchmark-precision-and-duplication"
+    },
+    {
+      "id": "mobsf-rest-local",
+      "name": "MobSF REST Local Service",
+      "family": "mobile-security-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["static-security-cross-check", "dynamic-security-cross-check"],
+      "recommendation": "loopback-only-license-and-incremental-value-benchmark"
+    },
+    {
+      "id": "androguard",
+      "name": "Androguard",
+      "family": "android-static-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["apk-parser", "dex-analysis", "call-graph", "cfg", "certificate-analysis"],
+      "recommendation": "local-library-benchmark-against-jadx-apktool-sdk"
+    },
+    {
+      "id": "android-apkanalyzer",
+      "name": "Android SDK apkanalyzer",
+      "family": "android-artifact-analysis",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["manifest-analysis", "dex-analysis", "resource-analysis", "apk-diff"],
+      "recommendation": "pin-sdk-component-and-benchmark-structural-precision"
+    },
+    {
+      "id": "frida-observation-only",
+      "name": "Frida Observation-Only Instrumentation",
+      "family": "runtime-instrumentation",
+      "state": "CANDIDATE",
+      "evaluation_status": "UNMEASURED",
+      "evidence_confidence": 0.0,
+      "scores": null,
+      "hard_gates": "PENDING",
+      "task_families": ["authorized-call-tracing", "module-observation", "execution-trace"],
+      "recommendation": "observation-only-no-evasion-benchmark-only-for-evidence-gaps"
     }
   ]
 }
