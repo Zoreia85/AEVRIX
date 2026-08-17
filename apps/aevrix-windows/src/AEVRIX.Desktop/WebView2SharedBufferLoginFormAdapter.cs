@@ -16,6 +16,7 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
     private const string ResultKind = "aevrix.project-login.result.v1";
     private static readonly TimeSpan NavigationTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(15);
+    private static readonly JsonSerializerOptions SharedBufferJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly CoreWebView2 _core;
     private readonly string _targetId;
@@ -187,12 +188,14 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
 
             packet.Dispose();
 
-            var metadataJson = JsonSerializer.Serialize(new SharedBufferMetadata(
-                OperationKind,
-                nonce,
-                recipe.UsernameSelector,
-                recipe.PasswordSelector,
-                recipe.SubmitSelector));
+            var metadataJson = JsonSerializer.Serialize(
+                new SharedBufferMetadata(
+                    OperationKind,
+                    nonce,
+                    recipe.UsernameSelector,
+                    recipe.PasswordSelector,
+                    recipe.SubmitSelector),
+                SharedBufferJsonOptions);
 
             _core.PostSharedBufferToScript(
                 sharedBuffer,
@@ -288,6 +291,8 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
 
     const buffer = event.getBuffer();
     let released = false;
+    let userName = null;
+    let secret = null;
     try {
       const bytes = new Uint8Array(buffer);
       if (bytes.length < 13
@@ -304,8 +309,8 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
       }
 
       const decoder = new TextDecoder('utf-8', { fatal: true });
-      const userName = decoder.decode(bytes.subarray(13, 13 + userLength));
-      const secret = decoder.decode(bytes.subarray(13 + userLength));
+      userName = decoder.decode(bytes.subarray(13, 13 + userLength));
+      secret = decoder.decode(bytes.subarray(13 + userLength));
 
       globalThis.chrome.webview.releaseBuffer(buffer);
       released = true;
@@ -320,12 +325,16 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
 
       assignInputValue(userInput, userName);
       assignInputValue(secretInput, secret);
+      userName = null;
+      secret = null;
       if (!(submitControl instanceof HTMLElement)) throw new Error('submit_target_invalid');
       submitControl.click();
       postResult(metadata.nonce, 'submitted', 'login_submit_dispatched');
     } catch (_) {
       postResult(metadata.nonce, 'failed', 'login_form_fill_failed');
     } finally {
+      userName = null;
+      secret = null;
       if (!released) globalThis.chrome.webview.releaseBuffer(buffer);
     }
   });
