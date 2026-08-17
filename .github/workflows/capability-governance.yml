@@ -6,12 +6,14 @@ on:
     paths:
       - 'docs/qa/CAPABILITY_CONTINUOUS_EVALUATION.md'
       - 'docs/qa/capability-registry.json'
+      - 'docs/manifests/repository-intelligence.json'
       - 'tools/capability_governance/**'
       - '.github/workflows/capability-governance.yml'
   pull_request:
     paths:
       - 'docs/qa/CAPABILITY_CONTINUOUS_EVALUATION.md'
       - 'docs/qa/capability-registry.json'
+      - 'docs/manifests/repository-intelligence.json'
       - 'tools/capability_governance/**'
       - '.github/workflows/capability-governance.yml'
   schedule:
@@ -41,11 +43,22 @@ jobs:
           --out capability-governance-report.md
           --strict
 
-      - name: Upload governance report
+      - name: Validate external capability coverage
+        run: >-
+          python tools/capability_governance/coverage.py
+          --registry docs/qa/capability-registry.json
+          --manifest docs/manifests/repository-intelligence.json
+          --root .
+          --out capability-coverage-report.md
+          --strict
+
+      - name: Upload governance reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: capability-governance-report
-          path: capability-governance-report.md
+          name: capability-governance-reports
+          path: |
+            capability-governance-report.md
+            capability-coverage-report.md
           if-no-files-found: error
           retention-days: 30
