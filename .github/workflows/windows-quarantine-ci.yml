@@ -1,0 +1,94 @@
+name: Windows quarantine CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/aevrix-windows/**"
+      - ".github/workflows/windows-quarantine-ci.yml"
+      - "global.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-quarantine-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  windows-product:
+    name: windows-product-x64
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Checkout exact quarantine candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact candidate identity
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $expected = $env:CANDIDATE_SHA.Trim().ToLowerInvariant()
+          if ($actual -ne $expected) { throw "candidate mismatch: expected $expected got $actual" }
+          Write-Host "Exact quarantine candidate: $actual"
+
+      - name: Setup .NET 10.0.400
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.400"
+
+      - name: Run Windows core tests
+        shell: pwsh
+        run: dotnet test ./apps/aevrix-windows/tests/AEVRIX.Core.Tests/AEVRIX.Core.Tests.csproj -c Release --no-restore:$false
+
+      - name: Build WinUI Desktop
+        shell: pwsh
+        run: |
+          dotnet build ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -p:Platform=x64 `
+            -p:RuntimeIdentifier=win-x64 `
+            -p:ContinuousIntegrationBuild=true
+
+      - name: Publish installed-path payload shape
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'aevrix-desktop-self-contained'
+          dotnet publish ./apps/aevrix-windows/src/AEVRIX.Desktop/AEVRIX.Desktop.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -o $out `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:ContinuousIntegrationBuild=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false
+          foreach ($name in @('AEVRIX.Desktop.exe','AEVRIX.Desktop.dll','AEVRIX.Desktop.deps.json','AEVRIX.Desktop.runtimeconfig.json','Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $out $name) -PathType Leaf)) {
+              throw "self-contained publish missing required payload: $name"
+            }
+          }
+          Get-ChildItem -LiteralPath $out -Recurse -File | Sort-Object FullName | ForEach-Object {
+            [pscustomobject]@{
+              path = [IO.Path]::GetRelativePath($out, $_.FullName).Replace('\\','/')
+              bytes = $_.Length
+              sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $out 'payload-evidence.json') -Encoding utf8NoBOM
+
+      - name: Upload quarantine payload evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-quarantine-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/aevrix-desktop-self-contained
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
