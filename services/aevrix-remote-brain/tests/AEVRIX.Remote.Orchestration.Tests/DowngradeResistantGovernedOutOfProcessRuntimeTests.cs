@@ -47,6 +47,50 @@ public sealed class DowngradeResistantGovernedOutOfProcessRuntimeTests
     }
 
     [TestMethod]
+    public async Task ExecuteWithProvenanceAsync_MissingFloorBlocksBeforeBackendExecution()
+    {
+        var backend = new CountingBackend();
+        var runtime = Runtime(backend, 5, 7, null);
+        using var workspace = new TempDirectory();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runtime.ExecuteWithProvenanceAsync(new OutOfProcessExecutionRequest([], workspace.Path)));
+
+        Assert.AreEqual(0, backend.ExecutionCount);
+    }
+
+    [TestMethod]
+    public async Task ExecuteWithProvenanceAsync_ExactFloorPreservesValidatedActivatedBackendProvenance()
+    {
+        var backend = new CountingBackend();
+        var authority = RestrictedAuthority();
+        var gate = new MonotonicExecutionVersionGate(
+            new InMemoryFloorAnchor(new ExecutionVersionFloor(5, 7)),
+            "runtime:test");
+        var runtime = new DowngradeResistantGovernedOutOfProcessRuntime(
+            [new VersionedIsolationBackendRegistration(backend, 5)],
+            authority,
+            7,
+            gate);
+        using var workspace = new TempDirectory();
+
+        var result = await runtime.ExecuteWithProvenanceAsync(
+            new OutOfProcessExecutionRequest([], workspace.Path));
+
+        Assert.AreEqual(0, result.Execution.ExitCode);
+        Assert.AreEqual(1, backend.ExecutionCount);
+        Assert.AreEqual(backend.BackendId, result.Provenance.BackendId);
+        Assert.AreEqual(authority.ComputeFingerprint(), result.Provenance.AuthorityFingerprint);
+        Assert.IsTrue(result.Provenance.NetworkIsolationEnforced);
+        Assert.IsTrue(result.Provenance.FilesystemIsolationEnforced);
+        Assert.IsTrue(result.Provenance.FilesystemWriteBoundaryEnforced);
+        Assert.IsTrue(result.Provenance.FilesystemReadIsolationEnforced);
+        Assert.IsTrue(result.Provenance.RestrictedTokenEnforced);
+        Assert.IsTrue(result.Provenance.AppContainerEnforced);
+        Assert.IsTrue(result.Provenance.LaunchedImageIdentityVerified);
+    }
+
+    [TestMethod]
     public void Constructor_RejectsUnversionedBackendAndPolicyEpoch()
     {
         var backend = new CountingBackend();
