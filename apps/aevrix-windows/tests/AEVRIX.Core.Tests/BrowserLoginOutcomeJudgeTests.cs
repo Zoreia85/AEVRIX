@@ -136,7 +136,9 @@ public sealed class BrowserLoginOutcomeJudgeTests
     private static LoginRecipe Recipe(
         string targetId = "target:web",
         IReadOnlyList<string>? authenticatedUrlMarkers = null,
-        IReadOnlyList<string>? authenticatedTextMarkers = null) => new(
+        IReadOnlyList<string>? authenticatedTextMarkers = null,
+        IReadOnlyList<string>? loggedOutUrlMarkers = null,
+        IReadOnlyList<string>? loggedOutTextMarkers = null) => new(
         TargetId: targetId,
         LoginUri: new Uri("https://example.com/login"),
         UsernameSelector: "#user",
@@ -144,8 +146,8 @@ public sealed class BrowserLoginOutcomeJudgeTests
         SubmitSelector: "#submit",
         AuthenticatedUrlMarkers: authenticatedUrlMarkers ?? Array.Empty<string>(),
         AuthenticatedTextMarkers: authenticatedTextMarkers ?? Array.Empty<string>(),
-        LoggedOutUrlMarkers: new[] { "/login" },
-        LoggedOutTextMarkers: new[] { "Sign in" },
+        LoggedOutUrlMarkers: loggedOutUrlMarkers ?? new[] { "/login" },
+        LoggedOutTextMarkers: loggedOutTextMarkers ?? new[] { "Sign in" },
         LearnedAt: DateTimeOffset.UtcNow);
 
     private static BrowserSessionObservation Observation(
