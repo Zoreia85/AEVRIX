@@ -47,6 +47,16 @@ Saving a credential does not grant unconditional access to it. Automatic login g
 
 If either gate is false, the broker returns `BlockedByPolicy` without reading the secret store at all. Only after both gates pass does the broker resolve the canonical login URL and request a matching project credential.
 
+## Browser-session isolation
+
+Local-only credential storage is not sufficient by itself because an authenticated browser also persists cookies, localStorage, IndexedDB and other session state. Persistent browser state for an authenticated project must therefore be isolated by both project and target.
+
+The canonical project profile path is:
+
+`BrowserProfiles/<ProjectId>/<TargetId>`
+
+Two projects pointing to the same portal must not share a browser profile merely because they have the same target identifier. `AevrixDataPaths.ProjectBrowserProfile(projectId, targetId)` provides that project-scoped path. The older target-only helper remains only for compatibility and must not be selected for new persistent authenticated project sessions.
+
 ## Runtime handling
 
 Secret material is retrieved only when a matching authorized login operation needs it. The Core exposes it through a disposable credential lease and clears the lease's managed character buffers on disposal.
@@ -63,7 +73,8 @@ Core:
 
 - `ProjectCredentialVault.cs` — project-scoped metadata, canonical URL resolution, default-account arbitration and disposable secret lease;
 - `WindowsCredentialManagerProjectSecretStore.cs` — Windows Credential Manager backend with local-machine persistence and opaque target names;
-- `ProjectCredentialAutofillBroker.cs` — fail-closed bridge that prevents automatic secret retrieval outside an authorized project execution.
+- `ProjectCredentialAutofillBroker.cs` — fail-closed bridge that prevents automatic secret retrieval outside an authorized project execution;
+- `AevrixDataPaths.ProjectBrowserProfile` — project + target browser profile boundary for cookies and authenticated browser state.
 
 Tests cover:
 
@@ -78,6 +89,7 @@ Tests cover:
 - policy-blocked autofill performs zero secret reads;
 - authorized autofill returns a disposable matching credential;
 - ambiguous accounts never trigger secret retrieval;
+- browser-profile separation between projects using the same target;
 - real Windows Credential Manager save/read/delete round trip on Windows CI.
 
 ## Next integration gate
