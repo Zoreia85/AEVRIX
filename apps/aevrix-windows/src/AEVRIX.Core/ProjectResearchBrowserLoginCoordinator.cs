@@ -34,9 +34,6 @@ public sealed record ProjectLoginAutomationResult(
         new(ProjectLoginAutomationStatus.Submitted, "login_form_submitted", Array.Empty<ProjectCredentialDescriptor>());
 }
 
-/// <summary>
-/// Minimal secret-aware browser adapter boundary. Implementations must not log or persist the supplied values.
-/// </summary>
 public interface IResearchBrowserLoginFormAdapter
 {
     Uri? CurrentUri { get; }
@@ -52,9 +49,19 @@ public interface IResearchBrowserLoginFormAdapter
 }
 
 /// <summary>
-/// Coordinates a project-scoped credential with a validated Research Browser login recipe.
-/// The coordinator never exposes a secret unless project execution, autofill policy, target binding and host allowlist all pass.
+/// Optional hardened adapter boundary for browser hosts that can consume both credential fields in one
+/// controlled operation. The coordinator prefers this contract when available, reducing secret lifetime
+/// and avoiding separate host calls for username, password and submit.
 /// </summary>
+public interface IResearchBrowserAtomicLoginFormAdapter : IResearchBrowserLoginFormAdapter
+{
+    Task FillCredentialsAndSubmitAsync(
+        LoginRecipe recipe,
+        ReadOnlyMemory<char> userName,
+        ReadOnlyMemory<char> password,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed class ProjectResearchBrowserLoginCoordinator
 {
     private readonly ProjectCredentialAutofillBroker _credentialBroker;
@@ -131,9 +138,21 @@ public sealed class ProjectResearchBrowserLoginCoordinator
             await adapter.NavigateAsync(recipe.LoginUri, cancellationToken);
         }
 
-        await adapter.FillAsync(recipe.UsernameSelector, credential.UserName, cancellationToken);
-        await adapter.FillAsync(recipe.PasswordSelector, credential.Password, cancellationToken);
-        await adapter.SubmitAsync(recipe.SubmitSelector, cancellationToken);
+        if (adapter is IResearchBrowserAtomicLoginFormAdapter atomicAdapter)
+        {
+            await atomicAdapter.FillCredentialsAndSubmitAsync(
+                recipe,
+                credential.UserName,
+                credential.Password,
+                cancellationToken);
+        }
+        else
+        {
+            await adapter.FillAsync(recipe.UsernameSelector, credential.UserName, cancellationToken);
+            await adapter.FillAsync(recipe.PasswordSelector, credential.Password, cancellationToken);
+            await adapter.SubmitAsync(recipe.SubmitSelector, cancellationToken);
+        }
+
         return ProjectLoginAutomationResult.Submitted();
     }
 
