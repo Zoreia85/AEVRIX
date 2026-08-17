@@ -58,6 +58,8 @@ def first_run_payload() -> dict:
         "uninstallExitCode": 0,
         "presentationObserved": True,
         "presentedAtUtc": "2026-08-17T12:00:00+00:00",
+        "preAcceptanceNavigationAbsent": True,
+        "declineExitedWithoutAcceptance": True,
         "initialAcceptDisabled": True,
         "explicitConfirmationRequired": True,
         "acceptancePersisted": True,
@@ -151,6 +153,8 @@ class InstallerEvidenceBridgeTests(unittest.TestCase):
             self.assertEqual(digest, actual_hash)
             self.assertEqual(COMMIT, details["candidateSha"])
             self.assertTrue(details["commandCenterTransitionObserved"])
+            self.assertTrue(details["preAcceptanceNavigationAbsent"])
+            self.assertTrue(details["declineExitedWithoutAcceptance"])
 
     def test_first_run_hash_mismatch_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
