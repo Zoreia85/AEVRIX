@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 
+from capability_provenance_audit import audit_capability_provenance
 from repository_intelligence_audit import audit_registry
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -176,12 +177,25 @@ def main() -> int:
     audit_privacy_root_policy(failures)
 
     registry_path = ROOT / "docs" / "manifests" / "repository-intelligence.json"
+    capability_path = ROOT / "docs" / "qa" / "capability-registry.json"
+    registry = None
     try:
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         failures.append(f"repository intelligence registry cannot be read: {exc}")
     else:
         failures.extend(f"repository intelligence: {failure}" for failure in audit_registry(registry))
+
+    try:
+        capability_registry = json.loads(capability_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        failures.append(f"capability registry cannot be read: {exc}")
+    else:
+        if registry is not None:
+            failures.extend(
+                f"capability provenance: {failure}"
+                for failure in audit_capability_provenance(registry, capability_registry, ROOT)
+            )
 
     manifest = []
     for path in sorted(files):
