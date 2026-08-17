@@ -51,7 +51,7 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
         }
 
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        EventHandler<CoreWebView2NavigationCompletedEventArgs>? handler = null;
+        Windows.Foundation.TypedEventHandler<CoreWebView2, CoreWebView2NavigationCompletedEventArgs>? handler = null;
         handler = (_, args) =>
         {
             if (!args.IsSuccess)
@@ -118,7 +118,7 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
         var nonce = Guid.NewGuid().ToString("N");
         var result = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        EventHandler<CoreWebView2WebMessageReceivedEventArgs>? messageHandler = null;
+        Windows.Foundation.TypedEventHandler<CoreWebView2, CoreWebView2WebMessageReceivedEventArgs>? messageHandler = null;
         messageHandler = (_, args) =>
         {
             try
@@ -180,7 +180,8 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
         {
             using var packet = ProjectLoginSecretPacket.Create(userName, password);
             using var sharedBuffer = _core.Environment.CreateSharedBuffer(checked((ulong)packet.Length));
-            using (var stream = sharedBuffer.OpenStream())
+            using (var randomAccessStream = sharedBuffer.OpenStream())
+            using (var stream = System.IO.WindowsRuntimeStreamExtensions.AsStream(randomAccessStream))
             {
                 packet.WriteTo(stream);
                 stream.Flush();
@@ -202,7 +203,6 @@ public sealed class WebView2SharedBufferLoginFormAdapter : IResearchBrowserAtomi
                 CoreWebView2SharedBufferAccess.ReadOnly,
                 metadataJson);
 
-            sharedBuffer.Close();
             _ = await result.Task.WaitAsync(OperationTimeout, cancellationToken);
         }
         finally
