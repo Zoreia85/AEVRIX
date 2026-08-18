@@ -49,46 +49,46 @@ $runtimeMilliseconds = $null
 $startupFailure = $null
 
 try {
-    if ($missing.Count -gt 0) {
-        throw "Installed self-contained payload is incomplete: $($missing -join ', ')"
-    }
+    # Missing payload is an expected fail-closed classification, not an exception.
+    # We still emit the sanitized evidence record and return exit code 20 below.
+    if ($missing.Count -eq 0) {
+        Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        $startedAtUtc = [DateTimeOffset]::UtcNow
+        $process = Start-Process -FilePath $desktop -PassThru
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Max(1, $ObservationSeconds))
 
-    Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
-    $startedAtUtc = [DateTimeOffset]::UtcNow
-    $process = Start-Process -FilePath $desktop -PassThru
-    $deadline = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Max(1, $ObservationSeconds))
-
-    while ([DateTimeOffset]::UtcNow -lt $deadline) {
-        $process.Refresh()
-        if ($process.HasExited) { break }
-        Start-Sleep -Milliseconds 200
-    }
-
-    $observedAtUtc = [DateTimeOffset]::UtcNow
-    $process.Refresh()
-    $processAliveAtObservation = -not $process.HasExited
-
-    if ($process.HasExited) {
-        $exitCode = $process.ExitCode
-        $runtimeMilliseconds = [Math]::Max(0, [long]($observedAtUtc - $startedAtUtc).TotalMilliseconds)
-    }
-
-    if (Test-Path -LiteralPath $diagnostic -PathType Leaf) {
-        try {
-            $raw = Get-Content -LiteralPath $diagnostic -Raw | ConvertFrom-Json
-            $startupFailure = [pscustomobject]@{
-                schemaVersion = [int]$raw.schemaVersion
-                recordedAtUtc = [string]$raw.recordedAtUtc
-                stage = [string]$raw.stage
-                exceptionType = [string]$raw.exceptionType
-                hresult = [string]$raw.hresult
-                sha256 = (Get-FileHash -LiteralPath $diagnostic -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
+        while ([DateTimeOffset]::UtcNow -lt $deadline) {
+            $process.Refresh()
+            if ($process.HasExited) { break }
+            Start-Sleep -Milliseconds 200
         }
-        catch {
-            $startupFailure = [pscustomobject]@{
-                parseStatus = 'INVALID_SANITIZED_DIAGNOSTIC'
-                sha256 = (Get-FileHash -LiteralPath $diagnostic -Algorithm SHA256).Hash.ToLowerInvariant()
+
+        $observedAtUtc = [DateTimeOffset]::UtcNow
+        $process.Refresh()
+        $processAliveAtObservation = -not $process.HasExited
+
+        if ($process.HasExited) {
+            $exitCode = $process.ExitCode
+            $runtimeMilliseconds = [Math]::Max(0, [long]($observedAtUtc - $startedAtUtc).TotalMilliseconds)
+        }
+
+        if (Test-Path -LiteralPath $diagnostic -PathType Leaf) {
+            try {
+                $raw = Get-Content -LiteralPath $diagnostic -Raw | ConvertFrom-Json
+                $startupFailure = [pscustomobject]@{
+                    schemaVersion = [int]$raw.schemaVersion
+                    recordedAtUtc = [string]$raw.recordedAtUtc
+                    stage = [string]$raw.stage
+                    exceptionType = [string]$raw.exceptionType
+                    hresult = [string]$raw.hresult
+                    sha256 = (Get-FileHash -LiteralPath $diagnostic -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            }
+            catch {
+                $startupFailure = [pscustomobject]@{
+                    parseStatus = 'INVALID_SANITIZED_DIAGNOSTIC'
+                    sha256 = (Get-FileHash -LiteralPath $diagnostic -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
             }
         }
     }
