@@ -42,6 +42,11 @@ jobs:
           $collectorExit = $LASTEXITCODE
 
           if ($collectorExit -ne 20) { throw "Expected missing-payload exit code 20, got $collectorExit" }
+          # The child exit code is expected and has now been asserted. Reset the
+          # parent's native-process status so the GitHub pwsh wrapper does not
+          # convert the validated classification into a false-negative job exit.
+          $global:LASTEXITCODE = 0
+
           if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw 'Evidence file was not produced.' }
           if (-not (Test-Path -LiteralPath "$evidence.sha256" -PathType Leaf)) { throw 'Evidence hash file was not produced.' }
           $data = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
