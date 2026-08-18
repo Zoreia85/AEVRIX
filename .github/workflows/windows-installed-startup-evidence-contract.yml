@@ -32,6 +32,8 @@ jobs:
           Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $root | Out-Null
 
+          # Execute the collector in a child PowerShell process so its intentional
+          # fail-closed exit code (20) can be asserted instead of terminating this gate.
           & pwsh -NoProfile -NonInteractive -File ./apps/aevrix-windows/installer/collect-installed-startup-evidence.ps1 `
             -InstallDirectory $root `
             -CandidateSha '${{ github.event.pull_request.head.sha || github.sha }}' `
@@ -40,6 +42,9 @@ jobs:
           $collectorExit = $LASTEXITCODE
 
           if ($collectorExit -ne 20) { throw "Expected missing-payload exit code 20, got $collectorExit" }
+          # The child exit code is expected and has now been asserted. Reset the
+          # parent's native-process status so the GitHub pwsh wrapper does not
+          # convert the validated classification into a false-negative job exit.
           $global:LASTEXITCODE = 0
 
           if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw 'Evidence file was not produced.' }
