@@ -19,6 +19,20 @@ if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') {
 }
 
 $installRoot = [IO.Path]::GetFullPath($InstallDirectory)
+$defaultInstallRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\AEVRIX'))
+$normalizeRoot = {
+    param([string]$Path)
+    $Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+}
+$installDirectoryClass = if ([string]::Equals(
+    (& $normalizeRoot $installRoot),
+    (& $normalizeRoot $defaultInstallRoot),
+    [StringComparison]::OrdinalIgnoreCase)) {
+    'LOCALAPPDATA_PROGRAMS_AEVRIX'
+} else {
+    'CUSTOM_OR_NONDEFAULT'
+}
+
 $desktop = Join-Path $installRoot 'AEVRIX.Desktop.exe'
 $diagnostic = Join-Path $env:LOCALAPPDATA 'AEVRIX\Diagnostics\startup-failure.json'
 
@@ -109,7 +123,7 @@ finally {
         schemaVersion = 1
         generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         candidateSha = $CandidateSha.ToLowerInvariant()
-        installDirectoryClass = 'LOCALAPPDATA_PROGRAMS_AEVRIX'
+        installDirectoryClass = $installDirectoryClass
         installedDesktopSha256 = $desktopSha256
         requiredPayload = @($requiredPayload)
         missingPayload = @($missing)
