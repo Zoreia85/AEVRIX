@@ -63,6 +63,8 @@ $runtimeMilliseconds = $null
 $startupFailure = $null
 
 try {
+    # Missing payload is an expected fail-closed classification, not an exception.
+    # We still emit the sanitized evidence record and return exit code 20 below.
     if ($missing.Count -eq 0) {
         Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
         $startedAtUtc = [DateTimeOffset]::UtcNow
