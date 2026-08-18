@@ -7,9 +7,10 @@ Authority: `Zoreia85/AEVRIX#494`. `Zoreia85/AEVRIX` PUBLIC is the temporary oper
 - Historical public inventory before this sanitation branch: 251 branches including `main`.
 - Dedicated sanitation branch: `sanitation/public-cleanup-ledger-v1`.
 - Current branch surface is therefore at least 252 until old refs can be deleted safely.
-- Open functional PRs after classification: #493 and #479; both remain DRAFT/QUARANTINE.
-- PR #364 is CLOSED without merge and its branch/provenance is retained as `BLOCKED_UNTIL_PRIVATE / ARCHIVE_EVIDENCE`.
-- PR #496 is CLOSED/MERGED as historical review metadata. Its approved Windows diagnostic content is physically present in current canonical `main`, but the old merge SHA is not a stable ancestry identity because privacy-safe canonicalization replaces non-canonical commit segments.
+- Current canonical main observed: `c00a80fe35e55c02cd022c614a4645d804016966`, bot-authored privacy-safe canonical commit.
+- Functional stale PR surface was reduced: #364, #493 and #479 are now CLOSED without merge; their branches/provenance remain preserved.
+- PR #496 is CLOSED/MERGED as historical review metadata; its approved Windows diagnostic content is physically present in current canonical main.
+- The sanitation governance PR #499 is the only intentionally active sanitation PR from this cycle and remains DRAFT/evidence-only.
 
 ## Canonical promotion model — issue #498
 
@@ -26,12 +27,13 @@ For `INTEGRATION_APPROVED`, bind:
 
 A PR reporting `merged=true` is historical review metadata only. S0/S4 must reconcile the current canonical bot SHA and tree/content after each promotion.
 
-## PR classifications
+## PR dispositions
 
-- #496 — `CANONICAL_CONTENT_PRESENT / WINDOWS_DIAGNOSTICS_EVIDENCE`; reviewed candidate `5e218abb773b0c3ce180ed09cc040a1e9f418413`; Source Policy PASS, .NET core PASS, Windows quarantine CI PASS, payload artifact recorded by S4. The files `StartupFailureReporter.cs` and `.github/workflows/windows-quarantine-ci.yml` are physically present on canonical main. Final installed first-run/installer AVA remains pending.
-- #493 — `QUARANTINE / MERGE_CANDIDATE`; Android vendor-integrity/App Bundle evidence. Must be rebuilt/reconciled onto current canonical `main` because its capability-registry delta is stale/destructive relative to newer registry state. No direct merge.
-- #479 — `QUARANTINE / MERGE_CANDIDATE`; fail-closed mobile artifact admission. Historical exact-head Source Policy + mobile-lab runs were green, but current-base reconciliation/security/regression/S4 PASS remain required. No direct merge.
-- #364 — `BLOCKED_UNTIL_PRIVATE / ARCHIVE_EVIDENCE`; AI provider budget logic is preserved but does not advance in public mode.
+- #496 — `CANONICAL_CONTENT_PRESENT / WINDOWS_DIAGNOSTICS_EVIDENCE`; reviewed candidate `5e218abb773b0c3ce180ed09cc040a1e9f418413`; Source Policy PASS, .NET core PASS, Windows quarantine CI PASS, payload artifact recorded by S4. `StartupFailureReporter.cs` and `.github/workflows/windows-quarantine-ci.yml` are physically present on canonical main. Final installed first-run/installer AVA remains pending.
+- #493 — CLOSED without merge; `ARCHIVE_EVIDENCE / QUARANTINE_SOURCE`. Android vendor-integrity/App Bundle code remains on `feature/mobile-android-integrity-v7`. Must be reconstructed from current canonical main because its old capability-registry delta would delete newer governance entries.
+- #479 — CLOSED without merge; `ARCHIVE_EVIDENCE / QUARANTINE_SOURCE`. Fail-closed admission code remains on `feature/mobile-artifact-admission-gate-v1`. Historical tests remain evidence for old head only; current-base reconstruction and full gates required before future promotion.
+- #364 — CLOSED without merge; `BLOCKED_UNTIL_PRIVATE / ARCHIVE_EVIDENCE`. AI provider budget logic remains preserved and does not advance in public mode.
+- #499 — OPEN/DRAFT sanitation ledger. Review/evidence only; do not ordinary-merge into canonical main.
 
 ## Branch sanitation policy
 
