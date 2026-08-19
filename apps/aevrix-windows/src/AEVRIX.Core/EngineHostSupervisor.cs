@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 
 namespace Aevrix.Core;
@@ -85,6 +86,8 @@ public sealed class EngineHostSupervisor : IAsyncDisposable
 
             startInfo.Environment[EngineProtocol.PipeEnvironmentVariable] = _pipeName;
             startInfo.Environment[EngineProtocol.TokenEnvironmentVariable] = _token;
+            startInfo.Environment[EngineProtocol.ParentProcessIdEnvironmentVariable] =
+                Environment.ProcessId.ToString(CultureInfo.InvariantCulture);
 
             _process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Unable to start AEVRIX.EngineHost.");
