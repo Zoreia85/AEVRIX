@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -16,6 +17,8 @@ if (string.IsNullOrWhiteSpace(pipeName)
     return;
 }
 
+using var shutdownCts = new CancellationTokenSource();
+var parentLifetimeTask = WatchSupervisingParentAsync(shutdownCts);
 var runtime = new EngineHostRuntime(AevrixDataPaths.ForCurrentUser());
 
 await using var pipe = new NamedPipeServerStream(
@@ -25,9 +28,16 @@ await using var pipe = new NamedPipeServerStream(
     PipeTransmissionMode.Byte,
     PipeOptions.Asynchronous);
 
-while (true)
+while (!shutdownCts.IsCancellationRequested)
 {
-    await pipe.WaitForConnectionAsync();
+    try
+    {
+        await pipe.WaitForConnectionAsync(shutdownCts.Token);
+    }
+    catch (OperationCanceledException) when (shutdownCts.IsCancellationRequested)
+    {
+        break;
+    }
 
     try
     {
@@ -86,6 +96,54 @@ while (true)
         if (pipe.IsConnected)
         {
             pipe.Disconnect();
+        }
+    }
+}
+
+await parentLifetimeTask.ConfigureAwait(false);
+
+static async Task WatchSupervisingParentAsync(CancellationTokenSource shutdownCts)
+{
+    var rawParentPid = Environment.GetEnvironmentVariable(
+        EngineProtocol.ParentProcessIdEnvironmentVariable);
+
+    // Direct developer/test launches remain supported. A process started by EngineHostSupervisor
+    // always receives this value and therefore becomes fail-closed to the parent lifetime.
+    if (string.IsNullOrWhiteSpace(rawParentPid))
+    {
+        return;
+    }
+
+    if (!int.TryParse(rawParentPid, out var parentPid)
+        || parentPid <= 0
+        || parentPid == Environment.ProcessId)
+    {
+        shutdownCts.Cancel();
+        return;
+    }
+
+    try
+    {
+        using var parent = Process.GetProcessById(parentPid);
+        await parent.WaitForExitAsync().ConfigureAwait(false);
+    }
+    catch (ArgumentException)
+    {
+        // Parent already exited before the child obtained its process handle.
+    }
+    catch (InvalidOperationException)
+    {
+        // Treat an unobservable parent as dead rather than leaving an orphan runtime behind.
+    }
+    catch (System.ComponentModel.Win32Exception)
+    {
+        // Supervised EngineHost must not outlive a parent it cannot prove is still present.
+    }
+    finally
+    {
+        if (!shutdownCts.IsCancellationRequested)
+        {
+            shutdownCts.Cancel();
         }
     }
 }
