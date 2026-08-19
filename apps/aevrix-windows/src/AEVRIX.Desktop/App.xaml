@@ -5,6 +5,10 @@
     RequestedTheme="Dark">
     <Application.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
             <Color x:Key="AevrixSurfaceColor">#111821</Color>
             <Color x:Key="AevrixPanelColor">#18222D</Color>
             <Color x:Key="AevrixAccentColor">#45C8FF</Color>
