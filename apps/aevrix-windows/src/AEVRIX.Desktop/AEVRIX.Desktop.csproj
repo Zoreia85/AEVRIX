@@ -4,6 +4,8 @@
     <RootNamespace>AEVRIX.Desktop</RootNamespace>
     <AssemblyName>AEVRIX.Desktop</AssemblyName>
     <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <AppxPackage>false</AppxPackage>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Platforms>x64;ARM64</Platforms>
