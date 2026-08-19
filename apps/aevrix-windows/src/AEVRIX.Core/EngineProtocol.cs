@@ -60,6 +60,7 @@ public static class EngineProtocol
     public const string PipeNamePrefix = "AEVRIX.Engine.";
     public const string TokenEnvironmentVariable = "AEVRIX_ENGINE_TOKEN";
     public const string PipeEnvironmentVariable = "AEVRIX_ENGINE_PIPE";
+    public const string ParentProcessIdEnvironmentVariable = "AEVRIX_ENGINE_PARENT_PID";
 
     public static string NewCaptureId(string targetId)
     {
