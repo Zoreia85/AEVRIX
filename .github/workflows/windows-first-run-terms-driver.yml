@@ -15,13 +15,13 @@ permissions:
   actions: write
   issues: write
 
-# A non-command comment on #501 must never cancel an active Windows chain.
+# Only an explicit MASTER command starts a chain. Unrelated comments never cancel it.
 concurrency:
   group: windows-first-run-driver-${{ github.event_name }}-${{ github.event.comment.id || inputs.candidate_sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  dispatch-after-installer:
+  dispatch-installed-chain:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
@@ -66,20 +66,20 @@ jobs:
           fi
           echo "Exact canonical candidate verified: $CANDIDATE_SHA"
 
-      - name: Record chain cutoff and report start
+      - name: Record installer cutoff and report start
         id: start
         shell: bash
         run: |
           set -euo pipefail
           cutoff="$(date -u +%s)"
-          echo "cutoff_epoch=$cutoff" >> "$GITHUB_OUTPUT"
+          echo "installer_cutoff_epoch=$cutoff" >> "$GITHUB_OUTPUT"
           body="$(python - <<'PY'
           import json, os
           text = (
               "WINDOWS CHAIN STARTED — MASTER command accepted\n\n"
               f"- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n"
               f"- driver run: `{os.environ['GITHUB_RUN_ID']}`\n"
-              "- requested chain: Windows installer candidate -> automatic workflow_run installed first-run AVA\n"
+              "- requested chain: explicit Windows installer workflow_dispatch -> explicit installed first-run AVA workflow_dispatch\n"
               "- release credit: NONE until exact installed AVA completes PASS"
           )
           print(json.dumps({"body": text}))
@@ -115,11 +115,11 @@ jobs:
       - name: Resolve completed exact installer run
         id: installer
         env:
-          CUTOFF_EPOCH: ${{ steps.start.outputs.cutoff_epoch }}
+          CUTOFF_EPOCH: ${{ steps.start.outputs.installer_cutoff_epoch }}
         shell: bash
         run: |
           set -euo pipefail
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-installer-candidate.yml/runs?head_sha=${CANDIDATE_SHA}&per_page=30"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-installer-candidate.yml/runs?head_sha=${CANDIDATE_SHA}&event=workflow_dispatch&per_page=30"
           run_id=""
           conclusion=""
           for attempt in $(seq 1 180); do
@@ -127,7 +127,7 @@ jobs:
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2022-11-28' "$api")"
-            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; runs=[]; [runs.append(r) for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows installer candidate" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; runs.sort(key=lambda r:r.get("created_at",""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s"%(r.get("id"),r.get("status"),r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
+            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; runs=[]; [runs.append(r) for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows installer candidate" and r.get("event")=="workflow_dispatch" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; runs.sort(key=lambda r:r.get("created_at",""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s"%(r.get("id"),r.get("status"),r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
             IFS='|' read -r candidate_run status candidate_conclusion <<<"$result"
             if [[ "$candidate_run" != "NONE" && "$status" == "completed" ]]; then
               run_id="$candidate_run"; conclusion="$candidate_conclusion"; break
@@ -135,41 +135,88 @@ jobs:
             sleep 15
           done
           if [[ -z "$run_id" ]]; then
-            echo "No completed exact installer run resolved within bounded window." >&2
+            echo "No completed exact workflow_dispatch installer run resolved within bounded window." >&2
             exit 3
           fi
           echo "installer_run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "installer_conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           echo "Resolved installer run $run_id / $conclusion"
 
-      - name: Report installer failure and fail closed
-        if: steps.installer.outputs.installer_conclusion != 'success'
+      - name: Report installer result to MASTER
         env:
           INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
           INSTALLER_CONCLUSION: ${{ steps.installer.outputs.installer_conclusion }}
         shell: bash
         run: |
+          set -euo pipefail
           body="$(python - <<'PY'
-          import json,os
-          print(json.dumps({"body":f"WINDOWS INSTALLER GATE FAILED\n\n- candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- installer run: `{os.environ['INSTALLER_RUN_ID']}`\n- installer conclusion: **{os.environ['INSTALLER_CONCLUSION'].upper()}**\n- first-run AVA: fail-closed / no Canary credit"}))
+          import json, os
+          c = os.environ['INSTALLER_CONCLUSION'].upper()
+          text = (
+              "WINDOWS INSTALLER RESULT\n\n"
+              f"- candidate: `{os.environ['CANDIDATE_SHA']}`\n"
+              f"- driver run: `{os.environ['GITHUB_RUN_ID']}`\n"
+              f"- installer run: `{os.environ['INSTALLER_RUN_ID']}`\n"
+              f"- installer conclusion: **{c}**"
+          )
+          print(json.dumps({"body": text}))
           PY
           )"
-          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" -d "$body" >/dev/null
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" \
+            -d "$body" >/dev/null
+
+      - name: Fail closed on installer failure
+        if: steps.installer.outputs.installer_conclusion != 'success'
+        shell: bash
+        run: |
+          echo "Exact installer failed; refusing AVA dispatch and Canary credit." >&2
           exit 2
 
-      - name: Resolve automatic exact first-run AVA
+      - name: Dispatch exact installed first-run AVA explicitly
         if: steps.installer.outputs.installer_conclusion == 'success'
-        id: ava
+        id: ava_dispatch
         env:
-          CUTOFF_EPOCH: ${{ steps.start.outputs.cutoff_epoch }}
+          INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
         shell: bash
         run: |
           set -euo pipefail
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/runs?head_sha=${CANDIDATE_SHA}&event=workflow_run&per_page=30"
+          cutoff="$(date -u +%s)"
+          body="$(python -c 'import json,os; print(json.dumps({"ref":"main","inputs":{"installer_run_id":os.environ["INSTALLER_RUN_ID"],"candidate_sha":os.environ["CANDIDATE_SHA"]}}))')"
+          code="$(curl --silent --show-error --output response.txt --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/dispatches" \
+            -d "$body")"
+          if [[ "$code" != "204" ]]; then
+            cat response.txt >&2 || true
+            echo "Installed first-run AVA workflow_dispatch failed with HTTP $code" >&2
+            exit 1
+          fi
+          echo "ava_cutoff_epoch=$cutoff" >> "$GITHUB_OUTPUT"
+          echo "Explicit installed first-run AVA dispatch accepted for candidate $CANDIDATE_SHA / installer $INSTALLER_RUN_ID"
+
+      - name: Resolve completed exact installed first-run AVA
+        if: steps.installer.outputs.installer_conclusion == 'success'
+        id: ava
+        env:
+          CUTOFF_EPOCH: ${{ steps.ava_dispatch.outputs.ava_cutoff_epoch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/runs?head_sha=${CANDIDATE_SHA}&event=workflow_dispatch&per_page=30"
           run_id=""; conclusion=""
           for attempt in $(seq 1 120); do
-            payload="$(curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$api")"
-            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; runs=[]; [runs.append(r) for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows first-run terms AVA" and r.get("event")=="workflow_run" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; runs.sort(key=lambda r:r.get("created_at",""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s"%(r.get("id"),r.get("status"),r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
+            payload="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' "$api")"
+            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; runs=[]; [runs.append(r) for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows first-run terms AVA" and r.get("event")=="workflow_dispatch" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; runs.sort(key=lambda r:r.get("created_at",""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s"%(r.get("id"),r.get("status"),r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
             IFS='|' read -r candidate_run status candidate_conclusion <<<"$result"
             if [[ "$candidate_run" != "NONE" && "$status" == "completed" ]]; then
               run_id="$candidate_run"; conclusion="$candidate_conclusion"; break
@@ -177,7 +224,7 @@ jobs:
             sleep 15
           done
           if [[ -z "$run_id" ]]; then
-            echo "No completed automatic exact AVA resolved within bounded window." >&2
+            echo "No completed exact workflow_dispatch AVA resolved within bounded window." >&2
             exit 3
           fi
           echo "ava_run_id=$run_id" >> "$GITHUB_OUTPUT"
@@ -196,15 +243,22 @@ jobs:
           body="$(python - <<'PY'
           import json,os
           c=os.environ['AVA_CONCLUSION'].upper(); state='PASS' if c=='SUCCESS' else 'FAIL'
-          print(json.dumps({"body":f"WINDOWS INSTALLED CHAIN {state}\n\n- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- installer run: `{os.environ['INSTALLER_RUN_ID']}` — SUCCESS\n- automatic first-run AVA run: `{os.environ['AVA_RUN_ID']}` — **{c}**\n- MASTER action: inspect exact jobs/artifacts before Canary credit"}))
+          print(json.dumps({"body":f"WINDOWS INSTALLED CHAIN {state}\n\n- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- installer run: `{os.environ['INSTALLER_RUN_ID']}` — SUCCESS\n- explicit first-run AVA run: `{os.environ['AVA_RUN_ID']}` — **{c}**\n- MASTER action: inspect exact jobs/artifacts before Canary credit"}))
           PY
           )"
-          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" -d "$body" >/dev/null
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" \
+            -d "$body" >/dev/null
 
       - name: Enforce exact AVA success
         if: steps.installer.outputs.installer_conclusion == 'success' && steps.ava.outputs.ava_conclusion != 'success'
         shell: bash
-        run: exit 4
+        run: |
+          echo "Exact installed first-run AVA failed; refusing Canary credit." >&2
+          exit 4
 
       - name: Publish driver summary
         if: steps.installer.outputs.installer_conclusion == 'success' && steps.ava.outputs.ava_conclusion == 'success'
@@ -213,8 +267,11 @@ jobs:
           AVA_RUN_ID: ${{ steps.ava.outputs.ava_run_id }}
         shell: bash
         run: |
-          echo '## AEVRIX exact installed Windows chain' >> "$GITHUB_STEP_SUMMARY"
-          echo "- Exact candidate: \`$CANDIDATE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Installer run: **$INSTALLER_RUN_ID**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- First-run AVA run: **$AVA_RUN_ID**" >> "$GITHUB_STEP_SUMMARY"
-          echo '- Installed first-run chain: **PASS**' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '## AEVRIX exact installed Windows chain'
+            echo "- Exact candidate: \`$CANDIDATE_SHA\`"
+            echo "- Installer run: **$INSTALLER_RUN_ID**"
+            echo "- First-run AVA run: **$AVA_RUN_ID**"
+            echo '- Installed first-run chain: **PASS**'
+            echo '- Release credit: pending independent MASTER/S4 evidence review'
+          } >> "$GITHUB_STEP_SUMMARY"
