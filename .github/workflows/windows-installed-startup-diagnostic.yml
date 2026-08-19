@@ -1,0 +1,267 @@
+name: Windows installed startup diagnostic
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: windows-installed-startup-diagnostic-${{ github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.number == 501 &&
+        github.event.comment.author_association == 'OWNER' &&
+        github.event.comment.body == '/aevrix-diagnose-startup'
+      )
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout event-bound canonical candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact current canonical main
+        id: identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = (& git rev-parse HEAD).Trim()
+          if ($candidate -notmatch '^[0-9a-f]{40}$') { throw "Invalid candidate SHA: $candidate" }
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $main = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/ref/heads/main"
+          $mainSha = [string]$main.object.sha
+          if ($candidate -ne $mainSha) { throw "Diagnostic refuses stale candidate: event=$candidate current-main=$mainSha" }
+          $author = (& git show -s --format='%an <%ae>' HEAD).Trim()
+          if ($author -notmatch '^github-actions\[bot\] <41898282\+github-actions\[bot\]@users\.noreply\.github\.com>$') {
+            throw "Diagnostic refuses non-canonical author identity: $author"
+          }
+          "candidate_sha=$candidate" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Exact canonical candidate verified: $candidate"
+
+      - name: Dispatch exact Windows installer candidate
+        id: dispatch
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cutoff = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' `
+            -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/windows-installer-candidate.yml/dispatches" `
+            -Body '{"ref":"main"}'
+          "cutoff_epoch=$cutoff" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Installer dispatch accepted for $env:CANDIDATE_SHA"
+
+      - name: Resolve successful exact installer run
+        id: installer_run
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          CUTOFF_EPOCH: ${{ steps.dispatch.outputs.cutoff_epoch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $cutoff = [DateTimeOffset]::FromUnixTimeSeconds([long]$env:CUTOFF_EPOCH).AddSeconds(-5)
+          $resolved = $null
+          for ($attempt = 0; $attempt -lt 180; $attempt++) {
+            $listing = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/windows-installer-candidate.yml/runs?head_sha=$env:CANDIDATE_SHA&event=workflow_dispatch&per_page=30"
+            $resolved = @($listing.workflow_runs | Where-Object {
+              [string]$_.head_sha -eq $env:CANDIDATE_SHA -and
+              [string]$_.name -eq 'Windows installer candidate' -and
+              [string]$_.event -eq 'workflow_dispatch' -and
+              [DateTimeOffset]$_.created_at -ge $cutoff
+            } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending | Select-Object -First 1)
+            if ($resolved.Count -eq 1 -and [string]$resolved[0].status -eq 'completed') { break }
+            Start-Sleep -Seconds 10
+          }
+          if ($resolved.Count -ne 1) { throw 'No exact installer run became observable inside the bounded diagnostic window.' }
+          $run = $resolved[0]
+          if ([string]$run.conclusion -ne 'success') { throw "Exact installer run $($run.id) concluded $($run.conclusion)." }
+          "installer_run_id=$($run.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Exact installer run resolved: $($run.id) / success"
+
+      - name: Download exact installer artifact
+        id: installer
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          INSTALLER_RUN_ID: ${{ steps.installer_run.outputs.installer_run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $listing = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:INSTALLER_RUN_ID/artifacts?per_page=100"
+          $expectedName = "aevrix-windows-installer-candidate-$env:CANDIDATE_SHA"
+          $matches = @($listing.artifacts | Where-Object { -not $_.expired -and [string]$_.name -eq $expectedName })
+          if ($matches.Count -ne 1) { throw "Expected exactly one artifact '$expectedName'; got $($matches.Count)." }
+          $artifact = $matches[0]
+          $zip = Join-Path $env:RUNNER_TEMP 'installer.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'installer'
+          Invoke-WebRequest -Headers $headers -Uri ([string]$artifact.archive_download_url) -OutFile $zip -MaximumRedirection 10
+          Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $candidateFiles = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter 'candidate-evidence.json')
+          if ($candidateFiles.Count -ne 1) { throw "Expected one candidate-evidence.json; got $($candidateFiles.Count)." }
+          $candidate = Get-Content -LiteralPath $candidateFiles[0].FullName -Raw | ConvertFrom-Json
+          if ([string]$candidate.candidateSha -ne $env:CANDIDATE_SHA) { throw 'Installer artifact candidate identity mismatch.' }
+          $version = [string]$candidate.newVersion
+          $installerName = "AEVRIX-$version-win-x64-Setup.exe"
+          $installers = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $installerName)
+          if ($installers.Count -ne 1) { throw "Expected one exact installer '$installerName'; got $($installers.Count)." }
+          $installerHash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "installer_path=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "installer_sha256=$installerHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "artifact_id=$($artifact.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "artifact_digest=$($artifact.digest)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Exact installer: artifact=$($artifact.id) digest=$($artifact.digest) sha256=$installerHash"
+
+      - name: Install and capture sanitized startup evidence
+        id: diagnostic
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          INSTALLER_PATH: ${{ steps.installer.outputs.installer_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidenceDir = Join-Path $env:RUNNER_TEMP 'aevrix-startup-diagnostic'
+          New-Item -ItemType Directory -Force -Path $evidenceDir | Out-Null
+          $evidence = Join-Path $evidenceDir 'installed-startup-evidence.json'
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs\AEVRIX'
+          $stateRoot = Join-Path $env:LOCALAPPDATA 'AEVRIX\UserData'
+          Remove-Item -LiteralPath (Join-Path $stateRoot 'first-run-acceptance.json'),(Join-Path $stateRoot 'first-run-presentation.json') -Force -ErrorAction SilentlyContinue
+          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Exact installer failed during startup diagnostic: $($install.ExitCode)" }
+          & ./apps/aevrix-windows/installer/collect-installed-startup-evidence.ps1 `
+            -InstallDirectory $installDir `
+            -CandidateSha $env:CANDIDATE_SHA `
+            -EvidencePath $evidence `
+            -ObservationSeconds 20
+          $collectorExit = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw 'Startup evidence file was not produced.' }
+          $data = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+          "collector_exit=$collectorExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "process_alive=$([bool]$data.processAliveAtObservation)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "desktop_exit_code=$($data.exitCode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "runtime_ms=$($data.runtimeMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "desktop_sha256=$($data.installedDesktopSha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          if ($null -ne $data.startupFailure) {
+            "failure_stage=$($data.startupFailure.stage)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "failure_type=$($data.startupFailure.exceptionType)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "failure_hresult=$($data.startupFailure.hresult)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "failure_record_sha256=$($data.startupFailure.sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          Write-Host "Startup classification: alive=$($data.processAliveAtObservation) exit=$($data.exitCode) runtimeMs=$($data.runtimeMilliseconds) collectorExit=$collectorExit"
+          if ($null -ne $data.startupFailure) {
+            Write-Host "Sanitized startup failure: stage=$($data.startupFailure.stage) type=$($data.startupFailure.exceptionType) hresult=$($data.startupFailure.hresult) sha256=$($data.startupFailure.sha256)"
+          }
+
+      - name: Uninstall diagnostic candidate
+        if: always()
+        shell: pwsh
+        run: |
+          $uninstall = Join-Path $env:LOCALAPPDATA 'Programs\AEVRIX\uninstall.exe'
+          if (Test-Path -LiteralPath $uninstall -PathType Leaf) {
+            $u = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
+            Write-Host "Diagnostic uninstall exit code: $($u.ExitCode)"
+          }
+
+      - name: Upload exact startup diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aevrix-installed-startup-diagnostic-${{ steps.identity.outputs.candidate_sha }}
+          path: ${{ runner.temp }}/aevrix-startup-diagnostic
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Report sanitized startup diagnosis to MASTER
+        if: always() && steps.diagnostic.outputs.process_alive != ''
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          INSTALLER_RUN_ID: ${{ steps.installer_run.outputs.installer_run_id }}
+          INSTALLER_SHA256: ${{ steps.installer.outputs.installer_sha256 }}
+          INSTALLER_ARTIFACT_ID: ${{ steps.installer.outputs.artifact_id }}
+          INSTALLER_ARTIFACT_DIGEST: ${{ steps.installer.outputs.artifact_digest }}
+          PROCESS_ALIVE: ${{ steps.diagnostic.outputs.process_alive }}
+          DESKTOP_EXIT_CODE: ${{ steps.diagnostic.outputs.desktop_exit_code }}
+          RUNTIME_MS: ${{ steps.diagnostic.outputs.runtime_ms }}
+          DESKTOP_SHA256: ${{ steps.diagnostic.outputs.desktop_sha256 }}
+          FAILURE_STAGE: ${{ steps.diagnostic.outputs.failure_stage }}
+          FAILURE_TYPE: ${{ steps.diagnostic.outputs.failure_type }}
+          FAILURE_HRESULT: ${{ steps.diagnostic.outputs.failure_hresult }}
+          FAILURE_RECORD_SHA256: ${{ steps.diagnostic.outputs.failure_record_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $bodyText = @"
+          WINDOWS STARTUP DIAGNOSTIC
+
+          - candidate: ``$env:CANDIDATE_SHA``
+          - diagnostic run: ``$env:GITHUB_RUN_ID``
+          - installer run: ``$env:INSTALLER_RUN_ID``
+          - installer artifact: ``$env:INSTALLER_ARTIFACT_ID`` / ``$env:INSTALLER_ARTIFACT_DIGEST``
+          - installer SHA-256: ``$env:INSTALLER_SHA256``
+          - installed Desktop SHA-256: ``$env:DESKTOP_SHA256``
+          - process alive at observation: **$env:PROCESS_ALIVE**
+          - desktop exit code: ``$env:DESKTOP_EXIT_CODE``
+          - runtime ms: ``$env:RUNTIME_MS``
+          - startup stage: ``$env:FAILURE_STAGE``
+          - exception type: ``$env:FAILURE_TYPE``
+          - HRESULT: ``$env:FAILURE_HRESULT``
+          - sanitized reporter record SHA-256: ``$env:FAILURE_RECORD_SHA256``
+
+          No exception message, stack trace, absolute user path, credential, token or session material is included.
+          "@
+          $payload = @{ body = $bodyText } | ConvertTo-Json
+          Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' `
+            -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/issues/501/comments" -Body $payload | Out-Null
+
+      - name: Classify startup gate
+        shell: pwsh
+        env:
+          PROCESS_ALIVE: ${{ steps.diagnostic.outputs.process_alive }}
+          FAILURE_TYPE: ${{ steps.diagnostic.outputs.failure_type }}
+        run: |
+          if ($env:PROCESS_ALIVE -ne 'True') {
+            throw "Installed Desktop did not remain alive. Sanitized exception type=$env:FAILURE_TYPE"
+          }
+          Write-Host 'PASS: installed Desktop remained alive through the startup observation window.'
