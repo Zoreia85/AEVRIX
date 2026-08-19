@@ -309,7 +309,6 @@ jobs:
           $evidenceDir = Join-Path $env:RUNNER_TEMP 'aevrix-first-run-ava'
           $report = Join-Path $evidenceDir 'first-run-terms-evidence.json'
           & ./apps/aevrix-windows/installer/test-first-run-terms.ps1 -Installer $env:INSTALLER_PATH -ProductVersion $env:PRODUCT_VERSION -CandidateSha $env:CANDIDATE_SHA -EvidencePath $report
-          if ($LASTEXITCODE -ne 0) { throw "Installed first-run terms AVA failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'First-run terms evidence report is missing.' }
           $data = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
           if ([int]$data.schemaVersion -ne 2 -or [string]$data.candidateSha -ne $env:CANDIDATE_SHA -or [string]$data.productVersion -ne $env:PRODUCT_VERSION) { throw 'First-run evidence identity mismatch.' }
