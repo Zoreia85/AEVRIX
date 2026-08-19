@@ -57,10 +57,47 @@ public partial class App : Application
 
     private void OpenMainWindow()
     {
-        var mainWindow = new MainWindow();
-        mainWindow.InitializeProjectCredentialsSurface();
-        mainWindow.InitializeResearchBrowserSurface();
+        MainWindow mainWindow;
+        try
+        {
+            mainWindow = new MainWindow();
+        }
+        catch (Exception ex)
+        {
+            StartupFailureReporter.TryWrite("main-window-initialize", ex);
+            throw;
+        }
+
         _window = mainWindow;
-        _window.Activate();
+        try
+        {
+            _window.Activate();
+        }
+        catch (Exception ex)
+        {
+            StartupFailureReporter.TryWrite("main-window-activate", ex);
+            throw;
+        }
+
+        // These modules are not prerequisites for displaying the governed Command Center.
+        // Initialize them only after the main shell is active so an optional surface cannot
+        // prevent first-run acceptance from transitioning into the product shell.
+        try
+        {
+            mainWindow.InitializeProjectCredentialsSurface();
+        }
+        catch (Exception ex)
+        {
+            StartupFailureReporter.TryWrite("project-credentials-initialize", ex);
+        }
+
+        try
+        {
+            mainWindow.InitializeResearchBrowserSurface();
+        }
+        catch (Exception ex)
+        {
+            StartupFailureReporter.TryWrite("research-browser-initialize", ex);
+        }
     }
 }
