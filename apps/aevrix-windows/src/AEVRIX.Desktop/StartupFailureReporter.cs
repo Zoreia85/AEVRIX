@@ -53,6 +53,10 @@ internal static class StartupFailureReporter
             "app-initialize" => stage,
             "app-launch" => stage,
             "unhandled-ui" => stage,
+            "main-window-initialize" => stage,
+            "main-window-activate" => stage,
+            "project-credentials-initialize" => stage,
+            "research-browser-initialize" => stage,
             _ => "unknown"
         };
     }
