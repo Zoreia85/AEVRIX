@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
     private bool _engineOperationInProgress;
     private bool _engineHealthProbeInProgress;
     private bool _engineStoppedByUser;
+    private bool _guidedBootstrapStarted;
     private bool _isClosing;
     private DateTimeOffset _lastAuthenticatedProbeUtc = DateTimeOffset.MinValue;
 
@@ -47,6 +48,7 @@ public sealed partial class MainWindow : Window
             _firstRunProfile = DesktopFirstRunProfile.CreateNew();
         }
 
+        ApplyRecommendedDefaults();
         InitializeFirstRunControls();
         _firstRunReady = true;
         TryValidatePersistedDeviceCertificate();
@@ -59,18 +61,83 @@ public sealed partial class MainWindow : Window
         _engineHealthTimer.Start();
 
         SetEngineStatus(
-            "Não iniciado",
-            "Nenhuma sessão local foi autenticada nesta execução.");
+            "Preparando",
+            "O AEVRIX verificará automaticamente o motor local nesta sessão.");
         RecordActivity(
             OperationalActivityLevel.Informational,
             "Desktop",
             "Sessão iniciada",
-            "Shell Windows carregado. Estados sem prova permanecem indisponíveis.");
+            "Shell Windows carregado. A preparação segura local será executada automaticamente; decisões de autorização permanecem explícitas.");
 
         RefreshFirstRunView();
-        var firstRunRequired = _firstRunProfileError is not null || _firstRunProfile.CompletedAtUtc is null;
-        RootNavigation.SelectedItem = firstRunRequired ? OnboardingNavItem : HomeNavItem;
-        ShowSection(firstRunRequired ? "onboarding" : "home", firstRunRequired ? "Inicialização segura" : "Command Center");
+        RootNavigation.SelectedItem = HomeNavItem;
+        ShowSection("home", "Visão geral");
+        _ = RunGuidedBootstrapAsync();
+    }
+
+    private void ApplyRecommendedDefaults()
+    {
+        var profileChanged = false;
+        if (_firstRunProfile.RequestedMode is null)
+        {
+            _firstRunProfile = _firstRunProfile with
+            {
+                RequestedMode = DesktopOperatingMode.LocalSupervised,
+                CompletedAtUtc = null
+            };
+            profileChanged = true;
+        }
+
+        if (profileChanged)
+        {
+            TrySaveFirstRunProfile();
+            RecordActivity(
+                OperationalActivityLevel.Informational,
+                "Inicialização",
+                "Padrão seguro aplicado",
+                "Modo local supervisionado selecionado automaticamente. O usuário pode alterá-lo a qualquer momento.");
+        }
+
+        if (string.IsNullOrWhiteSpace(WorkspaceInput.Text))
+        {
+            WorkspaceInput.Text = $"investigacao-{DateTime.Now:yyyyMMdd-HHmm}";
+        }
+
+        if (SensitivityInput.SelectedIndex < 0)
+        {
+            SensitivityInput.SelectedIndex = 0;
+        }
+    }
+
+    private async Task RunGuidedBootstrapAsync()
+    {
+        if (_guidedBootstrapStarted || _isClosing)
+        {
+            return;
+        }
+
+        _guidedBootstrapStarted = true;
+        await Task.Yield();
+
+        if (!_integrityAttempted)
+        {
+            RunLocalIntegrityCheck();
+        }
+
+        if (_deviceSecurityTier is null)
+        {
+            PrepareDeviceIdentity(showNotice: false);
+        }
+
+        if (!_engineAuthenticated && !_engineOperationInProgress && !_isClosing)
+        {
+            await VerifyEngineHostAsync(restart: false);
+        }
+
+        if (!_isClosing)
+        {
+            RefreshFirstRunView();
+        }
     }
 
     private void RootNavigation_SelectionChanged(
@@ -84,7 +151,7 @@ public sealed partial class MainWindow : Window
 
         if (args.SelectedItemContainer is not NavigationViewItem item)
         {
-            ShowSection("home", "Command Center");
+            ShowSection("home", "Visão geral");
             return;
         }
 
@@ -102,19 +169,19 @@ public sealed partial class MainWindow : Window
     private void OpenOnboardingButton_Click(object sender, RoutedEventArgs e)
     {
         RootNavigation.SelectedItem = OnboardingNavItem;
-        ShowSection("onboarding", "Inicialização segura");
+        ShowSection("onboarding", "Configuração inicial");
     }
 
     private void OpenMissionControlButton_Click(object sender, RoutedEventArgs e)
     {
         RootNavigation.SelectedItem = MissionControlNavItem;
-        ShowSection("mission", "Mission Control");
+        ShowSection("mission", "Execução e missões");
     }
 
     private void OpenActivityButton_Click(object sender, RoutedEventArgs e)
     {
         RootNavigation.SelectedItem = ActivityNavItem;
-        ShowSection("activity", "Activity / Proof Ledger");
+        ShowSection("activity", "Histórico");
     }
 
     private void RefreshActivityButton_Click(object sender, RoutedEventArgs e)
@@ -208,7 +275,7 @@ public sealed partial class MainWindow : Window
 
             _engineAuthenticated = true;
             _lastAuthenticatedProbeUtc = DateTimeOffset.UtcNow;
-            RenderAuthenticatedEngineState("Ping real confirmado. Supervisão contínua ativada.");
+            RenderAuthenticatedEngineState("Motor local pronto e supervisionado.");
             RecordActivity(
                 OperationalActivityLevel.Success,
                 "EngineHost",
@@ -220,8 +287,8 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             SetEngineStatus(
-                "Bloqueado",
-                $"A verificação falhou de forma fechada ({ex.GetType().Name}). Nenhum estado saudável foi inferido.");
+                "Precisa de atenção",
+                $"A verificação falhou de forma fechada ({ex.GetType().Name}). Use Verificar novamente para tentar outra vez.");
             RecordActivity(
                 OperationalActivityLevel.Error,
                 "EngineHost",
@@ -254,7 +321,7 @@ public sealed partial class MainWindow : Window
             _engineAuthenticated = false;
             SetEngineStatus(
                 "Interrompido",
-                "O processo supervisionado encerrou inesperadamente. A sessão autenticada foi revogada e exige nova verificação ou reinício.");
+                "O motor local encerrou inesperadamente. Use Verificar ou Reiniciar para recuperar a sessão.");
             RecordActivity(
                 OperationalActivityLevel.Warning,
                 "EngineHost",
@@ -276,14 +343,14 @@ public sealed partial class MainWindow : Window
         {
             await RequireAuthenticatedPingAsync(_engineSupervisor);
             _lastAuthenticatedProbeUtc = DateTimeOffset.UtcNow;
-            RenderAuthenticatedEngineState("Health-check autenticado confirmado automaticamente.");
+            RenderAuthenticatedEngineState("Motor local saudável e supervisionado.");
         }
         catch (Exception ex)
         {
             _engineAuthenticated = false;
             SetEngineStatus(
-                "Bloqueado",
-                $"A supervisão automática perdeu a prova autenticada ({ex.GetType().Name}). A sessão foi invalidada.");
+                "Precisa de atenção",
+                $"A supervisão perdeu a prova autenticada ({ex.GetType().Name}). A sessão foi invalidada com segurança.");
             RecordActivity(
                 OperationalActivityLevel.Error,
                 "EngineHost",
@@ -316,6 +383,9 @@ public sealed partial class MainWindow : Window
     }
 
     private void VerifyLocalIntegrityButton_Click(object sender, RoutedEventArgs e)
+        => RunLocalIntegrityCheck();
+
+    private void RunLocalIntegrityCheck()
     {
         _integrityAttempted = true;
         try
@@ -348,6 +418,9 @@ public sealed partial class MainWindow : Window
     }
 
     private void PrepareDeviceIdentityButton_Click(object sender, RoutedEventArgs e)
+        => PrepareDeviceIdentity(showNotice: true);
+
+    private void PrepareDeviceIdentity(bool showNotice)
     {
         try
         {
@@ -359,10 +432,13 @@ public sealed partial class MainWindow : Window
                 "Identidade",
                 "Identidade TPM preparada",
                 "Uma chave ECDSA P-256 não exportável vinculada ao provedor TPM foi comprovada para esta instalação.");
-            OnboardingResultNotice.Severity = InfoBarSeverity.Success;
-            OnboardingResultNotice.Title = "Identidade local pronta";
-            OnboardingResultNotice.Message = "A chave TPM não exportável foi criada ou reaberta com sucesso. Nenhum fallback de software foi aplicado.";
-            OnboardingResultNotice.IsOpen = true;
+            if (showNotice)
+            {
+                OnboardingResultNotice.Severity = InfoBarSeverity.Success;
+                OnboardingResultNotice.Title = "Identidade local pronta";
+                OnboardingResultNotice.Message = "A chave TPM não exportável foi criada ou reaberta com sucesso. Nenhum fallback de software foi aplicado.";
+                OnboardingResultNotice.IsOpen = true;
+            }
         }
         catch (Exception ex)
         {
@@ -372,10 +448,13 @@ public sealed partial class MainWindow : Window
                 "Identidade",
                 "Identidade TPM bloqueada",
                 $"A identidade TPM não pôde ser comprovada ({ex.GetType().Name}); fallback de software não foi aplicado automaticamente.");
-            OnboardingResultNotice.Severity = InfoBarSeverity.Error;
-            OnboardingResultNotice.Title = "Identidade TPM indisponível";
-            OnboardingResultNotice.Message = $"Falha fechada ({ex.GetType().Name}). O AEVRIX não reduziu automaticamente o tier de segurança.";
-            OnboardingResultNotice.IsOpen = true;
+            if (showNotice)
+            {
+                OnboardingResultNotice.Severity = InfoBarSeverity.Error;
+                OnboardingResultNotice.Title = "Identidade TPM indisponível";
+                OnboardingResultNotice.Message = $"Falha fechada ({ex.GetType().Name}). O AEVRIX não reduziu automaticamente o tier de segurança.";
+                OnboardingResultNotice.IsOpen = true;
+            }
         }
 
         RefreshFirstRunView();
@@ -435,7 +514,7 @@ public sealed partial class MainWindow : Window
         if (_firstRunProfileError is not null || !evaluation.CanComplete)
         {
             OnboardingResultNotice.Severity = InfoBarSeverity.Warning;
-            OnboardingResultNotice.Title = "Inicialização ainda bloqueada";
+            OnboardingResultNotice.Title = "Ainda falta uma etapa";
             OnboardingResultNotice.Message = _firstRunProfileError is not null
                 ? "O perfil persistido precisa ser reparado antes da conclusão."
                 : evaluation.Summary;
@@ -447,8 +526,8 @@ public sealed partial class MainWindow : Window
         if (!TrySaveFirstRunProfile())
         {
             OnboardingResultNotice.Severity = InfoBarSeverity.Error;
-            OnboardingResultNotice.Title = "Não foi possível persistir a conclusão";
-            OnboardingResultNotice.Message = "O Desktop permanece em estado não concluído porque o perfil local não pôde ser gravado de forma confiável.";
+            OnboardingResultNotice.Title = "Não foi possível salvar a configuração";
+            OnboardingResultNotice.Message = "O AEVRIX permanece em estado não concluído porque o perfil local não pôde ser gravado de forma confiável.";
             OnboardingResultNotice.IsOpen = true;
             return;
         }
@@ -456,18 +535,21 @@ public sealed partial class MainWindow : Window
         RecordActivity(
             OperationalActivityLevel.Success,
             "Inicialização",
-            "First-run concluído",
+            "Configuração inicial concluída",
             $"A configuração inicial foi concluída para o modo {_firstRunProfile.RequestedMode}. Estados operacionais continuam sujeitos a prova em cada sessão.");
         OnboardingResultNotice.Severity = InfoBarSeverity.Success;
-        OnboardingResultNotice.Title = "Inicialização concluída";
-        OnboardingResultNotice.Message = "A configuração inicial foi persistida. Isso não substitui os health-checks e gates de runtime de cada sessão.";
+        OnboardingResultNotice.Title = "Pronto para começar";
+        OnboardingResultNotice.Message = "A configuração deste PC foi concluída. Você já pode iniciar uma nova investigação.";
         OnboardingResultNotice.IsOpen = true;
         RefreshFirstRunView();
     }
 
     private void ResetFirstRunProfileButton_Click(object sender, RoutedEventArgs e)
     {
-        var replacement = DesktopFirstRunProfile.CreateNew();
+        var replacement = DesktopFirstRunProfile.CreateNew() with
+        {
+            RequestedMode = DesktopOperatingMode.LocalSupervised
+        };
         try
         {
             _firstRunProfileStore.Save(replacement);
@@ -481,7 +563,7 @@ public sealed partial class MainWindow : Window
                 OperationalActivityLevel.Warning,
                 "Inicialização",
                 "Perfil local recriado",
-                "O perfil persistido de first-run foi substituído por um estado limpo; nenhuma confiança anterior foi reaproveitada.");
+                "O perfil persistido foi substituído por um estado limpo com modo local supervisionado como padrão recomendado.");
         }
         catch (Exception ex)
         {
@@ -598,7 +680,7 @@ public sealed partial class MainWindow : Window
 
         OnboardingSummaryText.Text = _firstRunProfileError is null
             ? evaluation.Summary
-            : $"Perfil local bloqueado ({_firstRunProfileError.GetType().Name}). Recrie o perfil antes de concluir.";
+            : $"O perfil local precisa ser reparado ({_firstRunProfileError.GetType().Name}).";
         CompleteOnboardingButton.IsEnabled = _firstRunProfileError is null && evaluation.CanComplete;
 
         FirstRunProfileNotice.IsOpen = _firstRunProfileError is not null;
@@ -608,11 +690,52 @@ public sealed partial class MainWindow : Window
         }
         ResetFirstRunProfileButton.Visibility = _firstRunProfileError is null ? Visibility.Collapsed : Visibility.Visible;
 
-        CommandCenterOnboardingStatusText.Text = _firstRunProfile.CompletedAtUtc is { } completed
-            ? $"Concluída • {completed.ToLocalTime():dd/MM/yyyy HH:mm}"
+        var completed = _firstRunProfile.CompletedAtUtc is not null;
+        CommandCenterOnboardingStatusText.Text = _firstRunProfile.CompletedAtUtc is { } completedAt
+            ? $"Pronta • {completedAt.ToLocalTime():dd/MM HH:mm}"
             : evaluation.CanComplete
-                ? "Pronta para concluir"
-                : "Pendente / bloqueada";
+                ? "Só falta confirmar"
+                : _guidedBootstrapStarted
+                    ? "Preparando automaticamente"
+                    : "Preparação pendente";
+
+        CommandCenterModeText.Text = _firstRunProfile.RequestedMode switch
+        {
+            DesktopOperatingMode.RemoteGoverned => "Remoto governado",
+            _ => "Local supervisionado"
+        };
+
+        if (_firstRunProfileError is not null)
+        {
+            CommandCenterNextStepTitleText.Text = "A configuração precisa de atenção";
+            CommandCenterNextStepDetailText.Text = "Abra a configuração inicial para reparar o perfil local antes de continuar.";
+            CommandCenterSetupButton.Content = "Corrigir configuração";
+            CommandCenterSetupButton.Visibility = Visibility.Visible;
+            StartAnalysisButton.IsEnabled = false;
+        }
+        else if (completed)
+        {
+            CommandCenterNextStepTitleText.Text = "Pronto para começar uma investigação";
+            CommandCenterNextStepDetailText.Text = "Informe o alvo e o objetivo. O AEVRIX já manterá o workspace, a política de dados e o ambiente local nos padrões recomendados.";
+            CommandCenterSetupButton.Visibility = Visibility.Collapsed;
+            StartAnalysisButton.IsEnabled = true;
+        }
+        else if (evaluation.CanComplete)
+        {
+            CommandCenterNextStepTitleText.Text = "Só falta sua confirmação";
+            CommandCenterNextStepDetailText.Text = "As verificações automáticas já estão prontas. Revise a configuração e confirme a postura de permissões para liberar o fluxo de investigação.";
+            CommandCenterSetupButton.Content = "Revisar e concluir";
+            CommandCenterSetupButton.Visibility = Visibility.Visible;
+            StartAnalysisButton.IsEnabled = false;
+        }
+        else
+        {
+            CommandCenterNextStepTitleText.Text = "Preparando este computador";
+            CommandCenterNextStepDetailText.Text = "O AEVRIX verifica integridade, identidade TPM e EngineHost automaticamente. Se alguma etapa exigir você, ela aparecerá aqui.";
+            CommandCenterSetupButton.Content = "Acompanhar preparação";
+            CommandCenterSetupButton.Visibility = Visibility.Visible;
+            StartAnalysisButton.IsEnabled = false;
+        }
 
         RefreshSettingsView();
     }
@@ -625,7 +748,7 @@ public sealed partial class MainWindow : Window
         statusText.Text = gate.Status switch
         {
             DesktopReadinessStatus.Ready => "PRONTO",
-            DesktopReadinessStatus.Blocked => "BLOQUEADO",
+            DesktopReadinessStatus.Blocked => "PRECISA DE ATENÇÃO",
             _ => "PENDENTE"
         };
         detailText.Text = gate.Detail;
@@ -635,31 +758,31 @@ public sealed partial class MainWindow : Window
     {
         SettingsInstallationIdText.Text = $"Installation ID: {_firstRunProfile.InstallationId}";
         SettingsCompletionText.Text = _firstRunProfile.CompletedAtUtc is { } completed
-            ? $"First-run concluído em {completed.ToLocalTime():dd/MM/yyyy HH:mm}."
-            : "First-run ainda não concluído.";
+            ? $"Configuração inicial concluída em {completed.ToLocalTime():dd/MM/yyyy HH:mm}."
+            : "Configuração inicial ainda não concluída.";
         SettingsModeText.Text = _firstRunProfile.RequestedMode switch
         {
-            DesktopOperatingMode.LocalSupervised => "Local supervisionado",
+            DesktopOperatingMode.LocalSupervised => "Local supervisionado (recomendado)",
             DesktopOperatingMode.RemoteGoverned => "Remoto governado",
-            _ => "Não selecionado"
+            _ => "Local supervisionado (recomendado)"
         };
         SettingsIdentityText.Text = _deviceSecurityTier switch
         {
             DeviceKeySecurityTier.TpmNonExportable => "TPM não exportável comprovado nesta sessão.",
             DeviceKeySecurityTier.SoftwareNonExportable => "Software não exportável comprovado nesta sessão.",
             _ when _deviceCertificateValidated => "Certificado do dispositivo validado; tier da chave local ainda não foi comprovado nesta sessão.",
-            _ => "Identidade local não comprovada nesta sessão."
+            _ => "Identidade local ainda não comprovada nesta sessão."
         };
         SettingsEngineText.Text = _engineAuthenticated
-            ? "EngineHost autenticado nesta sessão."
+            ? "Motor local autenticado e supervisionado nesta sessão."
             : _engineVerificationAttempted
-                ? "EngineHost sem prova autenticada válida nesta sessão."
-                : "EngineHost ainda não verificado nesta sessão.";
+                ? "Motor local sem prova autenticada válida nesta sessão."
+                : "Motor local ainda não verificado nesta sessão.";
         SettingsRemoteText.Text = _remoteSessionAuthenticated
             ? "Sessão remota autenticada."
             : !string.IsNullOrWhiteSpace(_firstRunProfile.RemoteBaseUri)
                 ? "Endpoint configurado, porém sessão remota não autenticada."
-                : "Endpoint remoto não configurado; sessão remota indisponível.";
+                : "Não configurados; não são necessários no modo local supervisionado.";
     }
 
     private void RenderAuthenticatedEngineState(string message)
@@ -668,7 +791,7 @@ public sealed partial class MainWindow : Window
             ? $"{message} Processo local supervisionado: PID {processId}."
             : message;
 
-        SetEngineStatus("Autenticado", detail);
+        SetEngineStatus("Pronto", detail);
     }
 
     private void SetEngineStatus(string status, string detail)
@@ -714,7 +837,7 @@ public sealed partial class MainWindow : Window
     private void BackToHomeButton_Click(object sender, RoutedEventArgs e)
     {
         RootNavigation.SelectedItem = HomeNavItem;
-        ShowSection("home", "Command Center");
+        ShowSection("home", "Visão geral");
     }
 
     private static EngineHostSupervisor CreateEngineSupervisor()
