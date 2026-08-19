@@ -2,19 +2,46 @@
     x:Class="AEVRIX.Desktop.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    RequestedTheme="Dark">
+    RequestedTheme="Light">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
 
-            <Color x:Key="AevrixSurfaceColor">#111821</Color>
-            <Color x:Key="AevrixPanelColor">#18222D</Color>
-            <Color x:Key="AevrixAccentColor">#45C8FF</Color>
+            <!-- AEVRIX product UI: light by default for clarity and long research sessions. -->
+            <Color x:Key="AevrixSurfaceColor">#F4F7FB</Color>
+            <Color x:Key="AevrixPanelColor">#FFFFFF</Color>
+            <Color x:Key="AevrixAccentColor">#087FC3</Color>
+            <Color x:Key="AevrixBorderColor">#DCE4EC</Color>
+            <Color x:Key="AevrixSubtleColor">#EEF3F7</Color>
+            <Color x:Key="AevrixSuccessColor">#18794E</Color>
+            <Color x:Key="AevrixWarningColor">#9A6700</Color>
+            <Color x:Key="AevrixDangerColor">#B42318</Color>
+
             <SolidColorBrush x:Key="AevrixSurfaceBrush" Color="{StaticResource AevrixSurfaceColor}" />
             <SolidColorBrush x:Key="AevrixPanelBrush" Color="{StaticResource AevrixPanelColor}" />
             <SolidColorBrush x:Key="AevrixAccentBrush" Color="{StaticResource AevrixAccentColor}" />
+            <SolidColorBrush x:Key="AevrixBorderBrush" Color="{StaticResource AevrixBorderColor}" />
+            <SolidColorBrush x:Key="AevrixSubtleBrush" Color="{StaticResource AevrixSubtleColor}" />
+            <SolidColorBrush x:Key="AevrixSuccessBrush" Color="{StaticResource AevrixSuccessColor}" />
+            <SolidColorBrush x:Key="AevrixWarningBrush" Color="{StaticResource AevrixWarningColor}" />
+            <SolidColorBrush x:Key="AevrixDangerBrush" Color="{StaticResource AevrixDangerColor}" />
+
+            <!-- Keep controls spacious and readable without making every page feel like a diagnostic console. -->
+            <Style TargetType="Button">
+                <Setter Property="MinHeight" Value="38" />
+                <Setter Property="Padding" Value="14,8" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style TargetType="TextBox">
+                <Setter Property="MinHeight" Value="40" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style TargetType="ComboBox">
+                <Setter Property="MinHeight" Value="40" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
