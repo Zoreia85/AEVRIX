@@ -4,13 +4,16 @@
     <RootNamespace>AEVRIX.Desktop</RootNamespace>
     <AssemblyName>AEVRIX.Desktop</AssemblyName>
     <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <AppxPackage>false</AppxPackage>
     <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Platforms>x64;ARM64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
-    <ProjectReference Include="..\AEVRIX.Core\AEVRIX.Core.csproj" />
-    <ProjectReference Include="..\AEVRIX.EngineHost\AEVRIX.EngineHost.csproj" />
+    <ProjectReference Include="..\AEVRIX.Core\AEVRIX.Core.csproj" GlobalPropertiesToRemove="WindowsAppSDKSelfContained" />
+    <ProjectReference Include="..\AEVRIX.EngineHost\AEVRIX.EngineHost.csproj" GlobalPropertiesToRemove="WindowsAppSDKSelfContained" />
   </ItemGroup>
 </Project>
