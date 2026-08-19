@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <Grid Padding="28" RowSpacing="14" MaxWidth="1440" HorizontalAlignment="Stretch">
+    <Grid Padding="40,32" RowSpacing="16" MaxWidth="1440" HorizontalAlignment="Stretch">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -12,9 +12,9 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Spacing="7">
-            <TextBlock Text="RESEARCH BROWSER" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-            <TextBlock Text="Navegação isolada por projeto" FontSize="32" FontWeight="SemiBold" />
-            <TextBlock Text="Cada projeto web usa sua própria pasta de sessão do WebView2. Navegação fora da allowlist HTTPS é cancelada antes de sair do limite governado." FontSize="15" Opacity="0.72" TextWrapping="Wrap" />
+            <TextBlock Text="NAVEGADOR DE PESQUISA" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+            <TextBlock Text="Abra o site do projeto com isolamento" FontSize="34" FontWeight="SemiBold" />
+            <TextBlock Text="Selecione o projeto e navegue apenas dentro dos endereços permitidos. Sessão, histórico e cookies permanecem isolados por projeto." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
         </StackPanel>
 
         <InfoBar x:Name="BrowserNotice"
@@ -22,10 +22,10 @@
                  IsOpen="True"
                  IsClosable="False"
                  Severity="Informational"
-                 Title="Host interativo governado"
-                 Message="Abrir o Research Browser não autoriza credenciais, captura ou automação. Downloads e novas janelas ficam bloqueados nesta etapa; autenticação automática permanece sujeita aos gates do projeto." />
+                 Title="A navegação segue a política do projeto"
+                 Message="O AEVRIX bloqueia saídas da allowlist HTTPS, downloads e novas janelas quando a política não permitir. Abrir o navegador não autoriza captura nem uso de credenciais por si só." />
 
-        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="16">
+        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="18">
             <Grid RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -40,19 +40,21 @@
                     </Grid.ColumnDefinitions>
                     <ComboBox x:Name="ProjectSelector"
                               Grid.Column="0"
-                              Header="Projeto web"
+                              Header="Projeto"
                               PlaceholderText="Selecione um projeto"
                               SelectionChanged="ProjectSelector_SelectionChanged"
                               AutomationProperties.Name="Selecionar projeto do Research Browser" />
                     <TextBox x:Name="AddressInput"
                              Grid.Column="1"
-                             Header="Endereço HTTPS"
-                             PlaceholderText="https://portal.exemplo.com/"
+                             Header="Endereço"
+                             PlaceholderText="O endereço inicial vem do projeto e pode ser ajustado dentro da política"
                              KeyDown="AddressInput_KeyDown"
                              AutomationProperties.Name="Endereço do Research Browser" />
                     <Button Grid.Column="2"
                             VerticalAlignment="Bottom"
                             Content="Abrir"
+                            Background="{StaticResource AevrixAccentBrush}"
+                            Foreground="White"
                             Click="OpenAddressButton_Click"
                             AutomationProperties.Name="Abrir endereço permitido" />
                 </Grid>
@@ -68,10 +70,10 @@
                     <Button x:Name="BackButton" Grid.Column="0" Content="Voltar" Click="BackButton_Click" IsEnabled="False" />
                     <Button x:Name="ForwardButton" Grid.Column="1" Content="Avançar" Click="ForwardButton_Click" IsEnabled="False" />
                     <Button x:Name="ReloadButton" Grid.Column="2" Content="Recarregar" Click="ReloadButton_Click" IsEnabled="False" />
-                    <Button x:Name="HomeButton" Grid.Column="3" Content="Entrada do projeto" Click="HomeButton_Click" IsEnabled="False" />
+                    <Button x:Name="HomeButton" Grid.Column="3" Content="Página inicial" Click="HomeButton_Click" IsEnabled="False" />
                     <TextBlock x:Name="BrowserStatusText"
                                Grid.Column="4"
-                               Text="Nenhum projeto carregado."
+                               Text="Selecione um projeto para começar."
                                VerticalAlignment="Center"
                                HorizontalAlignment="Right"
                                Opacity="0.65"
@@ -80,11 +82,11 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="3" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="2" MinHeight="480">
+        <Border Grid.Row="3" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="2" MinHeight="480">
             <Grid x:Name="BrowserHost">
-                <StackPanel x:Name="BrowserEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-                    <TextBlock Text="Research Browser aguardando projeto" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                    <TextBlock Text="Somente projetos Web com política de navegador válida podem inicializar uma sessão." Opacity="0.65" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="560" />
+                <StackPanel x:Name="BrowserEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" MaxWidth="620">
+                    <TextBlock Text="Selecione um projeto para começar" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    <TextBlock Text="Se ainda não houver projeto Web, comece em Nova investigação. Quando o projeto estiver pronto, o endereço inicial e os limites de navegação aparecerão aqui." Opacity="0.68" TextAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>
             </Grid>
         </Border>
