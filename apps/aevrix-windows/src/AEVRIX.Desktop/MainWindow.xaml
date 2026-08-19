@@ -7,6 +7,8 @@
         <NavigationView
             x:Name="RootNavigation"
             PaneDisplayMode="Left"
+            OpenPaneLength="250"
+            CompactPaneLength="48"
             IsBackButtonVisible="Collapsed"
             IsSettingsVisible="False"
             PaneTitle="AEVRIX"
@@ -14,23 +16,30 @@
             AutomationProperties.Name="Navegação principal do AEVRIX">
 
             <NavigationView.MenuItems>
-                <NavigationViewItem x:Name="HomeNavItem" Content="Command Center" Tag="home" IsSelected="True" />
-                <NavigationViewItem x:Name="OnboardingNavItem" Content="Inicialização segura" Tag="onboarding" />
-                <NavigationViewItem Content="Projetos" Tag="projects" />
+                <NavigationViewItemHeader Content="INÍCIO" />
+                <NavigationViewItem x:Name="HomeNavItem" Content="Visão geral" Tag="home" IsSelected="True" />
+                <NavigationViewItem x:Name="OnboardingNavItem" Content="Configuração inicial" Tag="onboarding" />
+
+                <NavigationViewItemHeader Content="TRABALHO" />
                 <NavigationViewItem x:Name="NewInvestigationNavItem" Content="Nova investigação" Tag="new" />
-                <NavigationViewItem x:Name="MissionControlNavItem" Content="Mission Control" Tag="mission" />
+                <NavigationViewItem Content="Projetos e acessos" Tag="projects" />
+                <NavigationViewItem Content="Navegador de pesquisa" Tag="browser" />
                 <NavigationViewItem Content="Evidências" Tag="evidence" />
                 <NavigationViewItem Content="Blueprint" Tag="blueprint" />
-                <NavigationViewItem Content="Research Browser" Tag="browser" />
+
+                <NavigationViewItemHeader Content="OPERAÇÃO" />
+                <NavigationViewItem x:Name="MissionControlNavItem" Content="Execução e missões" Tag="mission" />
+                <NavigationViewItem x:Name="ActivityNavItem" Content="Histórico" Tag="activity" />
+
+                <NavigationViewItemHeader Content="SISTEMA" />
                 <NavigationViewItem Content="Especialistas / Adapters" Tag="specialists" />
-                <NavigationViewItem x:Name="ActivityNavItem" Content="Activity / Proof Ledger" Tag="activity" />
                 <NavigationViewItem Content="Integrações" Tag="integrations" />
-                <NavigationViewItem x:Name="SettingsNavItem" Content="Configurações / Segurança" Tag="settings" />
+                <NavigationViewItem x:Name="SettingsNavItem" Content="Configurações e segurança" Tag="settings" />
             </NavigationView.MenuItems>
 
             <Grid>
                 <ScrollViewer x:Name="CommandCenterView">
-                    <Grid Padding="32" RowSpacing="24" MaxWidth="1320" HorizontalAlignment="Stretch">
+                    <Grid Padding="40,32" RowSpacing="20" MaxWidth="1280" HorizontalAlignment="Stretch">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -39,85 +48,83 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Spacing="8">
-                            <TextBlock Text="COMMAND CENTER" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-                            <TextBlock Text="Centro operacional" FontSize="34" FontWeight="SemiBold" />
-                            <TextBlock Text="Visão governada da estação Windows, do cérebro remoto e das missões em execução." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        <StackPanel Grid.Row="0" Spacing="6">
+                            <TextBlock Text="AEVRIX" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="O que você quer fazer agora?" FontSize="36" FontWeight="SemiBold" />
+                            <TextBlock Text="O AEVRIX prepara automaticamente o ambiente seguro e mostra somente o próximo passo necessário." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Warning" Title="NOT_HOMOLOGATED" Message="Este shell é uma superfície em desenvolvimento. Estados não verificados permanecem restritos ou indisponíveis." />
+                        <Border Grid.Row="1" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="28">
+                            <Grid ColumnSpacing="28">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="10">
+                                    <TextBlock Text="PRÓXIMO PASSO" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                                    <TextBlock x:Name="CommandCenterNextStepTitleText" Text="Preparando este computador" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="CommandCenterNextStepDetailText" Text="O AEVRIX está verificando os componentes locais. Você será chamado somente quando uma confirmação humana for necessária." FontSize="15" Opacity="0.72" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
+                                        <Button x:Name="CommandCenterSetupButton" Content="Ver configuração" Click="OpenOnboardingButton_Click" AutomationProperties.Name="Abrir configuração inicial recomendada" />
+                                        <Button x:Name="StartAnalysisButton" Content="Nova investigação" Background="{StaticResource AevrixAccentBrush}" Foreground="White" Click="StartAnalysisButton_Click" AutomationProperties.Name="Preparar nova análise autorizada" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{StaticResource AevrixSubtleBrush}" CornerRadius="12" Padding="18">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="Configuração recomendada" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="CommandCenterModeText" Text="Local supervisionado" FontSize="20" />
+                                        <TextBlock Text="Padrão seguro para este PC. Você pode alterar quando quiser em Configuração inicial." Opacity="0.68" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
 
                         <Grid Grid.Row="2" ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="EngineHost" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="EngineHostStatusText" Text="Não iniciado" FontSize="22" />
-                                    <TextBlock x:Name="EngineHostDetailText" Text="Sem prova de sessão autenticada nesta tela." Opacity="0.65" TextWrapping="Wrap" />
-                                    <TextBlock Text="Liveness: 1 s • prova autenticada: 5 s" Opacity="0.5" TextWrapping="Wrap" />
-                                    <Button x:Name="VerifyEngineHostButton" Content="Verificar EngineHost" HorizontalAlignment="Left" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost autenticado" />
-                                    <Button x:Name="RestartEngineHostButton" Content="Reiniciar EngineHost" HorizontalAlignment="Left" Click="RestartEngineHostButton_Click" AutomationProperties.Name="Reiniciar EngineHost supervisionado" />
-                                    <Button x:Name="StopEngineHostButton" Content="Parar EngineHost" HorizontalAlignment="Left" IsEnabled="False" Click="StopEngineHostButton_Click" AutomationProperties.Name="Parar EngineHost supervisionado" />
+                            <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="20">
+                                <StackPanel Spacing="7">
+                                    <TextBlock Text="Motor local" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="EngineHostStatusText" Text="Verificando" FontSize="24" />
+                                    <TextBlock x:Name="EngineHostDetailText" Text="O AEVRIX fará a verificação automaticamente." Opacity="0.66" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                                        <Button x:Name="VerifyEngineHostButton" Content="Verificar" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost autenticado" />
+                                        <Button x:Name="RestartEngineHostButton" Content="Reiniciar" Click="RestartEngineHostButton_Click" AutomationProperties.Name="Reiniciar EngineHost supervisionado" />
+                                        <Button x:Name="StopEngineHostButton" Content="Parar" IsEnabled="False" Click="StopEngineHostButton_Click" AutomationProperties.Name="Parar EngineHost supervisionado" />
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="Cérebro remoto" FontWeight="SemiBold" />
-                                    <TextBlock Text="Não verificado" FontSize="22" />
-                                    <TextBlock Text="Conectividade e identidade ainda não foram consultadas." Opacity="0.65" TextWrapping="Wrap" />
+
+                            <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="20">
+                                <StackPanel Spacing="7">
+                                    <TextBlock Text="Configuração inicial" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="CommandCenterOnboardingStatusText" Text="Preparando" FontSize="24" />
+                                    <TextBlock Text="Integridade, TPM, EngineHost e modo local são preparados automaticamente. Confirmações continuam sob seu controle." Opacity="0.66" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Column="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="Postura de segurança" FontWeight="SemiBold" />
-                                    <TextBlock Text="Restrita" FontSize="22" />
-                                    <TextBlock Text="Nenhum gate de runtime é inferido pela interface." Opacity="0.65" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                            <Border Grid.Column="3" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="18">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="Missões" FontWeight="SemiBold" />
-                                    <TextBlock Text="0 ativas" FontSize="22" />
-                                    <TextBlock Text="Nenhuma missão é inferida sem vínculo real com o orquestrador." Opacity="0.65" TextWrapping="Wrap" />
-                                    <Button Content="Abrir Mission Control" HorizontalAlignment="Left" Click="OpenMissionControlButton_Click" AutomationProperties.Name="Abrir Mission Control" />
+
+                            <Border Grid.Column="2" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="20">
+                                <StackPanel Spacing="7">
+                                    <TextBlock Text="Trabalho" FontWeight="SemiBold" />
+                                    <TextBlock Text="0 investigações ativas" FontSize="24" />
+                                    <TextBlock Text="Quando a configuração estiver concluída, comece por Nova investigação. O restante do fluxo será guiado." Opacity="0.66" TextWrapping="Wrap" />
+                                    <Button Content="Abrir execução" HorizontalAlignment="Left" Click="OpenMissionControlButton_Click" AutomationProperties.Name="Abrir Mission Control" />
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <Grid Grid.Row="3" ColumnSpacing="16">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="2*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="Começar trabalho autorizado" FontSize="22" FontWeight="SemiBold" />
-                                    <TextBlock Text="O fluxo de investigação somente pode avançar depois de escopo, autorização e sensibilidade serem validados." Opacity="0.72" TextWrapping="Wrap" />
-                                    <Button x:Name="StartAnalysisButton" Content="Preparar nova análise autorizada" HorizontalAlignment="Left" Click="StartAnalysisButton_Click" AutomationProperties.Name="Preparar nova análise autorizada" />
-                                </StackPanel>
-                            </Border>
-                            <Border Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
-                                <StackPanel Spacing="10">
-                                    <TextBlock Text="Inicialização segura" FontSize="22" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="CommandCenterOnboardingStatusText" Text="Não concluída" FontSize="20" />
-                                    <TextBlock Text="Integridade estrutural, EngineHost autenticado, identidade do dispositivo, modo e postura de permissões." Opacity="0.65" TextWrapping="Wrap" />
-                                    <Button Content="Abrir inicialização segura" HorizontalAlignment="Left" Click="OpenOnboardingButton_Click" AutomationProperties.Name="Abrir inicialização segura" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
+                        <InfoBar Grid.Row="3" IsOpen="True" IsClosable="False" Severity="Informational" Title="Versão de testes" Message="Este Canary já possui instalação e primeira execução validadas, mas ainda não representa homologação pública final." />
 
-                        <TextBlock Grid.Row="4" Text="AEVRIX Desktop • build de desenvolvimento • evidência antes de confiança" Opacity="0.5" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Row="4" Text="Configurações avançadas e diagnósticos ficam disponíveis no menu Sistema." Opacity="0.56" HorizontalAlignment="Center" />
                     </Grid>
                 </ScrollViewer>
 
                 <ScrollViewer x:Name="OnboardingView" Visibility="Collapsed">
-                    <Grid Padding="32" RowSpacing="20" MaxWidth="1120" HorizontalAlignment="Stretch">
+                    <Grid Padding="40,32" RowSpacing="20" MaxWidth="1120" HorizontalAlignment="Stretch">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -126,15 +133,15 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Spacing="8">
-                            <TextBlock Text="INICIALIZAÇÃO SEGURA" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-                            <TextBlock Text="Preparar esta estação sem inferir confiança" FontSize="34" FontWeight="SemiBold" />
-                            <TextBlock Text="Cada gate precisa de evidência local ou remota correspondente. O modo remoto não pode ser concluído enquanto endpoint, certificado e sessão não forem comprovados." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        <StackPanel Grid.Row="0" Spacing="7">
+                            <TextBlock Text="CONFIGURAÇÃO INICIAL" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Deixe o AEVRIX preparar este PC" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="As verificações seguras são executadas automaticamente. Você só precisa revisar o modo escolhido e confirmar as decisões que exigem sua autorização." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <InfoBar x:Name="FirstRunProfileNotice" Grid.Row="1" IsOpen="False" IsClosable="False" Severity="Error" Title="Perfil local bloqueado" Message="O estado persistido da inicialização não pôde ser validado." />
+                        <InfoBar x:Name="FirstRunProfileNotice" Grid.Row="1" IsOpen="False" IsClosable="False" Severity="Error" Title="Perfil local precisa de atenção" Message="O estado persistido não pôde ser validado." />
 
-                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="24">
+                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="26">
                             <StackPanel Spacing="18">
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
@@ -142,89 +149,84 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="Readiness desta execução" FontSize="24" FontWeight="SemiBold" />
-                                        <TextBlock x:Name="OnboardingSummaryText" Text="Verificações pendentes." Opacity="0.7" TextWrapping="Wrap" />
+                                        <TextBlock Text="Progresso da preparação" FontSize="24" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="OnboardingSummaryText" Text="Preparando automaticamente..." Opacity="0.7" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" x:Name="ResetFirstRunProfileButton" Content="Recriar perfil local" Visibility="Collapsed" Click="ResetFirstRunProfileButton_Click" AutomationProperties.Name="Recriar perfil local de inicialização" />
+                                    <Button Grid.Column="1" x:Name="ResetFirstRunProfileButton" Content="Recriar perfil" Visibility="Collapsed" Click="ResetFirstRunProfileButton_Click" AutomationProperties.Name="Recriar perfil local de inicialização" />
                                 </Grid>
 
-                                <Border Height="1" Background="{StaticResource AevrixAccentBrush}" Opacity="0.2" />
+                                <Border Height="1" Background="{StaticResource AevrixBorderBrush}" />
 
                                 <Grid ColumnSpacing="18">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="1. Integridade estrutural local" FontWeight="SemiBold" />
-                                        <TextBlock x:Name="IntegrityGateStatusText" Text="PENDENTE" FontSize="18" />
-                                        <TextBlock x:Name="IntegrityGateDetailText" Text="Ainda não verificada." Opacity="0.65" TextWrapping="Wrap" />
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <TextBlock Text="Integridade do aplicativo" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="IntegrityGateStatusText" Text="VERIFICANDO" FontSize="18" />
+                                        <TextBlock x:Name="IntegrityGateDetailText" Text="A verificação será executada automaticamente." Opacity="0.65" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Verificar estrutura" Click="VerifyLocalIntegrityButton_Click" AutomationProperties.Name="Verificar integridade estrutural local" />
+                                    <Button Grid.Column="1" Content="Verificar novamente" Click="VerifyLocalIntegrityButton_Click" AutomationProperties.Name="Verificar integridade estrutural local" />
                                 </Grid>
 
                                 <Grid ColumnSpacing="18">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="2. EngineHost autenticado" FontWeight="SemiBold" />
-                                        <TextBlock x:Name="EngineGateStatusText" Text="PENDENTE" FontSize="18" />
-                                        <TextBlock x:Name="EngineGateDetailText" Text="Ainda não verificado." Opacity="0.65" TextWrapping="Wrap" />
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <TextBlock Text="Motor local" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="EngineGateStatusText" Text="VERIFICANDO" FontSize="18" />
+                                        <TextBlock x:Name="EngineGateDetailText" Text="O EngineHost será iniciado e autenticado automaticamente." Opacity="0.65" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" x:Name="OnboardingVerifyEngineButton" Content="Verificar EngineHost" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost para inicialização" />
+                                    <Button Grid.Column="1" x:Name="OnboardingVerifyEngineButton" Content="Verificar novamente" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost para inicialização" />
                                 </Grid>
 
                                 <Grid ColumnSpacing="18">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="3. Identidade do dispositivo" FontWeight="SemiBold" />
-                                        <TextBlock x:Name="DeviceIdentityGateStatusText" Text="PENDENTE" FontSize="18" />
-                                        <TextBlock x:Name="DeviceIdentityGateDetailText" Text="Nenhuma chave foi comprovada nesta execução." Opacity="0.65" TextWrapping="Wrap" />
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <TextBlock Text="Identidade segura deste dispositivo" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="DeviceIdentityGateStatusText" Text="VERIFICANDO" FontSize="18" />
+                                        <TextBlock x:Name="DeviceIdentityGateDetailText" Text="O AEVRIX tentará preparar a chave TPM local automaticamente, sem fallback silencioso." Opacity="0.65" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" x:Name="PrepareDeviceIdentityButton" Content="Preparar identidade TPM" Click="PrepareDeviceIdentityButton_Click" AutomationProperties.Name="Preparar identidade TPM não exportável" />
+                                    <Button Grid.Column="1" x:Name="PrepareDeviceIdentityButton" Content="Preparar novamente" Click="PrepareDeviceIdentityButton_Click" AutomationProperties.Name="Preparar identidade TPM não exportável" />
                                 </Grid>
 
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="4. Modo operacional" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="OperatingModeGateStatusText" Text="PENDENTE" FontSize="18" />
-                                    <TextBlock x:Name="OperatingModeGateDetailText" Text="Selecione um modo." Opacity="0.65" TextWrapping="Wrap" />
-                                    <ComboBox x:Name="OperatingModeInput" Header="Modo" PlaceholderText="Selecione explicitamente" SelectionChanged="OperatingModeInput_SelectionChanged" AutomationProperties.Name="Modo operacional">
-                                        <ComboBoxItem Content="Local supervisionado" Tag="local" />
-                                        <ComboBoxItem Content="Remoto governado" Tag="remote" />
-                                    </ComboBox>
+                                <Border Background="{StaticResource AevrixSubtleBrush}" CornerRadius="12" Padding="18">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="Modo recomendado" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="OperatingModeGateStatusText" Text="LOCAL SUPERVISIONADO" FontSize="18" />
+                                        <TextBlock x:Name="OperatingModeGateDetailText" Text="Selecionado por padrão para este PC; capacidades remotas continuam desabilitadas." Opacity="0.65" TextWrapping="Wrap" />
+                                        <ComboBox x:Name="OperatingModeInput" Header="Alterar modo, se necessário" PlaceholderText="Selecione" SelectionChanged="OperatingModeInput_SelectionChanged" AutomationProperties.Name="Modo operacional">
+                                            <ComboBoxItem Content="Local supervisionado (recomendado)" Tag="local" />
+                                            <ComboBoxItem Content="Remoto governado" Tag="remote" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Border>
+
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="Identidade e sessão remotas" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="RemoteIdentityGateStatusText" Text="NÃO NECESSÁRIO NO MODO LOCAL" FontSize="18" />
+                                    <TextBlock x:Name="RemoteIdentityGateDetailText" Text="O modo local não depende de endpoint remoto." Opacity="0.65" TextWrapping="Wrap" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="5. Identidade e sessão remotas" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="RemoteIdentityGateStatusText" Text="PENDENTE" FontSize="18" />
-                                    <TextBlock x:Name="RemoteIdentityGateDetailText" Text="Estado remoto não comprovado." Opacity="0.65" TextWrapping="Wrap" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="6. Postura de permissões" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="PermissionsGateStatusText" Text="PENDENTE" FontSize="18" />
-                                    <TextBlock x:Name="PermissionsGateDetailText" Text="Reconhecimento pendente." Opacity="0.65" TextWrapping="Wrap" />
-                                    <CheckBox x:Name="PermissionsAcknowledgementCheckBox" Content="Entendo que o Desktop não eleva privilégios, não desativa isolamento e não ignora políticas automaticamente." Checked="PermissionsAcknowledgementCheckBox_Changed" Unchecked="PermissionsAcknowledgementCheckBox_Changed" AutomationProperties.Name="Reconhecer postura de permissões" />
-                                </StackPanel>
+                                <Border Background="{StaticResource AevrixSubtleBrush}" CornerRadius="12" Padding="18">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="Sua confirmação" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="PermissionsGateStatusText" Text="PENDENTE" FontSize="18" />
+                                        <TextBlock x:Name="PermissionsGateDetailText" Text="Esta confirmação não é preenchida automaticamente." Opacity="0.65" TextWrapping="Wrap" />
+                                        <CheckBox x:Name="PermissionsAcknowledgementCheckBox" Content="Confirmo que o AEVRIX não deve elevar privilégios, desativar isolamento ou ignorar políticas automaticamente." Checked="PermissionsAcknowledgementCheckBox_Changed" Unchecked="PermissionsAcknowledgementCheckBox_Changed" AutomationProperties.Name="Reconhecer postura de permissões" />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Border>
 
-                        <InfoBar x:Name="OnboardingResultNotice" Grid.Row="3" IsOpen="False" IsClosable="True" Severity="Informational" Title="Inicialização" />
+                        <InfoBar x:Name="OnboardingResultNotice" Grid.Row="3" IsOpen="False" IsClosable="True" Severity="Informational" Title="Configuração" />
 
                         <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12">
-                            <Button x:Name="CompleteOnboardingButton" Content="Concluir inicialização" IsEnabled="False" Click="CompleteOnboardingButton_Click" AutomationProperties.Name="Concluir inicialização segura" />
-                            <Button Content="Ir ao Command Center" Click="BackToHomeButton_Click" AutomationProperties.Name="Ir ao Command Center sem concluir" />
+                            <Button x:Name="CompleteOnboardingButton" Content="Concluir configuração" IsEnabled="False" Background="{StaticResource AevrixAccentBrush}" Foreground="White" Click="CompleteOnboardingButton_Click" AutomationProperties.Name="Concluir inicialização segura" />
+                            <Button Content="Voltar para visão geral" Click="BackToHomeButton_Click" AutomationProperties.Name="Ir ao Command Center sem concluir" />
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
 
                 <ScrollViewer x:Name="NewInvestigationView" Visibility="Collapsed">
-                    <Grid Padding="32" RowSpacing="24" MaxWidth="1080" HorizontalAlignment="Stretch">
+                    <Grid Padding="40,32" RowSpacing="20" MaxWidth="1080" HorizontalAlignment="Stretch">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -232,43 +234,42 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Spacing="8">
+                        <StackPanel Grid.Row="0" Spacing="7">
                             <TextBlock Text="NOVA INVESTIGAÇÃO" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-                            <TextBlock Text="Preparar escopo autorizado" FontSize="34" FontWeight="SemiBold" />
-                            <TextBlock Text="Defina contexto e intenção antes de qualquer coleta, execução ou instrumentação." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                            <TextBlock Text="Diga ao AEVRIX o que deve ser analisado" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="O sistema já prepara workspace e política de dados padrão. Você informa apenas o que não pode ser inferido com segurança." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Warning" Title="Execução bloqueada por padrão" Message="Esta tela ainda não está vinculada ao motor de políticas. Preencher campos não concede autorização e não inicia uma missão." />
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Autorização continua explícita" Message="Defaults reduzem preenchimento, mas nunca substituem sua declaração de autorização para o alvo." />
 
-                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="24">
+                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="26">
                             <StackPanel Spacing="18">
-                                <TextBlock Text="1. Escopo e autorização" FontSize="22" FontWeight="SemiBold" />
-                                <ComboBox x:Name="AuthorizationClassInput" Header="Classe de autorização" PlaceholderText="Selecione a classe declarada" AutomationProperties.Name="Classe de autorização">
-                                    <ComboBoxItem Content="Sistema próprio" Tag="owned" />
-                                    <ComboBoxItem Content="Explicitamente autorizado" Tag="authorized" />
-                                    <ComboBoxItem Content="Terceiro — clean-room" Tag="clean-room" />
+                                <TextBlock Text="Informações essenciais" FontSize="22" FontWeight="SemiBold" />
+                                <ComboBox x:Name="AuthorizationClassInput" Header="Qual é sua autorização sobre este alvo?" PlaceholderText="Selecione explicitamente" AutomationProperties.Name="Classe de autorização">
+                                    <ComboBoxItem Content="É um sistema próprio" Tag="owned" />
+                                    <ComboBoxItem Content="Tenho autorização explícita" Tag="authorized" />
+                                    <ComboBoxItem Content="Análise de terceiro em clean-room" Tag="clean-room" />
                                 </ComboBox>
-                                <TextBox x:Name="WorkspaceInput" Header="Projeto / workspace" PlaceholderText="Identificador do workspace" AutomationProperties.Name="Projeto ou workspace" />
-                                <TextBox x:Name="TargetInput" Header="Alvo ou fonte" PlaceholderText="Arquivo, aplicação, repositório, API ou outra fonte autorizada" TextWrapping="Wrap" AutomationProperties.Name="Alvo ou fonte" />
-                                <TextBox x:Name="GoalsInput" Header="Objetivos da análise" PlaceholderText="O que precisa ser observado, validado ou reconstruído?" AcceptsReturn="True" MinHeight="96" TextWrapping="Wrap" AutomationProperties.Name="Objetivos da análise" />
-                                <ComboBox x:Name="SensitivityInput" Header="Sensibilidade dos dados" PlaceholderText="Selecione a política de dados" AutomationProperties.Name="Sensibilidade dos dados">
-                                    <ComboBoxItem Content="Padrão" Tag="standard" />
+                                <TextBox x:Name="WorkspaceInput" Header="Workspace" PlaceholderText="Gerado automaticamente" AutomationProperties.Name="Projeto ou workspace" />
+                                <TextBox x:Name="TargetInput" Header="O que será analisado?" PlaceholderText="URL, arquivo, aplicativo, repositório, API ou outra fonte autorizada" TextWrapping="Wrap" AutomationProperties.Name="Alvo ou fonte" />
+                                <TextBox x:Name="GoalsInput" Header="O que você quer descobrir ou reconstruir?" PlaceholderText="Descreva o resultado esperado em linguagem simples" AcceptsReturn="True" MinHeight="96" TextWrapping="Wrap" AutomationProperties.Name="Objetivos da análise" />
+                                <ComboBox x:Name="SensitivityInput" Header="Sensibilidade dos dados" PlaceholderText="Padrão do sistema" AutomationProperties.Name="Sensibilidade dos dados">
+                                    <ComboBoxItem Content="Padrão (recomendado)" Tag="standard" />
                                     <ComboBoxItem Content="Confidencial" Tag="confidential" />
                                     <ComboBoxItem Content="Dados pessoais / restritos" Tag="restricted" />
                                 </ComboBox>
-                                <Border Height="1" Background="{StaticResource AevrixAccentBrush}" Opacity="0.2" />
-                                <TextBlock Text="Etapas seguintes quando a política estiver conectada: plano de especialistas/adapters → revisão → validação de autoridade → início governado." Opacity="0.7" TextWrapping="Wrap" />
-                                <Button Content="Validar escopo e autorização" HorizontalAlignment="Left" Click="ValidateScopeButton_Click" AutomationProperties.Name="Validar escopo e autorização" />
-                                <InfoBar x:Name="PolicyUnavailableNotice" IsOpen="False" IsClosable="True" Severity="Informational" Title="Validação ainda indisponível" Message="O motor real de políticas ainda não está conectado a esta superfície. Nenhuma autorização foi concedida e nenhuma missão foi criada." />
+                                <TextBlock Text="Você poderá revisar e alterar essas escolhas antes de qualquer execução." Opacity="0.65" TextWrapping="Wrap" />
+                                <Button Content="Revisar e continuar" HorizontalAlignment="Left" Background="{StaticResource AevrixAccentBrush}" Foreground="White" Click="ValidateScopeButton_Click" AutomationProperties.Name="Validar escopo e autorização" />
+                                <InfoBar x:Name="PolicyUnavailableNotice" IsOpen="False" IsClosable="True" Severity="Informational" Title="Motor de políticas ainda não conectado" Message="Esta versão não iniciará missão automaticamente. Nenhuma autorização é inferida a partir dos campos." />
                             </StackPanel>
                         </Border>
 
-                        <Button Grid.Row="3" Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
+                        <Button Grid.Row="3" Content="Voltar para visão geral" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
                     </Grid>
                 </ScrollViewer>
 
                 <ScrollViewer x:Name="MissionControlView" Visibility="Collapsed">
-                    <Grid Padding="32" RowSpacing="24" MaxWidth="1180" HorizontalAlignment="Stretch">
+                    <Grid Padding="40,32" RowSpacing="20" MaxWidth="1180" HorizontalAlignment="Stretch">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -276,89 +277,75 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Spacing="8">
-                            <TextBlock Text="MISSION CONTROL" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-                            <TextBlock Text="Estado operacional verificável" FontSize="34" FontWeight="SemiBold" />
-                            <TextBlock Text="Acompanhe somente estados que a aplicação consegue sustentar com evidência local. Capacidades remotas continuam bloqueadas até integração real." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        <StackPanel Grid.Row="0" Spacing="7">
+                            <TextBlock Text="EXECUÇÃO E MISSÕES" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Acompanhe o que o AEVRIX está fazendo" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Esta tela mostra apenas estados comprovados. Se algo não estiver verificado, o AEVRIX mantém a capacidade bloqueada." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Fail-closed" Message="Ausência de prova nunca é convertida em estado saudável. O painel distingue explicitamente não verificado, autenticado, interrompido e bloqueado." />
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Sem suposições" Message="Ausência de prova nunca é exibida como estado saudável." />
 
                         <Grid Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
 
-                            <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
-                                <StackPanel Spacing="9">
-                                    <TextBlock Text="EngineHost local" FontWeight="SemiBold" />
+                            <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Motor local" FontWeight="SemiBold" />
                                     <TextBlock x:Name="MissionEngineStatusText" Text="Não iniciado" FontSize="26" />
                                     <TextBlock x:Name="MissionEngineDetailText" Text="Nenhuma sessão autenticada foi comprovada." Opacity="0.68" TextWrapping="Wrap" />
-                                    <Button Content="Gerenciar no Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Gerenciar EngineHost no Command Center" />
+                                    <Button Content="Gerenciar na visão geral" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Gerenciar EngineHost no Command Center" />
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
-                                <StackPanel Spacing="9">
+                            <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
+                                <StackPanel Spacing="8">
                                     <TextBlock Text="Cérebro remoto" FontWeight="SemiBold" />
-                                    <TextBlock Text="Não verificado" FontSize="26" />
-                                    <TextBlock Text="Endpoint, identidade, sessão e política remota ainda não estão vinculados a esta superfície." Opacity="0.68" TextWrapping="Wrap" />
+                                    <TextBlock Text="Não configurado" FontSize="26" />
+                                    <TextBlock Text="No modo local recomendado, o sistema continua operando sem depender de uma sessão remota." Opacity="0.68" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
-                                <StackPanel Spacing="9">
-                                    <TextBlock Text="Fila de missões" FontWeight="SemiBold" />
+                            <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Investigações em execução" FontWeight="SemiBold" />
                                     <TextBlock Text="0 ativas" FontSize="26" />
-                                    <TextBlock Text="Nenhuma fila é simulada. A contagem permanecerá zero até existir vínculo real com o orquestrador." Opacity="0.68" TextWrapping="Wrap" />
+                                    <TextBlock Text="A contagem permanecerá zero até existir vínculo real com o orquestrador." Opacity="0.68" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
-                                <StackPanel Spacing="9">
-                                    <TextBlock Text="Modo de execução" FontWeight="SemiBold" />
+                            <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Modo atual" FontWeight="SemiBold" />
                                     <TextBlock Text="Local supervisionado" FontSize="26" />
-                                    <TextBlock Text="O shell pode supervisionar o EngineHost local. O modo remoto permanece indisponível até autenticação e política serem comprovadas." Opacity="0.68" TextWrapping="Wrap" />
+                                    <TextBlock Text="Padrão seguro deste Canary; o modo remoto exige configuração e prova adicionais." Opacity="0.68" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <Button Grid.Row="3" Content="Abrir Activity" HorizontalAlignment="Left" Click="OpenActivityButton_Click" AutomationProperties.Name="Abrir atividade operacional" />
+                        <Button Grid.Row="3" Content="Abrir histórico" HorizontalAlignment="Left" Click="OpenActivityButton_Click" AutomationProperties.Name="Abrir atividade operacional" />
                     </Grid>
                 </ScrollViewer>
 
                 <ScrollViewer x:Name="ActivityView" Visibility="Collapsed">
-                    <Grid Padding="32" RowSpacing="20" MaxWidth="1080" HorizontalAlignment="Stretch">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                    <Grid Padding="40,32" RowSpacing="20" MaxWidth="1080" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Spacing="8">
-                            <TextBlock Text="ACTIVITY" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-                            <TextBlock Text="Histórico operacional amigável" FontSize="34" FontWeight="SemiBold" />
-                            <TextBlock Text="Resumo local e limitado dos eventos desta sessão para diagnóstico do usuário, sem expor payloads, segredos ou dados brutos." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        <StackPanel Grid.Row="0" Spacing="7">
+                            <TextBlock Text="HISTÓRICO" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="O que aconteceu nesta sessão" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="Eventos locais resumidos para diagnóstico, sem expor segredos ou payloads brutos." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Não é o Proof Ledger canônico" Message="Esta visualização é efêmera e orientada ao usuário. Evidência auditável persistente deve vir do ledger governado quando ele estiver conectado." />
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Histórico desta sessão" Message="A evidência auditável persistente será apresentada separadamente quando o ledger governado estiver conectado." />
 
-                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="22">
+                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
                             <StackPanel Spacing="14">
                                 <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="Eventos desta sessão" FontSize="22" FontWeight="SemiBold" />
-                                        <TextBlock Text="Mais recente primeiro • retenção limitada em memória" Opacity="0.6" />
+                                        <TextBlock Text="Eventos recentes" FontSize="22" FontWeight="SemiBold" />
+                                        <TextBlock Text="Mais recente primeiro" Opacity="0.6" />
                                     </StackPanel>
                                     <Button Grid.Column="1" Content="Atualizar" Click="RefreshActivityButton_Click" AutomationProperties.Name="Atualizar atividade operacional" />
                                 </Grid>
@@ -367,59 +354,54 @@
                             </StackPanel>
                         </Border>
 
-                        <Button Grid.Row="3" Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
+                        <Button Grid.Row="3" Content="Voltar para visão geral" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
                     </Grid>
                 </ScrollViewer>
 
                 <ScrollViewer x:Name="SettingsView" Visibility="Collapsed">
-                    <Grid Padding="32" RowSpacing="20" MaxWidth="1120" HorizontalAlignment="Stretch">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                    <Grid Padding="40,32" RowSpacing="20" MaxWidth="1120" HorizontalAlignment="Stretch">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Spacing="8">
-                            <TextBlock Text="CONFIGURAÇÕES / SEGURANÇA" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
-                            <TextBlock Text="Estado, não atalhos de segurança" FontSize="34" FontWeight="SemiBold" />
-                            <TextBlock Text="Esta superfície mostra configuração e evidência disponível. Ela não oferece toggles capazes de desativar autoridade do runtime, isolamento ou validação remota." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
+                        <StackPanel Grid.Row="0" Spacing="7">
+                            <TextBlock Text="CONFIGURAÇÕES E SEGURANÇA" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AevrixAccentBrush}" />
+                            <TextBlock Text="Preferências, estado e segurança" FontSize="34" FontWeight="SemiBold" />
+                            <TextBlock Text="O AEVRIX aplica padrões seguros automaticamente. Esta área existe para revisar ou alterar as opções quando necessário." FontSize="16" Opacity="0.72" TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Configuração governada" Message="Mudanças que reduzam o tier de segurança ou habilitem modo remoto exigem ação explícita e evidência correspondente; não há downgrade automático." />
+                        <InfoBar Grid.Row="1" IsOpen="True" IsClosable="False" Severity="Informational" Title="Padrões seguros" Message="Alterações que reduzam segurança ou habilitem modo remoto continuam exigindo ação explícita e evidência correspondente." />
 
-                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="24">
+                        <Border Grid.Row="2" Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="24">
                             <StackPanel Spacing="14">
-                                <TextBlock Text="Identidade desta instalação" FontSize="22" FontWeight="SemiBold" />
+                                <TextBlock Text="Este computador" FontSize="22" FontWeight="SemiBold" />
                                 <TextBlock x:Name="SettingsInstallationIdText" Text="Installation ID indisponível" TextWrapping="Wrap" />
-                                <TextBlock x:Name="SettingsCompletionText" Text="First-run não concluído" TextWrapping="Wrap" />
-                                <Border Height="1" Background="{StaticResource AevrixAccentBrush}" Opacity="0.2" />
+                                <TextBlock x:Name="SettingsCompletionText" Text="Configuração inicial não concluída" TextWrapping="Wrap" />
+                                <Border Height="1" Background="{StaticResource AevrixBorderBrush}" />
                                 <TextBlock Text="Modo operacional" FontWeight="SemiBold" />
-                                <TextBlock x:Name="SettingsModeText" Text="Não selecionado" />
-                                <TextBlock Text="Identidade do dispositivo nesta sessão" FontWeight="SemiBold" />
+                                <TextBlock x:Name="SettingsModeText" Text="Local supervisionado" />
+                                <TextBlock Text="Identidade deste dispositivo" FontWeight="SemiBold" />
                                 <TextBlock x:Name="SettingsIdentityText" Text="Não verificada" TextWrapping="Wrap" />
-                                <TextBlock Text="EngineHost nesta sessão" FontWeight="SemiBold" />
+                                <TextBlock Text="Motor local" FontWeight="SemiBold" />
                                 <TextBlock x:Name="SettingsEngineText" Text="Não autenticado" TextWrapping="Wrap" />
-                                <TextBlock Text="Remoto" FontWeight="SemiBold" />
-                                <TextBlock x:Name="SettingsRemoteText" Text="Não configurado / não autenticado" TextWrapping="Wrap" />
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <Button Content="Abrir inicialização segura" Click="OpenOnboardingButton_Click" AutomationProperties.Name="Abrir inicialização segura a partir das configurações" />
-                                    <Button x:Name="SettingsVerifyEngineButton" Content="Verificar EngineHost" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost nas configurações" />
-                                    <Button Content="Atualizar estado" Click="SettingsRefreshButton_Click" AutomationProperties.Name="Atualizar estado de segurança" />
+                                <TextBlock Text="Serviços remotos" FontWeight="SemiBold" />
+                                <TextBlock x:Name="SettingsRemoteText" Text="Não configurados" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button Content="Revisar configuração inicial" Click="OpenOnboardingButton_Click" AutomationProperties.Name="Abrir inicialização segura a partir das configurações" />
+                                    <Button x:Name="SettingsVerifyEngineButton" Content="Verificar motor" Click="VerifyEngineHostButton_Click" AutomationProperties.Name="Verificar EngineHost nas configurações" />
+                                    <Button Content="Atualizar" Click="SettingsRefreshButton_Click" AutomationProperties.Name="Atualizar estado de segurança" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
 
-                        <Button Grid.Row="3" Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
+                        <Button Grid.Row="3" Content="Voltar para visão geral" HorizontalAlignment="Left" Click="BackToHomeButton_Click" AutomationProperties.Name="Voltar ao Command Center" />
                     </Grid>
                 </ScrollViewer>
 
                 <Grid x:Name="PlannedSectionView" Visibility="Collapsed" Padding="32">
-                    <Border Background="{StaticResource AevrixPanelBrush}" CornerRadius="12" Padding="28" MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border Background="{StaticResource AevrixPanelBrush}" BorderBrush="{StaticResource AevrixBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="30" MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <StackPanel Spacing="12">
-                            <TextBlock x:Name="PlannedSectionTitle" Text="Superfície em preparação" FontSize="30" FontWeight="SemiBold" />
-                            <TextBlock Text="Esta área consta no sistema canônico de UX, mas ainda não possui implementação promovida. Nenhuma capacidade é simulada como disponível." Opacity="0.72" TextWrapping="Wrap" />
-                            <Button Content="Voltar ao Command Center" HorizontalAlignment="Left" Click="BackToHomeButton_Click" />
+                            <TextBlock x:Name="PlannedSectionTitle" Text="Recurso em preparação" FontSize="30" FontWeight="SemiBold" />
+                            <TextBlock Text="Esta área ainda não possui implementação promovida neste Canary. O AEVRIX não simula capacidades que ainda não existem." Opacity="0.72" TextWrapping="Wrap" />
+                            <Button Content="Voltar para visão geral" HorizontalAlignment="Left" Click="BackToHomeButton_Click" />
                         </StackPanel>
                     </Border>
                 </Grid>
