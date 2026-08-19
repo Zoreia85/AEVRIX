@@ -277,4 +277,9 @@ New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
     acceptanceSurvivedUninstall = $true
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $EvidencePath -Encoding utf8NoBOM
 
+# The script uses Start-Process for installers/uninstallers and validates their
+# ExitCode properties explicitly. Clear any stale native LASTEXITCODE so a caller
+# cannot misclassify this validated PASS because of an earlier unrelated process.
+$global:LASTEXITCODE = 0
+
 Write-Host "PASS: exact-candidate $CandidateSha blocks operational navigation before acceptance, Decline exits without accepting, explicit acceptance transitions to Command Center, persists across relaunch, and survives uninstall."
