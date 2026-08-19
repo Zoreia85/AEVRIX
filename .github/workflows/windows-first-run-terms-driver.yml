@@ -15,7 +15,6 @@ permissions:
   actions: write
   issues: write
 
-# A non-command comment on #501 must never cancel an active Windows chain.
 concurrency:
   group: windows-first-run-driver-${{ github.event_name }}-${{ github.event.comment.id || inputs.candidate_sha || github.run_id }}
   cancel-in-progress: false
@@ -24,12 +23,7 @@ jobs:
   dispatch-after-installer:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.number == 501 &&
-        github.event.comment.author_association == 'OWNER' &&
-        github.event.comment.body == '/aevrix-run-windows'
-      )
+      (github.event_name == 'issue_comment' && github.event.issue.number == 501 && github.event.comment.author_association == 'OWNER' && github.event.comment.body == '/aevrix-run-windows')
     runs-on: ubuntu-latest
     timeout-minutes: 80
     env:
@@ -40,77 +34,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Invalid candidate SHA: $CANDIDATE_SHA" >&2
-            exit 1
-          fi
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/main"
-          main_sha="$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "$api" | python -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')"
-          if [[ "$main_sha" != "$CANDIDATE_SHA" ]]; then
-            echo "Candidate is not current canonical main: candidate=$CANDIDATE_SHA main=$main_sha" >&2
-            exit 1
-          fi
-          commit_api="https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}"
-          author="$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "$commit_api" | python -c 'import json,sys; p=json.load(sys.stdin); print(p["commit"]["author"]["name"]+" <"+p["commit"]["author"]["email"]+">")')"
-          if [[ "$author" != "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" ]]; then
-            echo "Candidate is not canonical bot-authored: $author" >&2
-            exit 1
-          fi
-          echo "Exact canonical candidate verified: $CANDIDATE_SHA"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          main_sha="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/main | python -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')"
+          [[ "$main_sha" == "$CANDIDATE_SHA" ]] || { echo "candidate=$CANDIDATE_SHA main=$main_sha" >&2; exit 1; }
+          author="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA} | python -c 'import json,sys; p=json.load(sys.stdin); print(p["commit"]["author"]["name"]+" <"+p["commit"]["author"]["email"]+">")')"
+          [[ "$author" == 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>' ]] || exit 1
 
-      - name: Record chain cutoff and report start
+      - name: Record cutoff and report start
         id: start
         shell: bash
         run: |
-          set -euo pipefail
-          cutoff="$(date -u +%s)"
-          echo "cutoff_epoch=$cutoff" >> "$GITHUB_OUTPUT"
-          body="$(python - <<'PY'
-          import json, os
-          text = (
-              "WINDOWS CHAIN STARTED — MASTER command accepted\n\n"
-              f"- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n"
-              f"- driver run: `{os.environ['GITHUB_RUN_ID']}`\n"
-              "- requested chain: Windows installer candidate -> automatic workflow_run installed first-run AVA\n"
-              "- release credit: NONE until exact installed AVA completes PASS"
-          )
-          print(json.dumps({"body": text}))
+          echo "cutoff_epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+          python - <<'PY' > body.json
+          import json,os
+          print(json.dumps({'body':f"WINDOWS CHAIN STARTED — exact explicit chain\n\n- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- chain: installer -> explicit exact AVA\n- release credit: NONE until AVA PASS + S4"}))
           PY
-          )"
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" \
-            -d "$body" >/dev/null
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments -d @body.json >/dev/null
 
       - name: Dispatch exact Windows installer candidate
         shell: bash
         run: |
-          set -euo pipefail
-          body='{"ref":"main"}'
-          code="$(curl --silent --show-error --output response.txt --write-out '%{http_code}' \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-installer-candidate.yml/dispatches" \
-            -d "$body")"
-          if [[ "$code" != "204" ]]; then
-            cat response.txt >&2 || true
-            echo "Windows installer candidate dispatch failed with HTTP $code" >&2
-            exit 1
-          fi
-          echo "Installer dispatch accepted for $CANDIDATE_SHA"
+          code="$(curl -sS -o response.txt -w '%{http_code}' -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-installer-candidate.yml/dispatches -d '{"ref":"main"}')"
+          [[ "$code" == 204 ]] || { cat response.txt; exit 1; }
 
       - name: Resolve completed exact installer run
         id: installer
@@ -120,44 +65,34 @@ jobs:
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-installer-candidate.yml/runs?head_sha=${CANDIDATE_SHA}&per_page=30"
-          run_id=""
-          conclusion=""
           for attempt in $(seq 1 180); do
-            payload="$(curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' "$api")"
-            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; runs=[]; [runs.append(r) for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows installer candidate" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; runs.sort(key=lambda r:r.get("created_at",""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s"%(r.get("id"),r.get("status"),r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
-            IFS='|' read -r candidate_run status candidate_conclusion <<<"$result"
-            if [[ "$candidate_run" != "NONE" && "$status" == "completed" ]]; then
-              run_id="$candidate_run"; conclusion="$candidate_conclusion"; break
-            fi
+            payload="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "$api")"
+            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; rs=[r for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows installer candidate" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; rs.sort(key=lambda r:r.get("created_at",""),reverse=True); r=rs[0] if rs else None; print("NONE" if r is None else "%s|%s|%s"%(r["id"],r["status"],r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
+            IFS='|' read -r rid status conclusion <<<"$result"
+            if [[ "$rid" != NONE && "$status" == completed ]]; then echo "installer_run_id=$rid" >> "$GITHUB_OUTPUT"; echo "installer_conclusion=$conclusion" >> "$GITHUB_OUTPUT"; exit 0; fi
             sleep 15
           done
-          if [[ -z "$run_id" ]]; then
-            echo "No completed exact installer run resolved within bounded window." >&2
-            exit 3
-          fi
-          echo "installer_run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "installer_conclusion=$conclusion" >> "$GITHUB_OUTPUT"
-          echo "Resolved installer run $run_id / $conclusion"
+          exit 3
 
-      - name: Report installer failure and fail closed
+      - name: Fail closed on installer failure
         if: steps.installer.outputs.installer_conclusion != 'success'
+        shell: bash
+        run: exit 2
+
+      - name: Explicitly dispatch exact installed first-run AVA
+        if: steps.installer.outputs.installer_conclusion == 'success'
         env:
           INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
-          INSTALLER_CONCLUSION: ${{ steps.installer.outputs.installer_conclusion }}
         shell: bash
         run: |
-          body="$(python - <<'PY'
+          python - <<'PY' > ava-body.json
           import json,os
-          print(json.dumps({"body":f"WINDOWS INSTALLER GATE FAILED\n\n- candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- installer run: `{os.environ['INSTALLER_RUN_ID']}`\n- installer conclusion: **{os.environ['INSTALLER_CONCLUSION'].upper()}**\n- first-run AVA: fail-closed / no Canary credit"}))
+          print(json.dumps({'ref':'main','inputs':{'installer_run_id':os.environ['INSTALLER_RUN_ID'],'candidate_sha':os.environ['CANDIDATE_SHA']}}))
           PY
-          )"
-          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" -d "$body" >/dev/null
-          exit 2
+          code="$(curl -sS -o response.txt -w '%{http_code}' -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/dispatches -d @ava-body.json)"
+          [[ "$code" == 204 ]] || { cat response.txt; exit 1; }
 
-      - name: Resolve automatic exact first-run AVA
+      - name: Resolve explicit exact first-run AVA
         if: steps.installer.outputs.installer_conclusion == 'success'
         id: ava
         env:
@@ -165,56 +100,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/runs?head_sha=${CANDIDATE_SHA}&event=workflow_run&per_page=30"
-          run_id=""; conclusion=""
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-first-run-terms-ava.yml/runs?head_sha=${CANDIDATE_SHA}&event=workflow_dispatch&per_page=30"
           for attempt in $(seq 1 120); do
-            payload="$(curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$api")"
-            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; runs=[]; [runs.append(r) for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows first-run terms AVA" and r.get("event")=="workflow_run" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; runs.sort(key=lambda r:r.get("created_at",""), reverse=True); r=runs[0] if runs else None; print("NONE" if r is None else "%s|%s|%s"%(r.get("id"),r.get("status"),r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
-            IFS='|' read -r candidate_run status candidate_conclusion <<<"$result"
-            if [[ "$candidate_run" != "NONE" && "$status" == "completed" ]]; then
-              run_id="$candidate_run"; conclusion="$candidate_conclusion"; break
-            fi
+            payload="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "$api")"
+            result="$(python -c 'import datetime,json,sys; p=json.load(sys.stdin); sha=sys.argv[1]; cutoff=int(sys.argv[2])-5; rs=[r for r in p.get("workflow_runs",[]) if r.get("head_sha")==sha and r.get("name")=="Windows first-run terms AVA" and r.get("event")=="workflow_dispatch" and r.get("created_at") and int(datetime.datetime.fromisoformat(r["created_at"].replace("Z","+00:00")).timestamp())>=cutoff]; rs.sort(key=lambda r:r.get("created_at",""),reverse=True); r=rs[0] if rs else None; print("NONE" if r is None else "%s|%s|%s"%(r["id"],r["status"],r.get("conclusion") or ""))' "$CANDIDATE_SHA" "$CUTOFF_EPOCH" <<<"$payload")"
+            IFS='|' read -r rid status conclusion <<<"$result"
+            if [[ "$rid" != NONE && "$status" == completed ]]; then echo "ava_run_id=$rid" >> "$GITHUB_OUTPUT"; echo "ava_conclusion=$conclusion" >> "$GITHUB_OUTPUT"; exit 0; fi
             sleep 15
           done
-          if [[ -z "$run_id" ]]; then
-            echo "No completed automatic exact AVA resolved within bounded window." >&2
-            exit 3
-          fi
-          echo "ava_run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "ava_conclusion=$conclusion" >> "$GITHUB_OUTPUT"
-          echo "Resolved AVA run $run_id / $conclusion"
+          exit 3
 
-      - name: Report exact installed-chain result to MASTER
-        if: steps.installer.outputs.installer_conclusion == 'success'
+      - name: Report exact chain result to MASTER
+        if: always() && steps.installer.outputs.installer_conclusion == 'success' && steps.ava.outputs.ava_run_id != ''
         env:
           INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
           AVA_RUN_ID: ${{ steps.ava.outputs.ava_run_id }}
           AVA_CONCLUSION: ${{ steps.ava.outputs.ava_conclusion }}
         shell: bash
         run: |
-          set -euo pipefail
-          body="$(python - <<'PY'
+          python - <<'PY' > body.json
           import json,os
           c=os.environ['AVA_CONCLUSION'].upper(); state='PASS' if c=='SUCCESS' else 'FAIL'
-          print(json.dumps({"body":f"WINDOWS INSTALLED CHAIN {state}\n\n- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- installer run: `{os.environ['INSTALLER_RUN_ID']}` — SUCCESS\n- automatic first-run AVA run: `{os.environ['AVA_RUN_ID']}` — **{c}**\n- MASTER action: inspect exact jobs/artifacts before Canary credit"}))
+          print(json.dumps({'body':f"WINDOWS INSTALLED CHAIN {state}\n\n- canonical candidate: `{os.environ['CANDIDATE_SHA']}`\n- driver run: `{os.environ['GITHUB_RUN_ID']}`\n- installer run: `{os.environ['INSTALLER_RUN_ID']}` — SUCCESS\n- explicit first-run AVA run: `{os.environ['AVA_RUN_ID']}` — **{c}**\n- next: S4 exact artifact/job verification"}))
           PY
-          )"
-          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments" -d "$body" >/dev/null
+          curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/501/comments -d @body.json >/dev/null
 
       - name: Enforce exact AVA success
         if: steps.installer.outputs.installer_conclusion == 'success' && steps.ava.outputs.ava_conclusion != 'success'
         shell: bash
         run: exit 4
-
-      - name: Publish driver summary
-        if: steps.installer.outputs.installer_conclusion == 'success' && steps.ava.outputs.ava_conclusion == 'success'
-        env:
-          INSTALLER_RUN_ID: ${{ steps.installer.outputs.installer_run_id }}
-          AVA_RUN_ID: ${{ steps.ava.outputs.ava_run_id }}
-        shell: bash
-        run: |
-          echo '## AEVRIX exact installed Windows chain' >> "$GITHUB_STEP_SUMMARY"
-          echo "- Exact candidate: \`$CANDIDATE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Installer run: **$INSTALLER_RUN_ID**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- First-run AVA run: **$AVA_RUN_ID**" >> "$GITHUB_STEP_SUMMARY"
-          echo '- Installed first-run chain: **PASS**' >> "$GITHUB_STEP_SUMMARY"
