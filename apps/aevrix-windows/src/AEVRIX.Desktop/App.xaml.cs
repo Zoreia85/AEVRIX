@@ -99,5 +99,14 @@ public partial class App : Application
         {
             StartupFailureReporter.TryWrite("research-browser-initialize", ex);
         }
+
+        try
+        {
+            ProductOperationsExperience.Attach(mainWindow);
+        }
+        catch (Exception ex)
+        {
+            StartupFailureReporter.TryWrite("product-operations-experience-initialize", ex);
+        }
     }
 }

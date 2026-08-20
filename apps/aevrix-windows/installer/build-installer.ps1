@@ -7,7 +7,13 @@ param(
     [ValidateSet('Release')]
     [string]$Configuration = 'Release',
     [string]$OutputDirectory,
-    [string]$MakensisPath = $env:MAKENSIS_EXE
+    [string]$MakensisPath = $env:MAKENSIS_EXE,
+    [string]$SignToolPath = $env:SIGNTOOL_EXE,
+    [string]$SigningCertificateThumbprint = $env:AEVRIX_SIGNING_CERT_THUMBPRINT,
+    [string]$TimestampUrl = $env:AEVRIX_SIGNING_TIMESTAMP_URL,
+    [ValidateSet('CurrentUser', 'LocalMachine')]
+    [string]$SigningStoreLocation = 'CurrentUser',
+    [switch]$RequireTrustedSignature
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,6 +75,78 @@ function Invoke-DotnetPublish {
     }
 }
 
+function Resolve-SignTool {
+    if ($script:SignToolPath -and (Test-Path -LiteralPath $script:SignToolPath -PathType Leaf)) {
+        return $script:SignToolPath
+    }
+
+    $command = Get-Command 'signtool.exe' -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    return $null
+}
+
+function Assert-ValidAuthenticodeSignature {
+    param([Parameter(Mandatory)] [string]$Path)
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+        throw "Authenticode verification failed for $Path with status $($signature.Status)."
+    }
+    if (-not $signature.SignerCertificate) {
+        throw "Authenticode verification did not return a signer certificate for $Path."
+    }
+    return $signature
+}
+
+function Invoke-AevrixAuthenticodeSign {
+    param([Parameter(Mandatory)] [string[]]$Paths)
+
+    if (-not $SigningCertificateThumbprint) {
+        if ($RequireTrustedSignature) {
+            throw 'Trusted release signing is required but AEVRIX_SIGNING_CERT_THUMBPRINT was not provided.'
+        }
+        return $false
+    }
+    if (-not $TimestampUrl) {
+        throw 'A timestamp URL is required whenever Authenticode signing is enabled. Set AEVRIX_SIGNING_TIMESTAMP_URL.'
+    }
+
+    $tool = Resolve-SignTool
+    if (-not $tool) {
+        throw 'signtool.exe was not found. Set SIGNTOOL_EXE or install the Windows SDK signing tools.'
+    }
+
+    foreach ($path in $Paths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Signing input not found: $path"
+        }
+
+        $arguments = @('sign')
+        if ($SigningStoreLocation -eq 'LocalMachine') {
+            $arguments += '/sm'
+        }
+        $arguments += @(
+            '/sha1', $SigningCertificateThumbprint,
+            '/fd', 'SHA256',
+            '/tr', $TimestampUrl,
+            '/td', 'SHA256',
+            '/v',
+            $path
+        )
+
+        & $tool @arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "signtool failed for $path with exit code $LASTEXITCODE"
+        }
+        $null = Assert-ValidAuthenticodeSignature -Path $path
+    }
+
+    return $true
+}
+
 Write-Host "Publishing Desktop self-contained ($RuntimeIdentifier)..."
 Invoke-DotnetPublish -Project $desktopProject -Destination $desktopPublish -WindowsAppSdkSelfContained
 
@@ -118,6 +196,16 @@ if ($forbiddenPayload) {
     throw "Forbidden debug/secret-like installer payload detected:`n$names"
 }
 
+# Sign AEVRIX-owned PE payload before packaging. Runtime/vendor binaries retain their upstream signatures.
+$ownedPayloadToSign = @(
+    (Join-Path $desktopPublish 'AEVRIX.Desktop.exe'),
+    (Join-Path $desktopPublish 'AEVRIX.Desktop.dll'),
+    (Join-Path $desktopPublish 'AEVRIX.EngineHost.exe'),
+    (Join-Path $desktopPublish 'AEVRIX.EngineHost.dll'),
+    (Join-Path $desktopPublish 'AEVRIX.Core.dll')
+)
+$payloadSigned = Invoke-AevrixAuthenticodeSign -Paths $ownedPayloadToSign
+
 if (-not $MakensisPath) {
     $command = Get-Command 'makensis.exe' -ErrorAction SilentlyContinue
     if ($command) {
@@ -151,6 +239,17 @@ if (-not (Test-Path -LiteralPath $outFile -PathType Leaf)) {
     throw "Installer output was not produced: $outFile"
 }
 
+$installerSigned = Invoke-AevrixAuthenticodeSign -Paths @($outFile)
+if ($RequireTrustedSignature -and (-not $payloadSigned -or -not $installerSigned)) {
+    throw 'Trusted release signing was required but one or more AEVRIX artifacts remained unsigned.'
+}
+
+$installerSignature = if ($installerSigned) {
+    Assert-ValidAuthenticodeSignature -Path $outFile
+} else {
+    Get-AuthenticodeSignature -LiteralPath $outFile
+}
+
 $hash = Get-FileHash -LiteralPath $outFile -Algorithm SHA256
 $hashPath = "$outFile.sha256"
 "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($outFile))" | Set-Content -LiteralPath $hashPath -Encoding ascii -NoNewline
@@ -166,7 +265,7 @@ $payloadManifest = Get-ChildItem -LiteralPath $desktopPublish -Recurse -File |
     }
 $manifestPath = Join-Path $OutputDirectory "AEVRIX-$ProductVersion-$RuntimeIdentifier-payload.json"
 [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     product = 'AEVRIX'
     productVersion = $ProductVersion
     fileVersion = $FileVersion
@@ -178,7 +277,11 @@ $manifestPath = Join-Path $OutputDirectory "AEVRIX-$ProductVersion-$RuntimeIdent
         file = [IO.Path]::GetFileName($outFile)
         bytes = (Get-Item -LiteralPath $outFile).Length
         sha256 = $hash.Hash.ToLowerInvariant()
-        signed = $false
+        signed = [bool]$installerSigned
+        signatureStatus = $installerSignature.Status.ToString()
+        signerSubject = if ($installerSignature.SignerCertificate) { $installerSignature.SignerCertificate.Subject } else { $null }
+        signerThumbprint = if ($installerSignature.SignerCertificate) { $installerSignature.SignerCertificate.Thumbprint } else { $null }
+        timestamped = [bool]$installerSignature.TimeStamperCertificate
     }
     files = @($payloadManifest)
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
@@ -186,4 +289,8 @@ $manifestPath = Join-Path $OutputDirectory "AEVRIX-$ProductVersion-$RuntimeIdent
 Write-Host "Installer: $outFile"
 Write-Host "SHA-256: $($hash.Hash.ToLowerInvariant())"
 Write-Host "Payload manifest: $manifestPath"
-Write-Warning 'Installer signing is intentionally NOT marked complete. Authenticode remains a separate release gate.'
+if ($installerSigned) {
+    Write-Host "Authenticode: VALID — $($installerSignature.SignerCertificate.Subject)"
+} else {
+    Write-Warning 'Installer remains unsigned because no trusted signing identity was configured. This artifact is TEST-ONLY and must not receive public release credit.'
+}
