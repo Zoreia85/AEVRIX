@@ -1,4 +1,4 @@
-using Aevrix.Core;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Aevrix.Core.Tests;
 
@@ -8,7 +8,7 @@ public sealed class InvestigationWorkPlanTests
     [TestMethod]
     public void Create_DesktopApplicationRequiresArtifact()
     {
-        Assert.ThrowsExactly<ArgumentException>(() => InvestigationDraft.Create(
+        Assert.Throws<ArgumentException>(() => InvestigationDraft.Create(
             "workspace",
             InvestigationTargetKind.DesktopApplication,
             InvestigationStrategy.Investigate,
@@ -31,13 +31,13 @@ public sealed class InvestigationWorkPlanTests
             "standard");
 
         Assert.AreEqual(InvestigationTargetKind.WebSystem, draft.TargetKind);
-        Assert.HasCount(0, draft.Artifacts);
+        Assert.AreEqual(0, draft.Artifacts.Count);
     }
 
     [TestMethod]
     public void Create_RejectsEmulationForNonExecutableTarget()
     {
-        Assert.ThrowsExactly<ArgumentException>(() => InvestigationDraft.Create(
+        Assert.Throws<ArgumentException>(() => InvestigationDraft.Create(
             "workspace",
             InvestigationTargetKind.WebSystem,
             InvestigationStrategy.InvestigateAndEmulate,
@@ -87,8 +87,8 @@ public sealed class InvestigationWorkPlanTests
     {
         var capacity = LocalCapacityRecommendation.ForCurrentProcess();
 
-        Assert.IsGreaterThanOrEqualTo(1, capacity.RecommendedConcurrentInvestigations);
-        Assert.IsLessThanOrEqualTo(8, capacity.RecommendedConcurrentInvestigations);
-        Assert.IsGreaterThanOrEqualTo(1, capacity.LogicalProcessors);
+        Assert.IsTrue(capacity.RecommendedConcurrentInvestigations >= 1);
+        Assert.IsTrue(capacity.RecommendedConcurrentInvestigations <= 8);
+        Assert.IsTrue(capacity.LogicalProcessors >= 1);
     }
 }
