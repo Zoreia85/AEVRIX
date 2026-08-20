@@ -1,4 +1,4 @@
-using Aevrix.Core;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Aevrix.Core.Tests;
 
@@ -37,14 +37,14 @@ public sealed class InvestigationAgentPlanTests
 
         var withBinding = plan.GetReadyPackages(
             states,
-            new HashSet<string>(["evidence-verification"], StringComparer.Ordinal));
+            new HashSet<string>(new[] { "evidence-verification" }, StringComparer.Ordinal));
         Assert.IsTrue(withBinding.Any(item => item.Id == "clean-room-build"));
     }
 
     [TestMethod]
     public void Emulation_IsRejectedForWebTarget()
     {
-        Assert.ThrowsExactly<ArgumentException>(() => InvestigationAgentPlan.Create(
+        Assert.Throws<ArgumentException>(() => InvestigationAgentPlan.Create(
             InvestigationStrategy.InvestigateAndEmulate,
             InvestigationTargetKind.WebSystem));
     }
