@@ -35,8 +35,8 @@ public sealed class InvestigationRuntimeTests
 
             var storePath = Path.Combine(paths.EngineRoot, "investigation-runtime.json");
             var storedJson = await File.ReadAllTextAsync(storePath);
-            StringAssert.DoesNotContain(storedJson, artifactPath);
-            StringAssert.DoesNotContain(storedJson, "sensitive-input");
+            Assert.IsFalse(storedJson.Contains(artifactPath, StringComparison.Ordinal));
+            Assert.IsFalse(storedJson.Contains("sensitive-input", StringComparison.Ordinal));
         }
         finally
         {
