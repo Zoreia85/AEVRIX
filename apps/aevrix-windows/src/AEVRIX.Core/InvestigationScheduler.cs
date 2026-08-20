@@ -1,0 +1,141 @@
+namespace Aevrix.Core;
+
+public enum InvestigationPriority
+{
+    Low = 10,
+    Normal = 50,
+    High = 80,
+    Urgent = 100
+}
+
+public sealed record InvestigationResourceBudget(
+    int CpuWeight,
+    long MemoryBytes,
+    int MaxParallelAgentPackages)
+{
+    public static InvestigationResourceBudget ConservativeDefault(LocalCapacityRecommendation capacity)
+    {
+        ArgumentNullException.ThrowIfNull(capacity);
+        var slots = Math.Max(1, capacity.RecommendedConcurrentInvestigations);
+        var memoryPerInvestigation = Math.Max(
+            1024L * 1024 * 1024,
+            capacity.AvailableMemoryBytes / Math.Max(2, slots + 1));
+        return new InvestigationResourceBudget(
+            CpuWeight: Math.Max(1, 100 / slots),
+            MemoryBytes: memoryPerInvestigation,
+            MaxParallelAgentPackages: Math.Clamp(capacity.LogicalProcessors / Math.Max(2, slots * 2), 1, 4));
+    }
+}
+
+public sealed record InvestigationScheduleRequest(
+    Guid InvestigationId,
+    InvestigationPriority Priority,
+    DateTimeOffset EnqueuedAtUtc,
+    InvestigationRunState CurrentState);
+
+public sealed record InvestigationScheduleDecision(
+    Guid InvestigationId,
+    InvestigationRunState NextState,
+    InvestigationResourceBudget Budget,
+    int QueuePosition,
+    string Reason);
+
+public static class InvestigationScheduler
+{
+    public static IReadOnlyList<InvestigationScheduleDecision> Plan(
+        IEnumerable<InvestigationScheduleRequest> requests,
+        LocalCapacityRecommendation capacity)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(capacity);
+
+        var budget = InvestigationResourceBudget.ConservativeDefault(capacity);
+        var normalized = requests
+            .Where(request => request.CurrentState is not (
+                InvestigationRunState.Completed or
+                InvestigationRunState.Cancelled or
+                InvestigationRunState.Failed))
+            .OrderByDescending(request => request.CurrentState == InvestigationRunState.Running)
+            .ThenByDescending(request => request.Priority)
+            .ThenBy(request => request.EnqueuedAtUtc)
+            .ToArray();
+
+        var maxRunning = Math.Max(1, capacity.RecommendedConcurrentInvestigations);
+        var decisions = new List<InvestigationScheduleDecision>(normalized.Length);
+        var runningCount = 0;
+        var queuePosition = 0;
+
+        foreach (var request in normalized)
+        {
+            if (request.CurrentState is InvestigationRunState.Paused or InvestigationRunState.Blocked)
+            {
+                decisions.Add(new InvestigationScheduleDecision(
+                    request.InvestigationId,
+                    request.CurrentState,
+                    budget,
+                    0,
+                    request.CurrentState == InvestigationRunState.Paused
+                        ? "A investigação permanece pausada por decisão explícita."
+                        : "A investigação permanece bloqueada até que o gate pendente seja resolvido."));
+                continue;
+            }
+
+            if (runningCount < maxRunning)
+            {
+                runningCount++;
+                decisions.Add(new InvestigationScheduleDecision(
+                    request.InvestigationId,
+                    InvestigationRunState.Running,
+                    budget,
+                    0,
+                    request.CurrentState == InvestigationRunState.Running
+                        ? "Execução mantida dentro do orçamento atual da estação."
+                        : "Slot de execução disponível segundo a capacidade conservadora da estação."));
+                continue;
+            }
+
+            queuePosition++;
+            decisions.Add(new InvestigationScheduleDecision(
+                request.InvestigationId,
+                InvestigationRunState.Queued,
+                budget,
+                queuePosition,
+                "Capacidade simultânea atingida; a investigação permanece em fila sem competir de forma agressiva por recursos."));
+        }
+
+        return decisions;
+    }
+}
+
+public static class InvestigationStateMachine
+{
+    public static bool CanTransition(InvestigationRunState from, InvestigationRunState to)
+    {
+        if (from == to)
+        {
+            return true;
+        }
+
+        return from switch
+        {
+            InvestigationRunState.Draft => to is InvestigationRunState.Ready or InvestigationRunState.Blocked or InvestigationRunState.Cancelled,
+            InvestigationRunState.Ready => to is InvestigationRunState.Queued or InvestigationRunState.Running or InvestigationRunState.Blocked or InvestigationRunState.Cancelled,
+            InvestigationRunState.Queued => to is InvestigationRunState.Running or InvestigationRunState.Paused or InvestigationRunState.Blocked or InvestigationRunState.Cancelled,
+            InvestigationRunState.Running => to is InvestigationRunState.Paused or InvestigationRunState.Blocked or InvestigationRunState.Failed or InvestigationRunState.Completed or InvestigationRunState.Cancelled,
+            InvestigationRunState.Paused => to is InvestigationRunState.Queued or InvestigationRunState.Running or InvestigationRunState.Blocked or InvestigationRunState.Cancelled,
+            InvestigationRunState.Blocked => to is InvestigationRunState.Ready or InvestigationRunState.Queued or InvestigationRunState.Failed or InvestigationRunState.Cancelled,
+            InvestigationRunState.Failed => to is InvestigationRunState.Ready or InvestigationRunState.Cancelled,
+            InvestigationRunState.Completed => false,
+            InvestigationRunState.Cancelled => false,
+            _ => false
+        };
+    }
+
+    public static void RequireTransition(InvestigationRunState from, InvestigationRunState to)
+    {
+        if (!CanTransition(from, to))
+        {
+            throw new InvalidOperationException($"Investigation state transition {from} -> {to} is not allowed.");
+        }
+    }
+}
