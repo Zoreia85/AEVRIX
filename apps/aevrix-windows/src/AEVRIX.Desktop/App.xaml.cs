@@ -108,5 +108,14 @@ public partial class App : Application
         {
             StartupFailureReporter.TryWrite("product-operations-experience-initialize", ex);
         }
+
+        try
+        {
+            ProductRuntimeExperience.Attach(mainWindow);
+        }
+        catch (Exception ex)
+        {
+            StartupFailureReporter.TryWrite("product-runtime-experience-initialize", ex);
+        }
     }
 }
