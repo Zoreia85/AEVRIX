@@ -49,8 +49,10 @@ internal sealed class InvestigationRegistryStore
         try
         {
             var json = File.ReadAllText(_path);
-            return JsonSerializer.Deserialize<List<InvestigationRegistryEntry>>(json, _jsonOptions)
-                ?? Array.Empty<InvestigationRegistryEntry>();
+            var entries = JsonSerializer.Deserialize<List<InvestigationRegistryEntry>>(json, _jsonOptions);
+            return entries is null
+                ? Array.Empty<InvestigationRegistryEntry>()
+                : entries;
         }
         catch (JsonException)
         {
