@@ -78,6 +78,34 @@ public sealed class InvestigationSchedulerTests
     }
 
     [TestMethod]
+    public void Plan_PreservesAllRunningWorkWhenCapacityShrinksAndAdmitsNoNewWork()
+    {
+        var capacity = new LocalCapacityRecommendation(8, 16L * 1024 * 1024 * 1024, 2, "reduced");
+        var now = DateTimeOffset.UtcNow;
+        var runningA = Guid.NewGuid();
+        var runningB = Guid.NewGuid();
+        var runningC = Guid.NewGuid();
+        var freshUrgent = Guid.NewGuid();
+
+        var decisions = InvestigationScheduler.Plan(
+            [
+                new InvestigationScheduleRequest(runningA, InvestigationPriority.Low, now.AddHours(-3), InvestigationRunState.Running),
+                new InvestigationScheduleRequest(runningB, InvestigationPriority.Normal, now.AddHours(-2), InvestigationRunState.Running),
+                new InvestigationScheduleRequest(runningC, InvestigationPriority.High, now.AddHours(-1), InvestigationRunState.Running),
+                new InvestigationScheduleRequest(freshUrgent, InvestigationPriority.Urgent, now, InvestigationRunState.Ready)
+            ],
+            capacity,
+            now);
+
+        Assert.AreEqual(3, decisions.Count(item => item.NextState == InvestigationRunState.Running));
+        Assert.AreEqual(InvestigationRunState.Running, decisions.Single(item => item.InvestigationId == runningA).NextState);
+        Assert.AreEqual(InvestigationRunState.Running, decisions.Single(item => item.InvestigationId == runningB).NextState);
+        Assert.AreEqual(InvestigationRunState.Running, decisions.Single(item => item.InvestigationId == runningC).NextState);
+        Assert.AreEqual(InvestigationRunState.Queued, decisions.Single(item => item.InvestigationId == freshUrgent).NextState);
+        Assert.IsTrue(decisions.Single(item => item.InvestigationId == freshUrgent).Reason.Contains("acima da nova capacidade", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void Plan_DoesNotAutoResumePausedOrBlockedWork()
     {
         var capacity = new LocalCapacityRecommendation(16, 32L * 1024 * 1024 * 1024, 4, "test");
