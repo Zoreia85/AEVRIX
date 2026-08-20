@@ -63,67 +63,9 @@ public sealed record InvestigationAgentPlan(
             throw new ArgumentException("Emulation requires an executable application target.", nameof(targetKind));
         }
 
-        var packages = new List<AgentWorkPackage>
-        {
-            Package("coordination", InvestigationAgentRole.Coordinator, InvestigationPhase.IntakeAndAuthorization),
-            Package("acquisition", InvestigationAgentRole.Acquisition, InvestigationPhase.Acquisition, "coordination"),
-            Package("static-analysis", InvestigationAgentRole.StaticAnalyzer, InvestigationPhase.StaticAnalysis, "acquisition"),
-            Package("evidence-verification", InvestigationAgentRole.EvidenceVerifier, InvestigationPhase.EvidenceCorrelation, "static-analysis")
-        };
-
-        if (strategy is InvestigationStrategy.InvestigateAndEmulate or InvestigationStrategy.InvestigateAndBuildParallel)
-        {
-            if (InvestigationDraft.SupportsEmulation(targetKind))
-            {
-                packages.Insert(3, Package(
-                    "dynamic-observation",
-                    InvestigationAgentRole.DynamicObserver,
-                    InvestigationPhase.DynamicObservation,
-                    "acquisition"));
-                packages[packages.FindIndex(item => item.Id == "evidence-verification")] = Package(
-                    "evidence-verification",
-                    InvestigationAgentRole.EvidenceVerifier,
-                    InvestigationPhase.EvidenceCorrelation,
-                    "static-analysis",
-                    "dynamic-observation");
-            }
-        }
-
-        packages.Add(Package(
-            "blueprint",
-            InvestigationAgentRole.BlueprintSynthesizer,
-            InvestigationPhase.BlueprintSynthesis,
-            "evidence-verification"));
-
-        if (strategy is InvestigationStrategy.InvestigateAndBuildParallel or InvestigationStrategy.ReconstructWhiteLabel)
-        {
-            packages.Add(Package(
-                "clean-room-build",
-                InvestigationAgentRole.CleanRoomBuilder,
-                InvestigationPhase.Reconstruction,
-                requiresVerifiedEvidence: true,
-                "evidence-verification"));
-            packages.Add(Package(
-                "differential-judge",
-                InvestigationAgentRole.DifferentialJudge,
-                InvestigationPhase.DifferentialValidation,
-                requiresVerifiedEvidence: true,
-                "blueprint",
-                "clean-room-build"));
-            packages.Add(Package(
-                "final-qa",
-                InvestigationAgentRole.QualityAssurance,
-                InvestigationPhase.FinalQualityAssurance,
-                "differential-judge"));
-        }
-        else
-        {
-            packages.Add(Package(
-                "final-qa",
-                InvestigationAgentRole.QualityAssurance,
-                InvestigationPhase.FinalQualityAssurance,
-                "blueprint"));
-        }
+        var packages = strategy == InvestigationStrategy.ReconstructWhiteLabel
+            ? CreateWhiteLabelPackages()
+            : CreateInvestigationPackages(strategy, targetKind);
 
         foreach (var package in packages)
         {
@@ -169,6 +111,104 @@ public sealed record InvestigationAgentPlan(
         }
         return ready;
     }
+
+    private static List<AgentWorkPackage> CreateInvestigationPackages(
+        InvestigationStrategy strategy,
+        InvestigationTargetKind targetKind)
+    {
+        var packages = new List<AgentWorkPackage>
+        {
+            Package("coordination", InvestigationAgentRole.Coordinator, InvestigationPhase.IntakeAndAuthorization),
+            Package("acquisition", InvestigationAgentRole.Acquisition, InvestigationPhase.Acquisition, "coordination"),
+            Package("static-analysis", InvestigationAgentRole.StaticAnalyzer, InvestigationPhase.StaticAnalysis, "acquisition"),
+            Package("evidence-verification", InvestigationAgentRole.EvidenceVerifier, InvestigationPhase.EvidenceCorrelation, "static-analysis")
+        };
+
+        if (strategy is InvestigationStrategy.InvestigateAndEmulate or InvestigationStrategy.InvestigateAndBuildParallel)
+        {
+            if (InvestigationDraft.SupportsEmulation(targetKind))
+            {
+                packages.Insert(3, Package(
+                    "dynamic-observation",
+                    InvestigationAgentRole.DynamicObserver,
+                    InvestigationPhase.DynamicObservation,
+                    "acquisition"));
+                packages[packages.FindIndex(item => item.Id == "evidence-verification")] = Package(
+                    "evidence-verification",
+                    InvestigationAgentRole.EvidenceVerifier,
+                    InvestigationPhase.EvidenceCorrelation,
+                    "static-analysis",
+                    "dynamic-observation");
+            }
+        }
+
+        packages.Add(Package(
+            "blueprint",
+            InvestigationAgentRole.BlueprintSynthesizer,
+            InvestigationPhase.BlueprintSynthesis,
+            "evidence-verification"));
+
+        if (strategy == InvestigationStrategy.InvestigateAndBuildParallel)
+        {
+            packages.Add(Package(
+                "clean-room-build",
+                InvestigationAgentRole.CleanRoomBuilder,
+                InvestigationPhase.Reconstruction,
+                requiresVerifiedEvidence: true,
+                "evidence-verification"));
+            packages.Add(Package(
+                "differential-judge",
+                InvestigationAgentRole.DifferentialJudge,
+                InvestigationPhase.DifferentialValidation,
+                requiresVerifiedEvidence: true,
+                "blueprint",
+                "clean-room-build"));
+            packages.Add(Package(
+                "final-qa",
+                InvestigationAgentRole.QualityAssurance,
+                InvestigationPhase.FinalQualityAssurance,
+                "differential-judge"));
+        }
+        else
+        {
+            packages.Add(Package(
+                "final-qa",
+                InvestigationAgentRole.QualityAssurance,
+                InvestigationPhase.FinalQualityAssurance,
+                "blueprint"));
+        }
+
+        return packages;
+    }
+
+    private static List<AgentWorkPackage> CreateWhiteLabelPackages()
+        =>
+        [
+            Package("coordination", InvestigationAgentRole.Coordinator, InvestigationPhase.IntakeAndAuthorization),
+            Package(
+                "blueprint-admission",
+                InvestigationAgentRole.BlueprintSynthesizer,
+                InvestigationPhase.BlueprintSynthesis,
+                "coordination"),
+            Package(
+                "clean-room-build",
+                InvestigationAgentRole.CleanRoomBuilder,
+                InvestigationPhase.Reconstruction,
+                requiresVerifiedEvidence: true,
+                "blueprint-admission"),
+            Package(
+                "differential-judge",
+                InvestigationAgentRole.DifferentialJudge,
+                InvestigationPhase.DifferentialValidation,
+                requiresVerifiedEvidence: true,
+                "blueprint-admission",
+                "clean-room-build"),
+            Package(
+                "final-qa",
+                InvestigationAgentRole.QualityAssurance,
+                InvestigationPhase.FinalQualityAssurance,
+                "differential-judge")
+        ];
 
     private static AgentWorkPackage Package(
         string id,
