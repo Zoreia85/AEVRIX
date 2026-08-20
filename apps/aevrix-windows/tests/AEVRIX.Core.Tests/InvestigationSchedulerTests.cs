@@ -1,4 +1,4 @@
-using Aevrix.Core;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Aevrix.Core.Tests;
 
@@ -56,7 +56,7 @@ public sealed class InvestigationSchedulerTests
         Assert.IsFalse(InvestigationStateMachine.CanTransition(
             InvestigationRunState.Completed,
             InvestigationRunState.Running));
-        Assert.ThrowsExactly<InvalidOperationException>(() => InvestigationStateMachine.RequireTransition(
+        Assert.Throws<InvalidOperationException>(() => InvestigationStateMachine.RequireTransition(
             InvestigationRunState.Completed,
             InvestigationRunState.Running));
     }
@@ -72,9 +72,9 @@ public sealed class InvestigationSchedulerTests
 
         var budget = InvestigationResourceBudget.ConservativeDefault(capacity);
 
-        Assert.IsGreaterThanOrEqualTo(1, budget.CpuWeight);
-        Assert.IsGreaterThanOrEqualTo(1024L * 1024 * 1024, budget.MemoryBytes);
-        Assert.IsGreaterThanOrEqualTo(1, budget.MaxParallelAgentPackages);
-        Assert.IsLessThanOrEqualTo(4, budget.MaxParallelAgentPackages);
+        Assert.IsTrue(budget.CpuWeight >= 1);
+        Assert.IsTrue(budget.MemoryBytes >= 1024L * 1024 * 1024);
+        Assert.IsTrue(budget.MaxParallelAgentPackages >= 1);
+        Assert.IsTrue(budget.MaxParallelAgentPackages <= 4);
     }
 }
