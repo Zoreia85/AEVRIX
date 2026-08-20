@@ -57,7 +57,6 @@ public static class InvestigationScheduler
         ArgumentNullException.ThrowIfNull(capacity);
 
         var now = planningAtUtc ?? DateTimeOffset.UtcNow;
-        var budget = InvestigationResourceBudget.ConservativeDefault(capacity);
         var normalized = requests
             .Where(request => request.CurrentState is not (
                 InvestigationRunState.Completed or
@@ -72,6 +71,17 @@ public static class InvestigationScheduler
             capacity.RecommendedConcurrentInvestigations,
             1,
             LocalCapacityRecommendation.ProductMaximumConcurrentInvestigations);
+        var existingRunningCount = normalized.Count(request => request.CurrentState == InvestigationRunState.Running);
+        var effectiveBudgetSlots = Math.Clamp(
+            Math.Max(maxRunning, existingRunningCount),
+            1,
+            LocalCapacityRecommendation.ProductMaximumConcurrentInvestigations);
+        var budgetCapacity = capacity with
+        {
+            RecommendedConcurrentInvestigations = effectiveBudgetSlots
+        };
+        var budget = InvestigationResourceBudget.ConservativeDefault(budgetCapacity);
+
         var decisions = new List<InvestigationScheduleDecision>(normalized.Length);
         var runningCount = 0;
         var queuePosition = 0;
@@ -88,7 +98,7 @@ public static class InvestigationScheduler
                     0,
                     runningCount <= maxRunning
                         ? "Execução mantida dentro do orçamento atual da estação."
-                        : "Execução já iniciada foi preservada após redução de capacidade. Nenhum novo trabalho será admitido até o número ativo retornar ao orçamento atual."));
+                        : "Execução já iniciada foi preservada após redução de capacidade. O orçamento por investigação foi rebalanceado para os trabalhos ativos e nenhum novo trabalho será admitido até o número ativo retornar ao limite atual."));
                 continue;
             }
 
