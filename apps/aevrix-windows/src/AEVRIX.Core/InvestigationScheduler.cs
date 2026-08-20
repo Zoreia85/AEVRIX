@@ -16,7 +16,10 @@ public sealed record InvestigationResourceBudget(
     public static InvestigationResourceBudget ConservativeDefault(LocalCapacityRecommendation capacity)
     {
         ArgumentNullException.ThrowIfNull(capacity);
-        var slots = Math.Max(1, capacity.RecommendedConcurrentInvestigations);
+        var slots = Math.Clamp(
+            capacity.RecommendedConcurrentInvestigations,
+            1,
+            LocalCapacityRecommendation.ProductMaximumConcurrentInvestigations);
         var memoryPerInvestigation = Math.Max(
             1024L * 1024 * 1024,
             capacity.AvailableMemoryBytes / Math.Max(2, slots + 1));
@@ -42,13 +45,18 @@ public sealed record InvestigationScheduleDecision(
 
 public static class InvestigationScheduler
 {
+    private const double AgingMinutesPerPriorityPoint = 2.0;
+    private const double MaximumAgingPriorityPoints = 150.0;
+
     public static IReadOnlyList<InvestigationScheduleDecision> Plan(
         IEnumerable<InvestigationScheduleRequest> requests,
-        LocalCapacityRecommendation capacity)
+        LocalCapacityRecommendation capacity,
+        DateTimeOffset? planningAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(capacity);
 
+        var now = planningAtUtc ?? DateTimeOffset.UtcNow;
         var budget = InvestigationResourceBudget.ConservativeDefault(capacity);
         var normalized = requests
             .Where(request => request.CurrentState is not (
@@ -56,11 +64,14 @@ public static class InvestigationScheduler
                 InvestigationRunState.Cancelled or
                 InvestigationRunState.Failed))
             .OrderByDescending(request => request.CurrentState == InvestigationRunState.Running)
-            .ThenByDescending(request => request.Priority)
+            .ThenByDescending(request => ComputeFairSchedulingScore(request, now))
             .ThenBy(request => request.EnqueuedAtUtc)
             .ToArray();
 
-        var maxRunning = Math.Max(1, capacity.RecommendedConcurrentInvestigations);
+        var maxRunning = Math.Clamp(
+            capacity.RecommendedConcurrentInvestigations,
+            1,
+            LocalCapacityRecommendation.ProductMaximumConcurrentInvestigations);
         var decisions = new List<InvestigationScheduleDecision>(normalized.Length);
         var runningCount = 0;
         var queuePosition = 0;
@@ -83,6 +94,7 @@ public static class InvestigationScheduler
             if (runningCount < maxRunning)
             {
                 runningCount++;
+                var aged = ComputeAgingPriorityPoints(request, now);
                 decisions.Add(new InvestigationScheduleDecision(
                     request.InvestigationId,
                     InvestigationRunState.Running,
@@ -90,7 +102,9 @@ public static class InvestigationScheduler
                     0,
                     request.CurrentState == InvestigationRunState.Running
                         ? "Execução mantida dentro do orçamento atual da estação."
-                        : "Slot de execução disponível segundo a capacidade conservadora da estação."));
+                        : aged > 0
+                            ? "Slot de execução concedido pela fila justa com envelhecimento de prioridade; trabalho antigo não é deixado indefinidamente para trás."
+                            : "Slot de execução disponível segundo a capacidade conservadora da estação."));
                 continue;
             }
 
@@ -100,10 +114,30 @@ public static class InvestigationScheduler
                 InvestigationRunState.Queued,
                 budget,
                 queuePosition,
-                "Capacidade simultânea atingida; a investigação permanece em fila sem competir de forma agressiva por recursos."));
+                "Capacidade simultânea atingida; a investigação permanece em fila justa. O tempo de espera aumenta gradualmente sua prioridade efetiva para evitar starvation."));
         }
 
         return decisions;
+    }
+
+    internal static double ComputeFairSchedulingScore(
+        InvestigationScheduleRequest request,
+        DateTimeOffset planningAtUtc)
+        => (int)request.Priority + ComputeAgingPriorityPoints(request, planningAtUtc);
+
+    private static double ComputeAgingPriorityPoints(
+        InvestigationScheduleRequest request,
+        DateTimeOffset planningAtUtc)
+    {
+        var waiting = planningAtUtc - request.EnqueuedAtUtc;
+        if (waiting <= TimeSpan.Zero || request.CurrentState == InvestigationRunState.Running)
+        {
+            return 0;
+        }
+
+        return Math.Min(
+            MaximumAgingPriorityPoints,
+            waiting.TotalMinutes / AgingMinutesPerPriorityPoint);
     }
 }
 
