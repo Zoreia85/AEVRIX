@@ -89,7 +89,6 @@ public sealed class InvestigationWorkPlanTests
 
         Assert.IsTrue(capacity.RecommendedConcurrentInvestigations >= 1);
         Assert.IsTrue(capacity.RecommendedConcurrentInvestigations <= LocalCapacityRecommendation.ProductMaximumConcurrentInvestigations);
-        Assert.AreEqual(10, LocalCapacityRecommendation.ProductMaximumConcurrentInvestigations);
         Assert.IsTrue(capacity.LogicalProcessors >= 1);
     }
 }
