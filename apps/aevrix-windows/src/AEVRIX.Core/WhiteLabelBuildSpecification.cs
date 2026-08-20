@@ -7,6 +7,7 @@ public sealed record WhiteLabelBranding(
     string ProductName,
     string PublisherName,
     string? LogoAssetPath,
+    string? LogoAssetSha256,
     string? PrimaryColor,
     string? SecondaryColor,
     string? AccentColor)
@@ -19,6 +20,16 @@ public sealed record WhiteLabelBranding(
         {
             throw new ArgumentException("Whitelabel product and publisher names must remain within bounded display lengths.");
         }
+
+        if (!string.IsNullOrWhiteSpace(LogoAssetPath))
+        {
+            ValidateSha256(LogoAssetSha256, nameof(LogoAssetSha256));
+        }
+        else if (!string.IsNullOrWhiteSpace(LogoAssetSha256))
+        {
+            ValidateSha256(LogoAssetSha256, nameof(LogoAssetSha256));
+        }
+
         ValidateColor(PrimaryColor, nameof(PrimaryColor));
         ValidateColor(SecondaryColor, nameof(SecondaryColor));
         ValidateColor(AccentColor, nameof(AccentColor));
@@ -36,6 +47,14 @@ public sealed record WhiteLabelBranding(
             !normalized[1..].All(character => Uri.IsHexDigit(character)))
         {
             throw new ArgumentException("Colors must use #RRGGBB or #AARRGGBB hexadecimal notation.", parameterName);
+        }
+    }
+
+    private static void ValidateSha256(string? value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 64 || value.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new ArgumentException("A logo asset must be bound by a 64-character SHA-256 digest.", parameterName);
         }
     }
 }
@@ -105,11 +124,12 @@ public sealed record WhiteLabelBuildSpecification(
     {
         Validate();
         var canonical = new StringBuilder()
-            .AppendLine("AEVRIX-WHITELABEL-SPEC-V1")
+            .AppendLine("AEVRIX-WHITELABEL-SPEC-V2")
             .AppendLine(SourceWorkspaceId)
             .AppendLine(SourceBlueprintSha256.ToLowerInvariant())
             .AppendLine(Branding.ProductName.Trim())
             .AppendLine(Branding.PublisherName.Trim())
+            .AppendLine(Branding.LogoAssetSha256?.Trim().ToLowerInvariant() ?? string.Empty)
             .AppendLine(Branding.PrimaryColor?.Trim() ?? string.Empty)
             .AppendLine(Branding.SecondaryColor?.Trim() ?? string.Empty)
             .AppendLine(Branding.AccentColor?.Trim() ?? string.Empty);
