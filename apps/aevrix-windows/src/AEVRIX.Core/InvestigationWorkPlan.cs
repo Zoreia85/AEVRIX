@@ -176,6 +176,8 @@ public sealed record LocalCapacityRecommendation(
     int RecommendedConcurrentInvestigations,
     string Rationale)
 {
+    public const int ProductMaximumConcurrentInvestigations = 10;
+
     public static LocalCapacityRecommendation ForCurrentProcess()
     {
         var processors = Math.Max(1, Environment.ProcessorCount);
@@ -187,13 +189,16 @@ public sealed record LocalCapacityRecommendation(
 
         var cpuSlots = Math.Max(1, processors / 4);
         var memorySlots = Math.Max(1, (int)(memory / (6L * 1024 * 1024 * 1024)));
-        var recommended = Math.Clamp(Math.Min(cpuSlots, memorySlots), 1, 8);
+        var recommended = Math.Clamp(
+            Math.Min(cpuSlots, memorySlots),
+            1,
+            ProductMaximumConcurrentInvestigations);
         var memoryGiB = memory / 1024d / 1024d / 1024d;
 
         return new LocalCapacityRecommendation(
             processors,
             memory,
             recommended,
-            $"Estimativa conservadora baseada em {processors} processadores lógicos e {memoryGiB:F1} GiB de memória disponível. O orquestrador pode reduzir a concorrência sob pressão.");
+            $"Estimativa conservadora baseada em {processors} processadores lógicos e {memoryGiB:F1} GiB de memória disponível. O produto aceita até {ProductMaximumConcurrentInvestigations} investigações concorrentes, mas o orquestrador pode reduzir a concorrência sob pressão.");
     }
 }
