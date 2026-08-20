@@ -10,18 +10,33 @@ internal sealed record GitHubDeviceCode(
     int ExpiresInSeconds,
     int PollIntervalSeconds);
 
+internal sealed record GitHubActionsSnapshot(
+    bool Readable,
+    long? LatestRunId,
+    string? WorkflowName,
+    string? Status,
+    string? Conclusion,
+    string? HeadSha,
+    DateTimeOffset? UpdatedAtUtc,
+    string Detail);
+
 internal sealed record GitHubConnectionSnapshot(
     bool ApiReachable,
     bool Authenticated,
     string? Login,
     string? CanonicalSha,
+    GitHubActionsSnapshot Actions,
+    bool WorkflowDispatchAuthorized,
+    string WorkflowDispatchDetail,
     string Status,
-    DateTimeOffset CheckedAtUtc);
+    DateTimeOffset CheckedAtUtc,
+    DateTimeOffset? LastSuccessfulSyncAtUtc);
 
 internal sealed class GitHubDesktopConnectionService
 {
     private const string TokenCredentialTarget = "AEVRIX:GitHub:UserAccessToken";
     private const string RepositoryApi = "https://api.github.com/repos/Zoreia85/AEVRIX/branches/main";
+    private const string ActionsApi = "https://api.github.com/repos/Zoreia85/AEVRIX/actions/runs?branch=main&per_page=10";
     private readonly HttpClient _httpClient;
 
     public GitHubDesktopConnectionService()
@@ -33,7 +48,7 @@ internal sealed class GitHubDesktopConnectionService
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AEVRIX-Desktop/0.0.2");
         _httpClient.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        _httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2026-03-10");
+        _httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
     }
 
     public bool HasStoredToken()
@@ -50,20 +65,24 @@ internal sealed class GitHubDesktopConnectionService
 
     public async Task<GitHubConnectionSnapshot> ProbeAsync(CancellationToken cancellationToken = default)
     {
-        var token = WindowsCredentialSecretStore.Read(TokenCredentialTarget);
+        string? token;
+        try
+        {
+            token = WindowsCredentialSecretStore.Read(TokenCredentialTarget);
+        }
+        catch (Exception ex)
+        {
+            return Unavailable($"O Windows Credential Manager não pôde ser consultado ({ex.GetType().Name}).");
+        }
+
         try
         {
             using var branchRequest = CreateRequest(HttpMethod.Get, RepositoryApi, token);
             using var branchResponse = await _httpClient.SendAsync(branchRequest, cancellationToken).ConfigureAwait(false);
             if (!branchResponse.IsSuccessStatusCode)
             {
-                return new GitHubConnectionSnapshot(
-                    false,
-                    false,
-                    null,
-                    null,
-                    $"GitHub respondeu HTTP {(int)branchResponse.StatusCode}; conexão operacional não comprovada.",
-                    DateTimeOffset.UtcNow);
+                return Unavailable(
+                    $"GitHub respondeu HTTP {(int)branchResponse.StatusCode}; conexão operacional não comprovada.");
             }
 
             var branchJson = await branchResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -73,50 +92,155 @@ internal sealed class GitHubDesktopConnectionService
                 .GetProperty("sha")
                 .GetString();
 
-            if (string.IsNullOrWhiteSpace(token))
+            var actions = await ProbeActionsAsync(token, cancellationToken).ConfigureAwait(false);
+            string? login = null;
+            var authenticated = false;
+            var authenticationDetail = "Autenticação operacional ainda não configurada.";
+
+            if (!string.IsNullOrWhiteSpace(token))
             {
-                return new GitHubConnectionSnapshot(
-                    true,
-                    false,
-                    null,
-                    sha,
-                    "Repositório público alcançável. Autenticação operacional ainda não configurada.",
-                    DateTimeOffset.UtcNow);
+                using var userRequest = CreateRequest(HttpMethod.Get, "https://api.github.com/user", token);
+                using var userResponse = await _httpClient.SendAsync(userRequest, cancellationToken).ConfigureAwait(false);
+                if (userResponse.IsSuccessStatusCode)
+                {
+                    var userJson = await userResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    using var userDocument = JsonDocument.Parse(userJson);
+                    login = userDocument.RootElement.GetProperty("login").GetString();
+                    authenticated = !string.IsNullOrWhiteSpace(login);
+                    authenticationDetail = authenticated
+                        ? $"Conta autenticada: {login}."
+                        : "GitHub respondeu à autenticação sem uma identidade utilizável.";
+                }
+                else
+                {
+                    authenticationDetail =
+                        $"Token armazenado, mas identidade não confirmada (HTTP {(int)userResponse.StatusCode}). Reconecte a conta.";
+                }
             }
 
-            using var userRequest = CreateRequest(HttpMethod.Get, "https://api.github.com/user", token);
-            using var userResponse = await _httpClient.SendAsync(userRequest, cancellationToken).ConfigureAwait(false);
-            if (!userResponse.IsSuccessStatusCode)
-            {
-                return new GitHubConnectionSnapshot(
-                    true,
-                    false,
-                    null,
-                    sha,
-                    "Token armazenado, mas o GitHub não confirmou a identidade. Reconecte a conta.",
-                    DateTimeOffset.UtcNow);
-            }
+            var checkedAt = DateTimeOffset.UtcNow;
+            var fullyReadable = actions.Readable && !string.IsNullOrWhiteSpace(sha);
+            var status = fullyReadable
+                ? $"Repositório e Actions alcançáveis. {authenticationDetail}"
+                : $"Repositório alcançável, mas Actions não foi comprovado. {actions.Detail} {authenticationDetail}";
 
-            var userJson = await userResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            using var userDocument = JsonDocument.Parse(userJson);
-            var login = userDocument.RootElement.GetProperty("login").GetString();
+            // A successful GET does not prove Actions:write. GitHub App permissions must be
+            // configured and an actual dispatch must succeed before the product can claim it.
             return new GitHubConnectionSnapshot(
-                true,
-                true,
-                login,
-                sha,
-                $"GitHub autenticado como {login}; main canônico alcançável.",
-                DateTimeOffset.UtcNow);
+                ApiReachable: true,
+                Authenticated: authenticated,
+                Login: login,
+                CanonicalSha: sha,
+                Actions: actions,
+                WorkflowDispatchAuthorized: false,
+                WorkflowDispatchDetail: authenticated
+                    ? "Conta autenticada, porém Actions:write/workflow_dispatch ainda não foi comprovado pela GitHub App AEVRIX."
+                    : "Conecte a GitHub App AEVRIX para posteriormente comprovar Actions:write/workflow_dispatch.",
+                Status: status,
+                CheckedAtUtc: checkedAt,
+                LastSuccessfulSyncAtUtc: fullyReadable ? checkedAt : null);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new GitHubConnectionSnapshot(
-                false,
+            return Unavailable("GitHub excedeu o tempo limite da verificação operacional.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException)
+        {
+            return Unavailable($"GitHub indisponível ({ex.GetType().Name}).");
+        }
+    }
+
+    private async Task<GitHubActionsSnapshot> ProbeActionsAsync(
+        string? token,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = CreateRequest(HttpMethod.Get, ActionsApi, token);
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new GitHubActionsSnapshot(
+                    false,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    $"Actions respondeu HTTP {(int)response.StatusCode}.");
+            }
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("workflow_runs", out var runs)
+                || runs.ValueKind != JsonValueKind.Array)
+            {
+                return new GitHubActionsSnapshot(
+                    false,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "Resposta de Actions não contém workflow_runs.");
+            }
+
+            var enumerator = runs.EnumerateArray();
+            if (!enumerator.MoveNext())
+            {
+                return new GitHubActionsSnapshot(
+                    true,
+                    null,
+                    null,
+                    "sem execuções",
+                    null,
+                    null,
+                    null,
+                    "Actions está acessível, mas não há execução recente na branch main.");
+            }
+
+            var latest = enumerator.Current;
+            var runId = latest.TryGetProperty("id", out var idElement) && idElement.TryGetInt64(out var id)
+                ? id
+                : null;
+            var name = GetOptionalString(latest, "name");
+            var status = GetOptionalString(latest, "status");
+            var conclusion = GetOptionalString(latest, "conclusion");
+            var headSha = GetOptionalString(latest, "head_sha");
+            DateTimeOffset? updatedAt = null;
+            var updated = GetOptionalString(latest, "updated_at");
+            if (DateTimeOffset.TryParse(updated, out var parsed))
+            {
+                updatedAt = parsed;
+            }
+
+            return new GitHubActionsSnapshot(
+                true,
+                runId,
+                name,
+                status,
+                conclusion,
+                headSha,
+                updatedAt,
+                $"Último workflow observado: {name ?? "desconhecido"} / {status ?? "estado desconhecido"} / {conclusion ?? "sem conclusão"}.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            return new GitHubActionsSnapshot(
                 false,
                 null,
                 null,
-                $"GitHub indisponível ({ex.GetType().Name}).",
-                DateTimeOffset.UtcNow);
+                null,
+                null,
+                null,
+                null,
+                $"Actions indisponível ({ex.GetType().Name}).");
         }
     }
 
@@ -220,6 +344,27 @@ internal sealed class GitHubDesktopConnectionService
 
     public void Disconnect()
         => WindowsCredentialSecretStore.Delete(TokenCredentialTarget);
+
+    private static GitHubConnectionSnapshot Unavailable(string detail)
+    {
+        var checkedAt = DateTimeOffset.UtcNow;
+        return new GitHubConnectionSnapshot(
+            false,
+            false,
+            null,
+            null,
+            new GitHubActionsSnapshot(false, null, null, null, null, null, null, "Actions não verificado."),
+            false,
+            "workflow_dispatch não está disponível sem uma conexão GitHub comprovada.",
+            detail,
+            checkedAt,
+            null);
+    }
+
+    private static string? GetOptionalString(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, string uri, string? token)
     {
