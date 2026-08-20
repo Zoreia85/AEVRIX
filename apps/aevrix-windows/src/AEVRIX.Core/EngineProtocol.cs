@@ -11,6 +11,12 @@ namespace Aevrix.Core;
 [JsonDerivedType(typeof(GetEngineStatusCommand), "getEngineStatus")]
 [JsonDerivedType(typeof(ResearchBrowserSelfTestCommand), "researchBrowserSelfTest")]
 [JsonDerivedType(typeof(GenerateBlueprintCommand), "generateBlueprint")]
+[JsonDerivedType(typeof(RegisterInvestigationRuntimeCommand), "registerInvestigationRuntime")]
+[JsonDerivedType(typeof(ListInvestigationRuntimeCommand), "listInvestigationRuntime")]
+[JsonDerivedType(typeof(ReconcileInvestigationScheduleCommand), "reconcileInvestigationSchedule")]
+[JsonDerivedType(typeof(PauseInvestigationRuntimeCommand), "pauseInvestigationRuntime")]
+[JsonDerivedType(typeof(ResumeInvestigationRuntimeCommand), "resumeInvestigationRuntime")]
+[JsonDerivedType(typeof(CancelInvestigationRuntimeCommand), "cancelInvestigationRuntime")]
 public abstract record EngineCommand(string RequestId, int ProtocolVersion = EngineProtocol.CurrentVersion);
 
 public sealed record EnginePingCommand(string RequestId) : EngineCommand(RequestId);
@@ -45,6 +51,32 @@ public sealed record GenerateBlueprintCommand(
     string CaptureId,
     bool IncludeRawEvidenceReferences = false) : EngineCommand(RequestId);
 
+public sealed record RegisterInvestigationRuntimeCommand(
+    string RequestId,
+    Guid InvestigationId,
+    string Workspace,
+    InvestigationTargetKind TargetKind,
+    InvestigationStrategy Strategy,
+    string AuthorizationClass,
+    InvestigationPriority Priority,
+    IReadOnlyList<InvestigationInputArtifact> Artifacts) : EngineCommand(RequestId);
+
+public sealed record ListInvestigationRuntimeCommand(string RequestId) : EngineCommand(RequestId);
+
+public sealed record ReconcileInvestigationScheduleCommand(string RequestId) : EngineCommand(RequestId);
+
+public sealed record PauseInvestigationRuntimeCommand(
+    string RequestId,
+    Guid InvestigationId) : EngineCommand(RequestId);
+
+public sealed record ResumeInvestigationRuntimeCommand(
+    string RequestId,
+    Guid InvestigationId) : EngineCommand(RequestId);
+
+public sealed record CancelInvestigationRuntimeCommand(
+    string RequestId,
+    Guid InvestigationId) : EngineCommand(RequestId);
+
 public sealed record EngineResponse(
     string RequestId,
     bool Success,
@@ -55,7 +87,7 @@ public sealed record EngineResponse(
 
 public static class EngineProtocol
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public const int MaxMessageBytes = 1_048_576;
     public const string PipeNamePrefix = "AEVRIX.Engine.";
     public const string TokenEnvironmentVariable = "AEVRIX_ENGINE_TOKEN";
