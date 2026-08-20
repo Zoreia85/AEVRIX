@@ -127,6 +127,25 @@ public sealed record InvestigationStageProgress(
         };
 }
 
+public sealed record InvestigationProgressEvidenceSample(
+    DateTimeOffset SampledAtUtc,
+    double PercentComplete,
+    string EvidenceId)
+{
+    public void Validate(DateTimeOffset startedAtUtc, DateTimeOffset currentSampledAtUtc)
+    {
+        WorkspaceScope.ValidateToken(EvidenceId, nameof(EvidenceId));
+        if (!double.IsFinite(PercentComplete) || PercentComplete < 0 || PercentComplete > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(PercentComplete), "Progress evidence must be between 0 and 100 percent.");
+        }
+        if (SampledAtUtc < startedAtUtc || SampledAtUtc > currentSampledAtUtc)
+        {
+            throw new ArgumentOutOfRangeException(nameof(SampledAtUtc), "Progress evidence timestamp must fall within the investigation execution window.");
+        }
+    }
+}
+
 public sealed record InvestigationProgressSnapshot(
     InvestigationRunState State,
     InvestigationPhase CurrentPhase,
@@ -135,30 +154,34 @@ public sealed record InvestigationProgressSnapshot(
     DateTimeOffset SampledAtUtc,
     string? Blocker)
 {
+    private const int MinimumEtaEvidenceSamples = 3;
+    private const double MinimumEtaProgressDelta = 5.0;
+
     public static InvestigationProgressSnapshot Create(
         InvestigationRunState state,
         InvestigationPhase currentPhase,
         IEnumerable<InvestigationStageProgress> stages,
         DateTimeOffset startedAtUtc,
         DateTimeOffset sampledAtUtc,
-        string? blocker = null)
+        string? blocker = null,
+        IEnumerable<InvestigationProgressEvidenceSample>? executionHistory = null)
     {
+        if (sampledAtUtc < startedAtUtc)
+        {
+            throw new ArgumentException("Progress sample time cannot precede the investigation start time.", nameof(sampledAtUtc));
+        }
+
         var normalized = stages.Select(stage => stage.Normalize()).ToArray();
         var totalWeight = normalized.Sum(stage => stage.Weight);
         var completedWeight = normalized.Sum(stage => stage.Weight * stage.Completion);
         var fraction = totalWeight <= 0 ? 0 : completedWeight / totalWeight;
         var percent = Math.Round(Math.Clamp(fraction * 100, 0, 100), 1);
-
-        TimeSpan? eta = null;
-        var elapsed = sampledAtUtc - startedAtUtc;
-        if (state is InvestigationRunState.Running &&
-            fraction >= 0.10 && fraction < 1.0 &&
-            elapsed >= TimeSpan.FromMinutes(2))
-        {
-            var projectedTotalTicks = elapsed.Ticks / fraction;
-            var remainingTicks = Math.Max(0, projectedTotalTicks - elapsed.Ticks);
-            eta = TimeSpan.FromTicks((long)Math.Min(remainingTicks, TimeSpan.FromDays(30).Ticks));
-        }
+        var eta = EstimateRemainingFromEvidence(
+            state,
+            percent,
+            startedAtUtc,
+            sampledAtUtc,
+            executionHistory);
 
         return new InvestigationProgressSnapshot(
             state,
@@ -167,6 +190,78 @@ public sealed record InvestigationProgressSnapshot(
             eta,
             sampledAtUtc,
             string.IsNullOrWhiteSpace(blocker) ? null : blocker.Trim());
+    }
+
+    private static TimeSpan? EstimateRemainingFromEvidence(
+        InvestigationRunState state,
+        double currentPercent,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset sampledAtUtc,
+        IEnumerable<InvestigationProgressEvidenceSample>? executionHistory)
+    {
+        if (state is not InvestigationRunState.Running ||
+            currentPercent < 10 ||
+            currentPercent >= 100 ||
+            executionHistory is null)
+        {
+            return null;
+        }
+
+        var samples = executionHistory
+            .OrderBy(sample => sample.SampledAtUtc)
+            .ToArray();
+        if (samples.Length < MinimumEtaEvidenceSamples)
+        {
+            return null;
+        }
+
+        foreach (var sample in samples)
+        {
+            sample.Validate(startedAtUtc, sampledAtUtc);
+        }
+
+        if (samples.Select(sample => sample.EvidenceId).Distinct(StringComparer.Ordinal).Count() != samples.Length)
+        {
+            return null;
+        }
+
+        for (var index = 1; index < samples.Length; index++)
+        {
+            if (samples[index].SampledAtUtc <= samples[index - 1].SampledAtUtc ||
+                samples[index].PercentComplete < samples[index - 1].PercentComplete)
+            {
+                return null;
+            }
+        }
+
+        var first = samples[0];
+        var last = samples[^1];
+        if (last.SampledAtUtc != sampledAtUtc || Math.Abs(last.PercentComplete - currentPercent) > 0.05)
+        {
+            return null;
+        }
+
+        var observationWindow = last.SampledAtUtc - first.SampledAtUtc;
+        var progressDelta = last.PercentComplete - first.PercentComplete;
+        if (observationWindow < TimeSpan.FromMinutes(2) || progressDelta < MinimumEtaProgressDelta)
+        {
+            return null;
+        }
+
+        var percentPerSecond = progressDelta / observationWindow.TotalSeconds;
+        if (!double.IsFinite(percentPerSecond) || percentPerSecond <= 0)
+        {
+            return null;
+        }
+
+        var remainingSeconds = (100 - currentPercent) / percentPerSecond;
+        if (!double.IsFinite(remainingSeconds) || remainingSeconds < 0)
+        {
+            return null;
+        }
+
+        var boundedSeconds = Math.Min(remainingSeconds, TimeSpan.FromDays(30).TotalSeconds);
+        return TimeSpan.FromSeconds(boundedSeconds);
     }
 }
 
