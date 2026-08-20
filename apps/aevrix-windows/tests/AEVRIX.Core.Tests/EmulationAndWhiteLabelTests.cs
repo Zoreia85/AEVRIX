@@ -55,6 +55,40 @@ public sealed class EmulationAndWhiteLabelTests
         Assert.AreEqual(first, second);
     }
 
+    [TestMethod]
+    public void WhiteLabelSpecification_RequiresLogoContentHashWhenLogoPathExists()
+    {
+        var spec = CreateValidWhiteLabelSpec() with
+        {
+            Branding = CreateValidWhiteLabelSpec().Branding with
+            {
+                LogoAssetPath = "C:\\branding\\logo.png",
+                LogoAssetSha256 = null
+            }
+        };
+
+        Assert.Throws<ArgumentException>(spec.Validate);
+    }
+
+    [TestMethod]
+    public void WhiteLabelSpecification_DifferentLogoContentProducesDifferentDigest()
+    {
+        var first = CreateValidWhiteLabelSpec() with
+        {
+            Branding = CreateValidWhiteLabelSpec().Branding with
+            {
+                LogoAssetPath = "C:\\branding\\logo.png",
+                LogoAssetSha256 = new string('b', 64)
+            }
+        };
+        var second = first with
+        {
+            Branding = first.Branding with { LogoAssetSha256 = new string('c', 64) }
+        };
+
+        Assert.AreNotEqual(first.ComputeSpecificationSha256(), second.ComputeSpecificationSha256());
+    }
+
     private static WhiteLabelBuildSpecification CreateValidWhiteLabelSpec()
         => new(
             "workspace-001",
@@ -62,6 +96,7 @@ public sealed class EmulationAndWhiteLabelTests
             new WhiteLabelBranding(
                 "Produto Novo",
                 "Publisher Novo",
+                null,
                 null,
                 "#FFFFFF",
                 "#101820",
