@@ -78,6 +78,20 @@ public static class InvestigationScheduler
 
         foreach (var request in normalized)
         {
+            if (request.CurrentState == InvestigationRunState.Running)
+            {
+                runningCount++;
+                decisions.Add(new InvestigationScheduleDecision(
+                    request.InvestigationId,
+                    InvestigationRunState.Running,
+                    budget,
+                    0,
+                    runningCount <= maxRunning
+                        ? "Execução mantida dentro do orçamento atual da estação."
+                        : "Execução já iniciada foi preservada após redução de capacidade. Nenhum novo trabalho será admitido até o número ativo retornar ao orçamento atual."));
+                continue;
+            }
+
             if (request.CurrentState is InvestigationRunState.Paused or InvestigationRunState.Blocked)
             {
                 decisions.Add(new InvestigationScheduleDecision(
@@ -100,11 +114,9 @@ public static class InvestigationScheduler
                     InvestigationRunState.Running,
                     budget,
                     0,
-                    request.CurrentState == InvestigationRunState.Running
-                        ? "Execução mantida dentro do orçamento atual da estação."
-                        : aged > 0
-                            ? "Slot de execução concedido pela fila justa com envelhecimento de prioridade; trabalho antigo não é deixado indefinidamente para trás."
-                            : "Slot de execução disponível segundo a capacidade conservadora da estação."));
+                    aged > 0
+                        ? "Slot de execução concedido pela fila justa com envelhecimento de prioridade; trabalho antigo não é deixado indefinidamente para trás."
+                        : "Slot de execução disponível segundo a capacidade conservadora da estação."));
                 continue;
             }
 
@@ -114,7 +126,9 @@ public static class InvestigationScheduler
                 InvestigationRunState.Queued,
                 budget,
                 queuePosition,
-                "Capacidade simultânea atingida; a investigação permanece em fila justa. O tempo de espera aumenta gradualmente sua prioridade efetiva para evitar starvation."));
+                runningCount > maxRunning
+                    ? "A estação está temporariamente acima da nova capacidade por preservar trabalho já em execução; nenhuma nova investigação entra até o total ativo cair dentro do orçamento."
+                    : "Capacidade simultânea atingida; a investigação permanece em fila justa. O tempo de espera aumenta gradualmente sua prioridade efetiva para evitar starvation."));
         }
 
         return decisions;
