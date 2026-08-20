@@ -42,6 +42,41 @@ public sealed class InvestigationAgentPlanTests
     }
 
     [TestMethod]
+    public void WhiteLabelPlan_DoesNotReacquireOriginalTarget()
+    {
+        var plan = InvestigationAgentPlan.Create(
+            InvestigationStrategy.ReconstructWhiteLabel,
+            InvestigationTargetKind.Other);
+
+        Assert.IsFalse(plan.WorkPackages.Any(item => item.Role == InvestigationAgentRole.Acquisition));
+        Assert.IsFalse(plan.WorkPackages.Any(item => item.Role == InvestigationAgentRole.StaticAnalyzer));
+        Assert.IsFalse(plan.WorkPackages.Any(item => item.Role == InvestigationAgentRole.DynamicObserver));
+        Assert.IsTrue(plan.WorkPackages.Any(item => item.Id == "blueprint-admission"));
+        Assert.IsTrue(plan.WorkPackages.Any(item => item.Role == InvestigationAgentRole.CleanRoomBuilder));
+        Assert.IsTrue(plan.WorkPackages.Any(item => item.Role == InvestigationAgentRole.DifferentialJudge));
+        Assert.IsTrue(plan.WorkPackages.Any(item => item.Role == InvestigationAgentRole.QualityAssurance));
+    }
+
+    [TestMethod]
+    public void WhiteLabelBuilder_RequiresVerifiedBlueprintAdmissionBinding()
+    {
+        var plan = InvestigationAgentPlan.Create(
+            InvestigationStrategy.ReconstructWhiteLabel,
+            InvestigationTargetKind.Other);
+        var states = plan.WorkPackages.ToDictionary(item => item.Id, item => item.State, StringComparer.Ordinal);
+        states["coordination"] = AgentWorkPackageState.Verified;
+        states["blueprint-admission"] = AgentWorkPackageState.Verified;
+
+        var withoutBinding = plan.GetReadyPackages(states, new HashSet<string>(StringComparer.Ordinal));
+        Assert.IsFalse(withoutBinding.Any(item => item.Id == "clean-room-build"));
+
+        var withBinding = plan.GetReadyPackages(
+            states,
+            new HashSet<string>(new[] { "blueprint-admission" }, StringComparer.Ordinal));
+        Assert.IsTrue(withBinding.Any(item => item.Id == "clean-room-build"));
+    }
+
+    [TestMethod]
     public void Emulation_IsRejectedForWebTarget()
     {
         Assert.Throws<ArgumentException>(() => InvestigationAgentPlan.Create(
