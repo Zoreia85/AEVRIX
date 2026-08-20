@@ -103,6 +103,11 @@ public sealed class InvestigationSchedulerTests
         Assert.AreEqual(InvestigationRunState.Running, decisions.Single(item => item.InvestigationId == runningC).NextState);
         Assert.AreEqual(InvestigationRunState.Queued, decisions.Single(item => item.InvestigationId == freshUrgent).NextState);
         Assert.IsTrue(decisions.Single(item => item.InvestigationId == freshUrgent).Reason.Contains("acima da nova capacidade", StringComparison.Ordinal));
+
+        var rebalancedBudget = decisions.Single(item => item.InvestigationId == runningA).Budget;
+        Assert.AreEqual(33, rebalancedBudget.CpuWeight);
+        Assert.AreEqual(4L * 1024 * 1024 * 1024, rebalancedBudget.MemoryBytes);
+        Assert.AreEqual(1, rebalancedBudget.MaxParallelAgentPackages);
     }
 
     [TestMethod]
