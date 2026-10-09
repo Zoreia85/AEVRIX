@@ -85,7 +85,7 @@ jobs:
           } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $out 'payload-evidence.json') -Encoding utf8NoBOM
 
       - name: Upload quarantine payload evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-quarantine-${{ env.CANDIDATE_SHA }}
           path: ${{ runner.temp }}/aevrix-desktop-self-contained
